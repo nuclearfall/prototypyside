@@ -36,6 +36,12 @@ class GameComponentTemplate(QObject): # NOW INHERITS QObject
     def height_px(self) -> int:
         return int(self.height_in * self.dpi)
 
+    def set_width_px(self, px: int):
+        self.width_in = px / self.dpi
+
+    def set_height_px(self, px: int):
+        self.height_in = px / self.dpi
+
     def add_element(self, element_type: str, name: str, rect: QRectF) -> 'GameComponentElement':
         from prototypyside.models.game_component_elements import GameComponentElement
         element = GameComponentElement.create(element_type, name, rect, self) # Pass self (QObject) as parent_qobject

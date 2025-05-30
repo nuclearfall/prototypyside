@@ -22,20 +22,20 @@ from prototypyside.views.graphics_items import ResizeHandle
 if TYPE_CHECKING:
     from prototypyside.models.game_component_template import GameComponentTemplate
     from prototypyside.views.graphics_scene import GameComponentGraphicsScene
-
-
+    from PySide6.QtWidgets import QStyleOptionGraphicsItem, QWidget
 
 class GameComponentElement(QGraphicsItem, QObject): # Re-added QObject
     element_changed = Signal()
-
-    def __init__(self, name: str, rect: QRectF, parent_qobject: QObject = None):
+    def __init__(self, name: str, rect: QRectF, parent_qobject: Optional[QObject] = None):
         QObject.__init__(self, parent_qobject)
         QGraphicsItem.__init__(self)
+
         self.name = name
         self._rect = rect
-        # Store template for access to its properties, but parent_qobject manages Qt ownership
-        self.template: Optional['GameComponentTemplate'] = None # Will be set by GameComponentTemplate.from_dict or add_element
+        self.template: Optional['GameComponentTemplate'] = None
         self._content: Optional[str] = None
+        self._content_type: str = "text"  # Could also be 'image'
+
         self._style: Dict[str, Any] = {
             'font': QFont("Arial", 12),
             'color': QColor(0, 0, 0),
@@ -45,14 +45,60 @@ class GameComponentElement(QGraphicsItem, QObject): # Re-added QObject
             'alignment': Qt.AlignCenter
         }
 
-        self._handles: Dict[HandleType, ResizeHandle] = {} # Corrected type hint for dict values
-        self.setFlag(QGraphicsItem.ItemIsMovable)
-        self.setFlag(QGraphicsItem.ItemIsSelectable)
-        self.setFlag(QGraphicsItem.ItemSendsGeometryChanges)
-        self.setFlag(QGraphicsItem.ItemSendsScenePositionChanges)
-
+        self._handles: Dict[HandleType, ResizeHandle] = {}
+        self.setFlags(
+            QGraphicsItem.ItemIsSelectable |
+            QGraphicsItem.ItemIsMovable |
+            QGraphicsItem.ItemSendsGeometryChanges |
+            QGraphicsItem.ItemIsFocusable |
+            QGraphicsItem.ItemClipsToShape |
+            QGraphicsItem.ItemClipsChildrenToShape
+        )
         self.create_handles()
-        self.setFlag(QGraphicsItem.ItemSendsGeometryChanges, True) # Ensure this is set for itemChange to fire on geometry changes
+        self.setAcceptHoverEvents(True)
+        self.setZValue(1)
+
+    @property
+    def rect(self) -> QRectF:
+        return self._rect
+
+    def setRect(self, rect: QRectF):
+        self.prepareGeometryChange()
+        self._rect = rect
+        self.update()
+        self.element_changed.emit()
+
+    def boundingRect(self) -> QRectF:
+        border_width = self._style.get('border_width', 0)
+        padding = max(0, int(border_width)) + HANDLE_SIZE  # ensures space for border + handles
+        return self._rect.adjusted(-padding, -padding, padding, padding)
+
+
+    # def __init__(self, name: str, rect: QRectF, parent_qobject: QObject = None):
+    #     QObject.__init__(self, parent_qobject)
+    #     QGraphicsItem.__init__(self)
+    #     self.name = name
+    #     self._rect = rect
+    #     # Store template for access to its properties, but parent_qobject manages Qt ownership
+    #     self.template: Optional['GameComponentTemplate'] = None # Will be set by GameComponentTemplate.from_dict or add_element
+    #     self._content: Optional[str] = None
+    #     self._style: Dict[str, Any] = {
+    #         'font': QFont("Arial", 12),
+    #         'color': QColor(0, 0, 0),
+    #         'bg_color': QColor(255, 255, 255, 0),
+    #         'border_color': QColor(0, 0, 0),
+    #         'border_width': 0,
+    #         'alignment': Qt.AlignCenter
+    #     }
+
+    #     self._handles: Dict[HandleType, ResizeHandle] = {} # Corrected type hint for dict values
+    #     self.setFlag(QGraphicsItem.ItemIsMovable)
+    #     self.setFlag(QGraphicsItem.ItemIsSelectable)
+    #     self.setFlag(QGraphicsItem.ItemSendsGeometryChanges)
+    #     self.setFlag(QGraphicsItem.ItemSendsScenePositionChanges)
+
+    #     self.create_handles()
+    #     self.setFlag(QGraphicsItem.ItemSendsGeometryChanges, True) # Ensure this is set for itemChange to fire on geometry changes
 
     def itemChange(self, change: QGraphicsItem.GraphicsItemChange, value: Any) -> Any:
         if change == QGraphicsItem.ItemPositionChange and self.scene():
@@ -69,6 +115,7 @@ class GameComponentElement(QGraphicsItem, QObject): # Re-added QObject
         return super().itemChange(change, value)
 
     def create_handles(self):
+        print("handles should be drawn now")
         if not self._handles:
             handle_types = [
                 HandleType.TOP_LEFT, HandleType.TOP_CENTER, HandleType.TOP_RIGHT,
@@ -170,9 +217,6 @@ class GameComponentElement(QGraphicsItem, QObject): # Re-added QObject
         else:
             raise ValueError(f"Unknown element type: {element_type}")
 
-    def boundingRect(self) -> QRectF:
-        return self._rect
-
     def set_content(self, content: str):
         if self._content != content:
             self._content = content
@@ -182,42 +226,29 @@ class GameComponentElement(QGraphicsItem, QObject): # Re-added QObject
     def get_content(self) -> Optional[str]:
         return self._content
 
-    def set_rect(self, new_rect: QRectF):
-        if self._rect != new_rect:
-            self.prepareGeometryChange()
-            self._rect = new_rect
-            self.element_changed.emit()
-            self.update()
-            self.update_handles_position()
-
     def set_style_property(self, key: str, value: Any):
         if self._style.get(key) != value:
             self._style[key] = value
             self.element_changed.emit()
             self.update()
 
-    def paint(self, painter: QPainter, option, widget):
-        painter.setRenderHint(QPainter.Antialiasing)
+    def paint(self, painter: QPainter, option: "QStyleOptionGraphicsItem", widget: Optional["QWidget"] = None):
+        # Fill background
+        fill_color = self._style.get('fill_color', QColor(255, 255, 255))
+        painter.setBrush(QBrush(fill_color))
+        painter.setPen(Qt.NoPen)
+        painter.drawRect(self._rect)  # ✅ NOT self.boundingRect()
 
-        if isinstance(self._style.get('bg_color'), QColor):
-            painter.setBrush(QBrush(self._style['bg_color']))
-        else:
-            painter.setBrush(QBrush(QColor(255, 255, 255, 0)))
-
-        if isinstance(self._style.get('border_color'), QColor) and \
-           isinstance(self._style.get('border_width'), (int, float)):
-            painter.setPen(QPen(self._style['border_color'], self._style['border_width']))
-        else:
-            painter.setPen(Qt.NoPen)
-
-        painter.drawRect(0, 0, self._rect.width(), self._rect.height())
-
-        if self.isSelected():
-            selection_pen = QPen(Qt.darkBlue, 0, Qt.DotLine)
-            painter.setPen(selection_pen)
+        # Draw border
+        border_width = self._style.get('border_width', 0)
+        border_color = self._style.get('border_color', QColor(0, 0, 0))
+        if border_width > 0:
+            pen = QPen(border_color)
+            pen.setWidthF(border_width)
+            painter.setPen(pen)
             painter.setBrush(Qt.NoBrush)
-            selection_rect = self.boundingRect().adjusted(-2, -2, 2, 2)
-            painter.drawRect(selection_rect)
+            painter.drawRect(self._rect)  # ✅ Border also only around _rect
+
 
     def mouseReleaseEvent(self, event: QGraphicsSceneMouseEvent):
         self.element_changed.emit()
@@ -357,22 +388,23 @@ class ImageElement(GameComponentElement):
         self.update()
 
     def paint(self, painter: QPainter, option, widget):
+        rect = self._rect
         if self._pixmap and not self._pixmap.isNull():
             scaled_pixmap = self._pixmap.scaled(
                 self.boundingRect().size().toSize(),
                 Qt.KeepAspectRatio,
                 Qt.SmoothTransformation
             )
-            x = self.boundingRect().x() + (self.boundingRect().width() - scaled_pixmap.width()) / 2
-            y = self.boundingRect().y() + (self.boundingRect().height() - scaled_pixmap.height()) / 2
+            x = rect.x() + (rect.width() - scaled_pixmap.width()) / 2
+            y = rect.y() + (rect.height() - scaled_pixmap.height()) / 2
             painter.drawPixmap(QPointF(x, y), scaled_pixmap)
         else:
             painter.setBrush(QColor(200, 200, 200, 100))
             painter.setPen(QPen(Qt.gray, 1, Qt.DashLine))
-            painter.drawRect(self.boundingRect())
-            painter.drawText(self.boundingRect(), Qt.AlignCenter, "Image Placeholder\n(CSV Path or Drag)")
+            painter.drawRect(self.rect)
+            painter.drawText(self.rect, Qt.AlignCenter, "Image Placeholder\n(CSV Path or Drag)")
 
-        super().paint(painter, option, widget)
+        #super().paint(painter, option, widget)
 
 
 class LabelElement(GameComponentElement):

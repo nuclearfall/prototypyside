@@ -11,7 +11,7 @@ from PySide6.QtWidgets import (QMainWindow, QGraphicsView, QGraphicsItem, QDockW
                                QLabel, QLineEdit, QPushButton, QComboBox,
                                QSpinBox, QDoubleSpinBox, QFormLayout, QGroupBox,
                                QColorDialog, QFontDialog, QFileDialog, QMessageBox,
-                               QHBoxLayout, QDialog, QToolBar, QCheckBox)
+                               QHBoxLayout, QDialog, QToolBar)
 
 from PySide6.QtCore import Qt, Signal, Slot, QPointF, QRectF, QSizeF, QObject, QSize, QTimer, QCoreApplication, QEvent # Added QTimer, QCoreApplication, QEvent
 from PySide6.QtGui import QPainter, QImage, QPixmap, QFont, QColor, QAction, QIcon, QPdfWriter, QTextDocument, QKeySequence, QShortcut # Added QKeySequence, QShortcut
@@ -21,9 +21,8 @@ from prototypyside.views.palettes import ComponentListWidget
 from prototypyside.views.layers_panel import LayersListWidget
 from prototypyside.views.graphics_scene import GameComponentGraphicsScene
 
-from prototypyside.widgets.unit_field import UnitField
-from prototypyside.widgets.font_toolbar import FontToolBar
-
+from prototypyside.widgets.font_toolbar import FontToolbar
+from prototypeside.widgets.unit_field import UnitField
 # Import models
 from prototypyside.models.game_component_template import GameComponentTemplate
 from prototypyside.models.game_component_elements import (GameComponentElement, TextElement,
@@ -31,19 +30,23 @@ from prototypyside.models.game_component_elements import (GameComponentElement, 
                                                      ContainerElement)
 from prototypyside.views.graphics_view import DesignerGraphicsView
 from prototypyside.services.export_manager import ExportManager # NEW: Import ExportManager
+from prototypyside.utils.unit_converter import parse_dimension, format_dimension
+
+# Import constants (like MIN_ELEMENT_SIZE)
+from prototypyside.config import MIN_ELEMENT_SIZE, MEASURE_INCREMENT
 
 
 
 class MainDesignerWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.dpi = 72
         self.current_template = GameComponentTemplate(parent=self)
         self.merged_templates: List[GameComponentTemplate] = []
         self.setWindowTitle("Professional Game Component Designer")
         self.resize(1400, 900)
         self.setMinimumSize(800, 600)
-        self.current_unit = 'px'
+
+        self.current_unit = "px"
 
         self._current_selected_element: Optional['GameComponentElement'] = None
         self.palette_dock: Optional[QDockWidget] = None
@@ -94,7 +97,6 @@ class MainDesignerWindow(QMainWindow):
         self.setup_layers_panel()
         self.create_font_toolbar()
         self.create_drawing_toolbar()
-        self.create_measure_toolbar()
 
         self.scene.selectionChanged.connect(self.on_selection_changed)
         self.scene.element_dropped.connect(self.add_element_from_drop)
@@ -195,26 +197,27 @@ class MainDesignerWindow(QMainWindow):
 
         # Geometry Group
         geometry_group = QGroupBox("Geometry")
-        form_layout = QFormLayout()
+        geometry_layout = QFormLayout()
 
-        # Geometry Fields (UnitFields)
-        self.element_x_field = UnitField(initial_px=None, unit=self.current_unit, dpi=self.current_template.dpi)
-        self.element_y_field = UnitField(initial_px=None, unit=self.current_unit, dpi=self.current_template.dpi)
-        self.element_width_field = UnitField(initial_px=None, unit=self.current_unit, dpi=self.current_template.dpi)
-        self.element_height_field = UnitField(initial_px=None, unit=self.current_unit, dpi=self.current_template.dpi)
+        # Replace x, y, width, height with UnitFields
+        self.element_x_field = UnitField(initial_px=element.x_px, unit=self.current_unit, dpi=self.current_template.dpi)
+        self.element_y_field = UnitField(initial_px=element.y_px, unit=self.current_unit, dpi=self.current_template.dpi)
+        self.element_width_field = UnitField(initial_px=element.width_px, unit=self.current_unit, dpi=self.current_template.dpi)
+        self.element_height_field = UnitField(initial_px=element.height_px, unit=self.current_unit, dpi=self.current_template.dpi)
 
-        self.element_x_field.editingFinishedWithValue.connect(lambda px: self.update_element_geometry("x", px))
-        self.element_y_field.editingFinishedWithValue.connect(lambda px: self.update_element_geometry("y", px))
-        self.element_width_field.editingFinishedWithValue.connect(lambda px: self.update_element_geometry("width", px))
-        self.element_height_field.editingFinishedWithValue.connect(lambda px: self.update_element_geometry("height", px))
+        self.element_x_field.editingFinishedWithValue.connect(lambda px: self.update_element_property(element, "x_px", px))
+        self.element_y_field.editingFinishedWithValue.connect(lambda px: self.update_element_property(element, "y_px", px))
+        self.element_width_field.editingFinishedWithValue.connect(lambda px: self.update_element_property(element, "width_px", px))
+        self.element_height_field.editingFinishedWithValue.connect(lambda px: self.update_element_property(element, "height_px", px))
 
         form_layout.addRow("X:", self.element_x_field)
         form_layout.addRow("Y:", self.element_y_field)
         form_layout.addRow("Width:", self.element_width_field)
         form_layout.addRow("Height:", self.element_height_field)
 
-        geometry_group.setLayout(form_layout)
-        properties_layout.addWidget(geometry_group)
+        geometry_group.setLayout(geometry_layout)
+        properties_layout.addWidget(geometry_group) # Add to the scrollable layout
+
         # Appearance Group
         appearance_group = QGroupBox("Appearance")
         appearance_layout = QFormLayout()
@@ -231,12 +234,10 @@ class MainDesignerWindow(QMainWindow):
         self.border_color_btn.clicked.connect(self.change_border_color)
         appearance_layout.addRow(self.border_color_btn)
 
-        # Border Width (UnitField)
-        self.border_width_field = UnitField(None, unit=self.current_unit, dpi=self.current_template.dpi)
-        self.border_width_field.editingFinishedWithValue.connect(
-            lambda px: self.update_element_border_width(px)
-        )
-        appearance_layout.addRow("Border Width:", self.border_width_field)
+        self.border_width_spin = QSpinBox()
+        self.border_width_spin.setRange(0, 50)
+        self.border_width_spin.valueChanged.connect(self.update_border_width)
+        appearance_layout.addRow("Border Width:", self.border_width_spin)
 
         self.alignment_combo = QComboBox()
         self.alignment_map = {
@@ -257,6 +258,29 @@ class MainDesignerWindow(QMainWindow):
         # Game Component Properties Group
         game_component_props_group = QGroupBox("Game Component Properties")
         game_component_props_layout = QFormLayout()
+
+        self.game_component_width_spin = QDoubleSpinBox()
+        self.game_component_width_spin.setRange(1.0, 200.0)
+        self.game_component_width_spin.setSingleStep(0.1)
+        self.game_component_width_spin.setValue(self.current_template.width_in)
+        self.game_component_width_spin.editingFinished.connect(self.update_game_component_dimensions)
+        game_component_props_layout.addRow(f"Width ({self.current_unit}):", self.game_component_width_spin)
+
+        self.game_component_height_spin = QDoubleSpinBox()
+        self.game_component_height_spin.setRange(1.0, 200.0)
+        adjust = MEASURE_ADJUSTMENT[self.current_unit]
+        self.game_component_height_spin.setSingleStep(adjust)
+        self.game_component_height_spin.setValue(self.current_template.height_in)
+        self.game_component_height_spin.editingFinished.connect(self.update_game_component_dimensions)
+        game_component_props_layout.addRow(f"Height ({self.current_unit})", self.game_component_height_spin)
+
+        self.game_component_dpi_spin = QSpinBox()
+        self.game_component_dpi_spin.setRange(72, 1200)
+        adjust = MEASURE_ADJUSTMENT[self.current_unit]
+        self.game_component_dpi_spin.setSingleStep(adjust)
+        self.game_component_dpi_spin.setValue(self.current_template.dpi)
+        self.game_component_dpi_spin.editingFinished.connect(self.update_game_component_dimensions)
+        game_component_props_layout.addRow("DPI:", self.game_component_dpi_spin)
 
         self.set_bg_image_btn = QPushButton("Set Background Image")
         self.set_bg_image_btn.clicked.connect(self.set_game_component_background_image)
@@ -345,40 +369,67 @@ class MainDesignerWindow(QMainWindow):
         self.layers_dock.setMaximumWidth(300)
         self.addDockWidget(Qt.LeftDockWidgetArea, self.layers_dock)
 
-    def create_drawing_toolbar(self):
-        toolbar = self.addToolBar("Drawing Tools")
-        toolbar.setToolButtonStyle(Qt.ToolButtonTextBesideIcon)
+    def create_measure_toolbar(self):
+        self.measure_toolbar = QToolBar("Measurement Toolbar")
+        self.measure_toolbar.setObjectName("MeasurementToolbar")
+        self.addToolBar(Qt.TopToolBarArea, self.measure_toolbar)
 
-        self.color_picker_action = QAction(QIcon.fromTheme("color-picker"), "Color Picker", self)
-        self.color_picker_action.triggered.connect(self.on_color_picker_clicked)
-        toolbar.addAction(self.color_picker_action)
+        # Unit Selector
+        self.unit_selector = QComboBox()
+        self.unit_selector.addItems(["in", "cm", "px"])
+        self.unit_selector.setCurrentText(self.current_unit)
+        self.unit_selector.currentTextChanged.connect(self.on_unit_change)
+        self.measure_toolbar.addWidget(QLabel("Unit:"))
+        self.measure_toolbar.addWidget(self.unit_selector)
 
-        self.fill_action = QAction(QIcon.fromTheme("paint-fill"), "Fill Tool", self)
-        self.fill_action.triggered.connect(self.on_fill_tool_clicked)
-        toolbar.addAction(self.fill_action)
+        # Snap to Grid
+        self.snap_checkbox = QCheckBox("Snap to Grid")
+        self.snap_checkbox.setChecked(True)
+        self.snap_checkbox.stateChanged.connect(self.on_snap_toggle)
+        self.snap_to_grid = True
+        self.measure_toolbar.addWidget(self.snap_checkbox)
 
-        self.eraser_action = QAction(QIcon.fromTheme("edit-clear"), "Eraser", self)
-        self.eraser_action.triggered.connect(self.on_eraser_tool_clicked)
-        toolbar.addAction(self.eraser_action)
+        # Show Grid
+        self.grid_checkbox = QCheckBox("Show Grid")
+        self.grid_checkbox.setChecked(True)
+        self.grid_checkbox.stateChanged.connect(self.on_grid_toggle)
+        self.show_grid = True
+        self.measure_toolbar.addWidget(self.grid_checkbox)
 
-        self.brush_action = QAction(QIcon.fromTheme("edit-brush"), "Brush Tool", self)
-        self.brush_action.triggered.connect(self.on_brush_tool_clicked)
-        toolbar.addAction(self.brush_action)
+        # Template Size Controls
+        self.measure_toolbar.addSeparator()
+        self.measure_toolbar.addWidget(QLabel("Template:"))
 
-        toolbar.addSeparator()
+        self.template_width_field = UnitField(
+            initial_px=self.current_template.width_px,
+            unit=self.current_unit,
+            dpi=self.current_template.dpi
+        )
+        self.template_width_field.editingFinishedWithValue.connect(self.on_template_width_changed)
 
-        self.current_color_label = QLabel("Current Color:")
-        self.current_color_display = QLabel()
-        self.current_color_display.setFixedSize(20, 20)
-        self.current_color_display.setStyleSheet(f"background-color: {QColor(0, 0, 0).name()}; border: 1px solid black;")
-        toolbar.addWidget(self.current_color_label)
-        toolbar.addWidget(self.current_color_display)
+        self.template_height_field = UnitField(
+            initial_px=self.current_template.height_px,
+            unit=self.current_unit,
+            dpi=self.current_template.dpi
+        )
+        self.template_height_field.editingFinishedWithValue.connect(self.on_template_height_changed)
 
-        self._current_drawing_color = QColor(0, 0, 0)
-        self.update_color_display()
+        self.measure_toolbar.addWidget(QLabel("Width:"))
+        self.measure_toolbar.addWidget(self.template_width_field)
+        self.measure_toolbar.addWidget(QLabel("Height:"))
+        self.measure_toolbar.addWidget(self.template_height_field)
+
+        # DPI SpinBox (not a UnitField)
+        self.game_component_dpi_spin = QSpinBox()
+        self.game_component_dpi_spin.setRange(36, 1200)
+        self.game_component_dpi_spin.setValue(self.current_template.dpi)
+        self.game_component_dpi_spin.valueChanged.connect(self.on_template_dpi_changed)
+        self.measure_toolbar.addWidget(QLabel("DPI:"))
+        self.measure_toolbar.addWidget(self.game_component_dpi_spin)
+
 
     def create_font_toolbar(self):
-        self.font_toolbar_widget = FontToolBar(self)
+        self.font_toolbar_widget = FontToolbar(self)
         font_toolbar = self.addToolBar("Font Tools")
         font_toolbar.addWidget(self.font_toolbar_widget)
         self.font_toolbar_widget.font_changed.connect(self.on_font_toolbar_font_changed)
@@ -443,6 +494,38 @@ class MainDesignerWindow(QMainWindow):
         self.measure_toolbar.addWidget(self.game_component_dpi_spin)
 
 
+    @Slot(str)
+    def on_unit_change(self, unit: str):
+        self.current_unit = unit
+        self.refresh_properties_panel()
+        self.scene().unit = unit
+        self.scene().update()  # force grid redraw
+
+    @Slot(int)
+    def on_template_width_changed(self, new_px):
+        self.current_template.width_px = new_px
+        self.current_template.width_in = new_px / self.current_template.dpi
+        self.update_template_scene_rect()
+
+    @Slot(int)
+    def on_template_height_changed(self, new_px):
+        self.current_template.height_px = new_px
+        self.current_template.height_in = new_px / self.current_template.dpi
+        self.update_template_scene_rect()
+
+    def update_template_scene_rect(self):
+        self.scene.set_template_dimensions(
+            self.current_template.width_px,
+            self.current_template.height_px
+        )
+        rect = QRectF(0, 0, self.current_template.width_px, self.current_template.height_px)
+        self.scene.setSceneRect(rect)
+        self.view.setSceneRect(rect)
+        self.view.fitInView(rect, Qt.KeepAspectRatio)
+        self.scene.update()
+        self.view.update()
+        self.current_template.template_changed.emit()
+
     def create_menus(self):
         file_menu = self.menuBar().addMenu("&File")
 
@@ -498,7 +581,7 @@ class MainDesignerWindow(QMainWindow):
         self.scene = GameComponentGraphicsScene(
             self.current_template.width_px,
             self.current_template.height_px,
-            self.dpi
+            self
         )
 
         self.view = DesignerGraphicsView(self.scene)
@@ -514,8 +597,9 @@ class MainDesignerWindow(QMainWindow):
         self.scene.selectionChanged.connect(self.on_selection_changed)
         self.scene.element_dropped.connect(self.add_element_from_drop)
 
-        # self.game_component_width.setValue(self.current_template.width_in)
-        # self.game_component_height.setValue(self.current_template.height_in)
+        self.game_component_width_spin.setValue(self.current_template.width_in)
+        self.game_component_height_spin.setValue(self.current_template.height_in)
+        self.game_component_dpi_spin.setValue(self.current_template.dpi)
 
         self.on_selection_changed()
         #self.view.fitInView(self.scene.sceneRect(), Qt.KeepAspectRatio)
@@ -607,8 +691,9 @@ class MainDesignerWindow(QMainWindow):
         self.setCentralWidget(self.view)
 
 
-        # self.game_component_width.setValue(self.current_template.width_in)
-        # self.game_component_height.setValue(self.current_template.height_in)
+        self.game_component_width_spin.setValue(self.current_template.width_in)
+        self.game_component_height_spin.setValue(self.current_template.height_in)
+        self.game_component_dpi_spin.setValue(self.current_template.dpi)
 
         self.on_selection_changed()
 
@@ -632,6 +717,27 @@ class MainDesignerWindow(QMainWindow):
         if element:
             element.set_content(content)
 
+    @Slot(float, float, float, float)
+    def update_selected_geometry(self, x: Optional[float] = None, y: Optional[float] = None,
+                                 width: Optional[float] = None, height: Optional[float] = None):
+        element = self.get_selected_element()
+        if element:
+            current_rect = element.rect
+            current_pos = element.pos()
+
+            new_x = x if x is not None else current_pos.x()
+            new_y = y if y is not None else current_pos.y()
+            new_width = width if width is not None else current_rect.width()
+            new_height = height if height is not None else current_rect.height()
+
+            new_width = max(new_width, MIN_ELEMENT_SIZE)
+            new_height = max(new_height, MIN_ELEMENT_SIZE)
+
+            element.setPos(new_x, new_y)
+            element.setRect(QRectF(0, 0, new_width, new_height))
+
+            element.update()
+
     @Slot(QFont)
     def on_font_toolbar_font_changed(self, font: QFont):
         element = self.get_selected_element()
@@ -647,72 +753,6 @@ class MainDesignerWindow(QMainWindow):
                 element.set_style_property('color', color)
             else:
                 self.show_status_message("Text color selection cancelled.", "info") # Status bar message for cancellation
-
-    @Slot(str)
-    def on_unit_change(self, unit: str):
-        self.current_unit = unit
-        self.scene.unit = unit
-
-        # Update the unit display in the UnitFields
-        self.template_width_field.set_unit(unit)
-        self.template_height_field.set_unit(unit)
-
-        self.measure_toolbar.update()
-        self.refresh_element_property_panel()
-        self.scene.update()  # force grid redraw
-
-    @Slot(int)
-    def on_snap_toggle(self, state: int):
-        self.snap_to_grid = bool(state)
-        self.scene.is_snap_to_grid = self.snap_to_grid  # Pass it to scene
-
-    @Slot(int)
-    def on_grid_toggle(self, state):
-        self.show_grid = bool(state)
-        self.measure_toolbar.update()
-        self.scene.update()  # Redraw scene
-
-    @Slot(int)
-    def on_template_width_changed(self, new_px):
-        self.current_template.set_width_px(new_px)
-        self.update_template_scene_rect()
-
-    @Slot(int)
-    def on_template_height_changed(self, new_px):
-        self.current_template.set_height_px(new_px)
-        self.update_template_scene_rect()
-
-    def update_template_scene_rect(self):
-        self.scene.set_template_dimensions(
-            self.current_template.width_px,
-            self.current_template.height_px
-        )
-
-        QTimer.singleShot(0, lambda: self.view.fitInView(self.scene.sceneRect(), Qt.KeepAspectRatio))
-
-        self.scene.update()
-        self.view.update()
-        self.current_template.template_changed.emit()
-
-    @Slot()
-    def on_template_dpi_changed(self):
-        new_dpi = self.game_component_dpi_spin.value()
-        self.current_template.dpi = new_dpi
-
-        # Update UnitFields to reflect new DPI
-        self.template_width_field.set_dpi(new_dpi)
-        self.template_height_field.set_dpi(new_dpi)
-
-        # Also update the current element fields if one is selected
-        if self._current_selected_element:
-            self.refresh_element_property_panel()
-
-        self.view.viewport().update()
-        self.view.update()
-        self.scene.update()
-
-        self.current_template.template_changed.emit()
-        self.show_status_message(f"DPI updated to {new_dpi}.", "info")
 
     @Slot()
     def change_bg_color(self):
@@ -752,31 +792,35 @@ class MainDesignerWindow(QMainWindow):
         selected_element = self.get_selected_element()
 
         if self._current_selected_element and self._current_selected_element != selected_element:
-            # Disconnect previous
             try:
                 self._current_selected_element.element_changed.disconnect(self.on_element_data_changed)
             except TypeError:
                 pass
 
-            # 🔽 Hide handles on previous selection
-            self._current_selected_element.hide_handles()
-
         self._current_selected_element = selected_element
 
         if selected_element:
-            # 🔼 Show handles on new selection
-            selected_element.show_handles()
-
             self.set_element_controls_enabled(True)
             self.font_toolbar_widget.setEnabled(True)
 
             self.name_edit.blockSignals(True)
             self.content_edit.blockSignals(True)
+            self.x_spin.blockSignals(True)
+            self.y_spin.blockSignals(True)
+            self.width_spin.blockSignals(True)
+            self.height_spin.blockSignals(True)
+            self.border_width_spin.blockSignals(True)
             self.alignment_combo.blockSignals(True)
 
             self.name_edit.setText(selected_element.name)
             self.content_edit.setText(selected_element.get_content() or "")
-            self.refresh_element_property_panel()
+
+            self.x_spin.setValue(selected_element.pos().x())
+            self.y_spin.setValue(selected_element.pos().y())
+            self.width_spin.setValue(selected_element.boundingRect().width())
+            self.height_spin.setValue(selected_element.boundingRect().height())
+
+            self.border_width_spin.setValue(selected_element._style.get('border_width', 0))
             current_alignment = selected_element._style.get('alignment', Qt.AlignCenter)
             if current_alignment in self.reverse_alignment_map:
                 self.alignment_combo.setCurrentIndex(self.reverse_alignment_map[current_alignment])
@@ -786,7 +830,7 @@ class MainDesignerWindow(QMainWindow):
             if isinstance(selected_element, (TextElement, LabelElement)):
                 current_font = selected_element._style.get('font', QFont("Arial", 12))
                 if not isinstance(current_font, QFont):
-                    current_font = QFont("Arial", 12)
+                     current_font = QFont("Arial", 12)
                 self.font_toolbar_widget.set_font(current_font)
                 self.font_toolbar_widget.setEnabled(True)
             else:
@@ -794,6 +838,11 @@ class MainDesignerWindow(QMainWindow):
 
             self.name_edit.blockSignals(False)
             self.content_edit.blockSignals(False)
+            self.x_spin.blockSignals(False)
+            self.y_spin.blockSignals(False)
+            self.width_spin.blockSignals(False)
+            self.height_spin.blockSignals(False)
+            self.border_width_spin.blockSignals(False)
             self.alignment_combo.blockSignals(False)
 
             selected_element.element_changed.connect(self.on_element_data_changed)
@@ -815,17 +864,28 @@ class MainDesignerWindow(QMainWindow):
             self.layers_list.clearSelection()
             self.layers_list.blockSignals(False)
 
-
     @Slot()
     def on_element_data_changed(self):
         element = self.get_selected_element()
         if element and element == self._current_selected_element:
             self.name_edit.blockSignals(True)
             self.content_edit.blockSignals(True)
+            self.x_spin.blockSignals(True)
+            self.y_spin.blockSignals(True)
+            self.element_spin.blockSignals(True)
+            self.height_spin.blockSignals(True)
+            self.border_width_spin.blockSignals(True)
             self.alignment_combo.blockSignals(True)
 
             self.name_edit.setText(element.name)
             self.content_edit.setText(element.get_content() or "")
+
+            self.x_spin.setValue(element.pos().x())
+            self.y_spin.setValue(element.pos().y())
+            self.width_spin.setValue(element.boundingRect().width())
+            self.height_spin.setValue(element.boundingRect().height())
+
+            self.border_width_spin.setValue(element._style.get('border_width', 0))
             current_alignment = element._style.get('alignment', Qt.AlignCenter)
             if current_alignment in self.reverse_alignment_map:
                 self.alignment_combo.setCurrentIndex(self.reverse_alignment_map[current_alignment])
@@ -840,6 +900,11 @@ class MainDesignerWindow(QMainWindow):
 
             self.name_edit.blockSignals(False)
             self.content_edit.blockSignals(False)
+            self.x_spin.blockSignals(False)
+            self.y_spin.blockSignals(False)
+            self.width_spin.blockSignals(False)
+            self.height_spin.blockSignals(False)
+            self.border_width_spin.blockSignals(False)
             self.alignment_combo.blockSignals(False)
 
             element.update()
@@ -924,8 +989,8 @@ class MainDesignerWindow(QMainWindow):
 
     @Slot()
     def update_game_component_dimensions(self):
-        new_width_in = self.game_component_width.value()
-        new_height_in = self.game_component_height.value()
+        new_width_in = self.game_component_width_spin.value()
+        new_height_in = self.game_component_height_spin.value()
         new_dpi = self.game_component_dpi_spin.value()
 
         self.current_template.width_in = new_width_in
@@ -948,146 +1013,6 @@ class MainDesignerWindow(QMainWindow):
 
         self.show_status_message("Game Component dimensions and DPI have been updated.", "info")
 
-    def set_element_controls_enabled(self, enabled: bool):
-        self.name_edit.setEnabled(enabled)
-        self.content_edit.setEnabled(enabled)
-        self.color_btn.setEnabled(enabled)
-        self.bg_color_btn.setEnabled(enabled)
-        self.border_color_btn.setEnabled(enabled)
-        self.alignment_combo.setEnabled(enabled)
-        self.remove_element_btn.setEnabled(enabled)
-
-
-    @Slot()
-    def remove_selected_element(self):
-        element = self.get_selected_element()
-        if element:
-            # QMessageBox for confirmation retained as it's a destructive action
-            reply = QMessageBox.question(self, "Remove Element",
-                                         f"Are you sure you want to remove '{element.name}'?",
-                                         QMessageBox.Yes | QMessageBox.No)
-            if reply == QMessageBox.No:
-                self.show_status_message("Element removal cancelled.", "info")
-                return
-            self.scene.removeItem(element)
-            self.current_template.remove_element(element)
-            self.on_selection_changed()
-            self.show_status_message(f"Element '{element.name}' removed.", "info")
-        else:
-            self.show_status_message("No element selected to remove.", "warning")
-
-    def refresh_element_property_panel(self):
-        element = self._current_selected_element
-        dpi = self.current_template.dpi
-
-        if element:
-            rect = element.rect
-
-            self.element_x_field.set_dpi(dpi)
-            self.element_x_field.set_unit(self.current_unit)
-            self.element_x_field.set_px_value(element.pos().x())
-
-            self.element_y_field.set_dpi(dpi)
-            self.element_y_field.set_unit(self.current_unit)
-            self.element_y_field.set_px_value(element.pos().y())
-
-            self.element_width_field.set_dpi(dpi)
-            self.element_width_field.set_unit(self.current_unit)
-            self.element_width_field.set_px_value(rect.width())
-
-            self.element_height_field.set_dpi(dpi)
-            self.element_height_field.set_unit(self.current_unit)
-            self.element_height_field.set_px_value(rect.height())
-
-            self.border_width_field.set_dpi(dpi)
-            self.border_width_field.set_unit(self.current_unit)
-            if hasattr(element, "border_width"):
-                self.border_width_field.set_px_value(element.border_width)
-            else:
-                self.border_width_field.set_px_value(0)
-
-            # Enable fields
-            self.element_x_field.setEnabled(True)
-            self.element_y_field.setEnabled(True)
-            self.element_width_field.setEnabled(True)
-            self.element_height_field.setEnabled(True)
-            self.border_width_field.setEnabled(True)
-
-        else:
-            # Disable and clear all fields
-            self.element_x_field.set_px_value(None)
-            self.element_y_field.set_px_value(None)
-            self.element_width_field.set_px_value(None)
-            self.element_height_field.set_px_value(None)
-            self.border_width_field.set_px_value(None)
-
-            self.element_x_field.setEnabled(False)
-            self.element_y_field.setEnabled(False)
-            self.element_width_field.setEnabled(False)
-            self.element_height_field.setEnabled(False)
-            self.border_width_field.setEnabled(False)
-
-            
-    #### Paint Toolbar ####
-
-    @Slot()
-    def on_color_picker_clicked(self):
-        color = QColorDialog.getColor(self._current_drawing_color, self, "Select Drawing Color")
-        if color.isValid():
-            self._current_drawing_color = color
-            self.update_color_display()
-            self.show_status_message(f"Drawing color set to {color.name()}.", "info")
-        else:
-            self.show_status_message("Color picker cancelled.", "info")
-
-
-    @Slot()
-    def on_fill_tool_clicked(self):
-        self.show_status_message("Fill tool selected. Click on an area to fill.", "info")
-
-    @Slot()
-    def on_eraser_tool_clicked(self):
-        self.show_status_message("Eraser tool selected. Drag to erase.", "info")
-
-    @Slot()
-    def on_brush_tool_clicked(self):
-        self.show_status_message("Brush tool selected. Drag to draw.", "info")
-
-
-    @Slot()
-    def on_element_dimension_changed(self, element, attr, px):
-        setattr(element, attr, px)
-        self.scene.update()
-        self.view.update()
-
-
-    @Slot(str, int)
-    def update_element_geometry(self, prop: str, px: int):
-        if not self._current_selected_element:
-            return
-
-        element = self._current_selected_element
-        rect = element.rect
-        pos = element.pos()
-
-        if prop == "x":
-            element.setPos(QPointF(px, pos.y()))
-        elif prop == "y":
-            element.setPos(QPointF(pos.x(), px))
-        elif prop == "width":
-            element.setRect(QRectF(rect.x(), rect.y(), px, rect.height()))
-        elif prop == "height":
-            element.setRect(QRectF(rect.x(), rect.y(), rect.width(), px))
-
-        element.update()
-        self.scene.update()
-        self.view.viewport().update()
-
-
-
-
-    def update_color_display(self):
-        self.current_color_display.setStyleSheet(f"background-color: {self._current_drawing_color.name()}; border: 1px solid black;")
     @Slot()
     def set_game_component_background_image(self):
         path, _ = QFileDialog.getOpenFileName(
@@ -1277,18 +1202,6 @@ class MainDesignerWindow(QMainWindow):
         templates_to_export = self.merged_templates if self.merged_templates else [self.current_template]
         self.export_manager.export_png(templates_to_export, output_dir=output_dir, is_cli_mode=True)
 
-
-    @Slot(int)
-    def update_element_border_width(self, px: int):
-        if not self._current_selected_element:
-            return
-        if hasattr(self._current_selected_element, 'set_border_width'):
-            self._current_selected_element.set_border_width(px)
-            self._current_selected_element.element_changed.emit()
-            self.scene.update()
-            self.view.update()
-
-
     def export_pdf_cli(self, output_dir: Path): # NEW: CLI-specific PDF export
         templates_to_export = self.merged_templates if self.merged_templates else [self.current_template]
         # For PDF, the ExportManager expects a full file path, not just a directory.
@@ -1298,3 +1211,120 @@ class MainDesignerWindow(QMainWindow):
 
 
 
+    @Slot()
+    def update_element_property(self, element, attr: str, px: int):
+        setattr(element, attr, px)
+        self.scene.update()
+        self.view.update()
+
+    def set_element_controls_enabled(self, enabled: bool):
+        self.name_edit.setEnabled(enabled)
+        self.content_edit.setEnabled(enabled)
+        self.x_spin.setEnabled(enabled)
+        self.y_spin.setEnabled(enabled)
+        self.width_spin.setEnabled(enabled)
+        self.height_spin.setEnabled(enabled)
+        self.color_btn.setEnabled(enabled)
+        self.bg_color_btn.setEnabled(enabled)
+        self.border_color_btn.setEnabled(enabled)
+        self.border_width_spin.setEnabled(enabled)
+        self.alignment_combo.setEnabled(enabled)
+        self.remove_element_btn.setEnabled(enabled) # Enable/Disable the new remove button
+
+
+    @Slot()
+    def remove_selected_element(self):
+        element = self.get_selected_element()
+        if element:
+            # QMessageBox for confirmation retained as it's a destructive action
+            reply = QMessageBox.question(self, "Remove Element",
+                                         f"Are you sure you want to remove '{element.name}'?",
+                                         QMessageBox.Yes | QMessageBox.No)
+            if reply == QMessageBox.No:
+                self.show_status_message("Element removal cancelled.", "info")
+                return
+            self.scene.removeItem(element)
+            self.current_template.remove_element(element)
+            self.on_selection_changed()
+            self.show_status_message(f"Element '{element.name}' removed.", "info")
+        else:
+            self.show_status_message("No element selected to remove.", "warning")
+
+    #### Measure Toolbar ####
+    @Slot()
+    def update_game_component_dimensions(self):
+        try:
+            dpi = self.game_component_dpi_spin.value()
+
+            new_width_px = parse_dimension(self.game_component_width_input.text(), dpi)
+            new_height_px = parse_dimension(self.game_component_height_input.text(), dpi)
+
+            self.current_template.dpi = dpi
+            self.current_template.width_px = new_width_px
+            self.current_template.height_px = new_height_px
+
+            # Update template internal in/inches too
+            self.current_template.width_in = new_width_px / dpi
+            self.current_template.height_in = new_height_px / dpi
+
+            self.scene.set_template_dimensions(new_width_px, new_height_px)
+
+            new_scene_rect = QRectF(0, 0, new_width_px, new_height_px)
+            self.scene.setSceneRect(new_scene_rect)
+            self.view.setSceneRect(new_scene_rect)
+            self.view.fitInView(new_scene_rect, Qt.KeepAspectRatio)
+
+            self.current_template.template_changed.emit()
+            self.view.viewport().update()
+            self.view.update()
+            self.scene.update()
+
+            self.show_status_message("Game Component dimensions and DPI have been updated.", "info")
+
+        except ValueError as e:
+            self.show_status_message(f"Invalid input: {e}", "error")
+
+    def refresh_properties_panel(self):
+        dpi = self.current_template.dpi
+        self.game_component_width_input.setText(
+            format_dimension(self.current_template.width_px, self.current_unit, dpi)
+        )
+        self.game_component_height_input.setText(
+            format_dimension(self.current_template.height_px, self.current_unit, dpi)
+        )
+    #### Paint Toolbar ####
+
+    @Slot()
+    def on_color_picker_clicked(self):
+        color = QColorDialog.getColor(self._current_drawing_color, self, "Select Drawing Color")
+        if color.isValid():
+            self._current_drawing_color = color
+            self.update_color_display()
+            self.show_status_message(f"Drawing color set to {color.name()}.", "info")
+        else:
+            self.show_status_message("Color picker cancelled.", "info")
+
+
+    @Slot()
+    def on_fill_tool_clicked(self):
+        self.show_status_message("Fill tool selected. Click on an area to fill.", "info")
+
+    @Slot()
+    def on_eraser_tool_clicked(self):
+        self.show_status_message("Eraser tool selected. Drag to erase.", "info")
+
+    @Slot()
+    def on_brush_tool_clicked(self):
+        self.show_status_message("Brush tool selected. Drag to draw.", "info")
+
+    def update_color_display(self):
+        self.current_color_display.setStyleSheet(f"background-color: {self._current_drawing_color.name()}; border: 1px solid black;")
+
+    @Slot(int)
+    def on_snap_toggle(self, state):
+        self.snap_to_grid = bool(state)
+
+    @Slot(int)
+    def on_grid_toggle(self, state):
+        self.show_grid = bool(state)
+        self.scene().update()  # Redraw scene

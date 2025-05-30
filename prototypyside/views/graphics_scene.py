@@ -4,6 +4,9 @@ from PySide6.QtWidgets import QGraphicsScene, QGraphicsItem, QApplication, QGrap
 from PySide6.QtCore import Qt, QPointF, QRectF, Signal # Removed QDataStream, QIODevice as they are not directly used in this file's logic
 from PySide6.QtGui import QColor, QPen, QPainter, QPixmap, QTransform # Added QTransform for robust itemAt handling
 
+
+from prototypyside.config import MEASURE_INCREMENT
+from prototypyside.utils.unit_converter import parse_dimension, format_dimension
 # For type hinting MainDesignerWindow and GameComponentTemplate
 from typing import Optional, TYPE_CHECKING
 if TYPE_CHECKING:
@@ -23,25 +26,30 @@ class GameComponentGraphicsScene(QGraphicsScene):
     def __init__(self, initial_width_px: int = 400, initial_height_px: int = 400, parent=None):
         super().__init__(parent)
         self.setBackgroundBrush(QColor(240, 240, 240)) # Light gray background for the overall scene
-
+        self.measure_by = "in"
+        self.is_snap_to_grid = True
         self._template_width_px = initial_width_px
         self._template_height_px = initial_height_px
 
         self.selected_item: Optional['GameComponentElement'] = None # Tracker for the single selected item
         self._max_z_value = 0 # To manage Z-order for selected items (increment this when item is brought to front)
         self.connecting_line: Optional[QGraphicsRectItem] = None # Placeholder for a potential future feature
-
+        self.drag_offset = None 
+        self._dragging_item = None
         # Set the sceneRect immediately with the initial dimensions
         self.setSceneRect(0, 0, self._template_width_px, self._template_height_px)
+
 
     def set_template_dimensions(self, width_px: int, height_px: int):
         self._template_width_px = width_px
         self._template_height_px = height_px
-        
-        # Create a QRectF with proper origin and size
-        scene_rect = QRectF(0, 0, self._template_width_px, self._template_height_px)
-        self.setSceneRect(scene_rect)
-        self.invalidate()
+
+        new_rect = QRectF(0, 0, width_px, height_px)
+        self.setSceneRect(new_rect)
+
+        # Force update of all items and the background
+        self.invalidate(new_rect, QGraphicsScene.BackgroundLayer)
+        self.update()
 
     def drawBackground(self, painter: QPainter, rect: QRectF):
         # Always call the base class implementation first (for the overall background brush)
@@ -82,16 +90,7 @@ class GameComponentGraphicsScene(QGraphicsScene):
             painter.drawRect(template_rect)
 
 
-        # 2. Draw the grid within the defined template area (on top of background image or white)
-        grid_size = 20 # Pixels for grid cells
-        grid_color = QColor(220, 220, 220)
-        painter.setPen(QPen(grid_color, 0.5))
-
-        for y in range(0, int(self._template_height_px) + 1, grid_size):
-            painter.drawLine(0, y, self._template_width_px, y)
-
-        for x in range(0, int(self._template_width_px) + 1, grid_size):
-            painter.drawLine(x, 0, x, self._template_height_px)
+        self.draw_grid(painter, rect)
 
         # 3. Draw the fixed template border in black (on top of everything)
         border_pen = QPen(Qt.black, 2)
@@ -99,7 +98,59 @@ class GameComponentGraphicsScene(QGraphicsScene):
         painter.setBrush(Qt.NoBrush) # Ensure no fill for the border rect
         painter.drawRect(template_rect) # Draw the border around the template area
 
+    def draw_grid(self, painter, rect):
+        if not getattr(self.parent(), "show_grid", True):
+            return
+
+        unit = getattr(self.parent(), "current_unit", "in")
+        dpi = 72
+        base = parse_dimension("1 " + unit, dpi)
+        spacing = int(round(base * MEASURE_INCREMENT[unit]))
+
+        pen = QPen(QColor(220, 220, 220))
+        painter.setPen(pen)
+
+        left = int(rect.left())
+        right = int(rect.right())
+        top = int(rect.top())
+        bottom = int(rect.bottom())
+
+        x = left - (left % spacing)
+        while x < right:
+            painter.drawLine(x, top, x, bottom)
+            x += spacing
+
+        y = top - (top % spacing)
+        while y < bottom:
+            painter.drawLine(left, y, right, y)
+            y += spacing
+
+    def snap_to_grid(self, pos: QPointF, grid_size: float = 10.0) -> QPointF:
+        if not self.is_snap_to_grid:
+            return pos
+        x = round(pos.x() / grid_size) * grid_size
+        y = round(pos.y() / grid_size) * grid_size
+        return QPointF(x, y)
+
+    def apply_snap(self, pos: QPointF, grid_size: float = 10.0) -> QPointF:
+        if not self.is_snap_to_grid:
+            return pos
+        x = round(pos.x() / grid_size) * grid_size
+        y = round(pos.y() / grid_size) * grid_size
+        return QPointF(x, y)
+
+
     # --- REVISED MOUSE EVENT HANDLERS ---
+
+    def mouseMoveEvent(self, event: QGraphicsSceneMouseEvent):
+        super().mouseMoveEvent(event)
+
+        if hasattr(self, '_dragging_item') and self._dragging_item:
+            new_pos = event.scenePos() - self._drag_offset
+            if self.snap_to_grid:
+                new_pos = self.apply_snap(new_pos)
+            self._dragging_item.setPos(new_pos)
+
     def mousePressEvent(self, event: QGraphicsSceneMouseEvent):
         # Call super() first to allow Qt's default item selection and drag handling.
         # This is CRITICAL for drag-and-drop from external sources (like your palette).
@@ -118,7 +169,9 @@ class GameComponentGraphicsScene(QGraphicsScene):
             # initiated any drag if an item was clicked.
             if not item_at_pos:
                 self.clearSelection() # Deselects all items in the scene
-
+            if item_at_pos and (item_at_pos.flags() & QGraphicsItem.ItemIsMovable):
+                self._dragging_item = item_at_pos
+                self._drag_offset = event.scenePos() - item_at_pos.pos()
             # Keep track of the GameComponentElement that was pressed, if any.
             # This helps in mouseReleaseEvent to confirm selection after potential drag/move.
             if isinstance(item_at_pos, GameComponentElement):
@@ -130,6 +183,14 @@ class GameComponentGraphicsScene(QGraphicsScene):
     def mouseReleaseEvent(self, event: QGraphicsSceneMouseEvent):
         # Always call super() first to finalize any drag/move operations Qt might have handled.
         super().mouseReleaseEvent(event)
+        self._dragging_item = None 
+        self._drag_offset = None 
+
+        if self.snap_to_grid:
+            item = self.get_selected_element()
+            if item:
+                snapped_pos = self.snap_to_grid(item.pos())
+                item.setPos(snapped_pos)
 
         # After super() completes, and if it was a LeftButton release:
         if event.button() == Qt.LeftButton:

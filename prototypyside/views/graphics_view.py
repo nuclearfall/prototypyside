@@ -26,9 +26,20 @@ class DesignerGraphicsView(QGraphicsView):
         self.viewport().grabGesture(Qt.PinchGesture)
         self.viewport().installEventFilter(self)
 
+
         self.current_scale = 1.0
         self._last_scale = 1.0
-        self.MIN_SCALE = 1.0
+        scene_rect = self.sceneRect()
+        view_size = self.viewport().size()
+
+        if scene_rect.isEmpty() or view_size.isEmpty():
+            return
+
+        scale_x = view_size.width() / scene_rect.width()
+        scale_y = view_size.height() / scene_rect.height()
+
+        self.MIN_SCALE = min(scale_x, scale_y)
+
         self.MAX_SCALE = 10.0
         self._pinch_start_transform = QTransform()
         self._pinch_last_factor = 1.0
@@ -45,6 +56,10 @@ class DesignerGraphicsView(QGraphicsView):
         if event.type() == QEvent.Gesture:
             return self.gestureEvent(event)
         return super().eventFilter(watched, event)
+
+    def resizeEvent(self, event):
+        super().resizeEvent(event)
+        self.update_min_scale()
 
     def gestureEvent(self, event: QGestureEvent) -> bool:
         print(f"gestureEvent triggered {self._pinch_direction}")
@@ -75,23 +90,20 @@ class DesignerGraphicsView(QGraphicsView):
                 elif raw_delta < 0.99:
                     self._pinch_direction = 'out'
                 else:
-                    return  # Still undecided, wait for clearer delta
+                    return  # Still undecided
 
             # Prevent reversal mid-gesture
-            if self._pinch_direction == 'in' and raw_delta < 1.0:
-                return
-            if self._pinch_direction == 'out' and raw_delta > 1.0:
+            if (self._pinch_direction == 'in' and raw_delta < 1.0) or \
+               (self._pinch_direction == 'out' and raw_delta > 1.0):
                 return
 
-            # Smooth scaling
+            # Apply sensitivity
             sensitivity = self.PINCH_SENSITIVITY
             eased_delta = raw_delta ** sensitivity
             smoothed_delta = 1.0 + (eased_delta - 1.0)
 
-            new_scale = self.current_scale * smoothed_delta
-            if self.MIN_SCALE <= new_scale <= self.MAX_SCALE:
-                self.scaleView(smoothed_delta)
-                self.current_scale = new_scale
+            # Let scaleView handle clamping and applying
+            self.scaleView(smoothed_delta)
 
             self._pinch_last_factor = scale_factor
 
@@ -99,6 +111,52 @@ class DesignerGraphicsView(QGraphicsView):
             self._gesture_active = False
             self._pinch_direction = None
             self._pinch_last_factor = 1.0
+
+    # def handlePinchGesture(self, pinch: QPinchGesture):
+    #     if pinch.state() == Qt.GestureStarted:
+    #         self._gesture_active = True
+    #         self._pinch_direction = None
+    #         self._pinch_last_factor = 1.0
+
+    #     elif pinch.state() == Qt.GestureUpdated:
+    #         if not self._gesture_active:
+    #             return  # Ignore spurious gestures
+
+    #         scale_factor = pinch.scaleFactor()
+    #         raw_delta = scale_factor / self._pinch_last_factor
+
+    #         # Lock direction once
+    #         if self._pinch_direction is None:
+    #             if raw_delta > 1.01:
+    #                 self._pinch_direction = 'in'
+    #             elif raw_delta < 0.99:
+    #                 self._pinch_direction = 'out'
+    #             else:
+    #                 return  # Still undecided, wait for clearer delta
+
+    #         # Prevent reversal mid-gesture
+    #         if self._pinch_direction == 'in' and raw_delta < 1.0:
+    #             return
+    #         if self._pinch_direction == 'out' and raw_delta > 1.0:
+    #             return
+
+    #         # Smooth scaling
+    #         sensitivity = self.PINCH_SENSITIVITY
+    #         eased_delta = raw_delta ** sensitivity
+    #         smoothed_delta = 1.0 + (eased_delta - 1.0)
+
+    #         new_scale = self.current_scale * smoothed_delta
+
+    #         if self.MIN_SCALE <= new_scale <= self.MAX_SCALE:
+    #             self.scaleView(smoothed_delta)
+    #             self.current_scale = max(MIN_SCALE, min(new_scale, self.MAX_SCALE))
+
+    #         self._pinch_last_factor = scale_factor
+
+    #     elif pinch.state() in (Qt.GestureFinished, Qt.GestureCanceled):
+    #         self._gesture_active = False
+    #         self._pinch_direction = None
+    #         self._pinch_last_factor = 1.0
 
 
     def wheelEvent(self, event: QWheelEvent):
@@ -115,16 +173,15 @@ class DesignerGraphicsView(QGraphicsView):
         else:
             super().wheelEvent(event)
 
-
     def scaleView(self, factor: float):
-        new_scale = self.current_scale * factor
+        proposed_scale = self.current_scale * factor
+        clamped_scale = max(self.MIN_SCALE, min(proposed_scale, self.MAX_SCALE))
 
-        # Clamp scale between MIN_SCALE and MAX_SCALE
-        if new_scale < self.MIN_SCALE or new_scale > self.MAX_SCALE:
-            return
+        # Adjust actual factor to only apply the portion that stays within bounds
+        actual_factor = clamped_scale / self.current_scale
 
-        self.current_scale = new_scale
-        self.scale(factor, factor)
+        self.current_scale = clamped_scale
+        self.scale(actual_factor, actual_factor)
 
     def startZoomAnimation(self, start_scale: float, end_scale: float, duration: int = 150):
         if hasattr(self, "_zoom_anim") and self._zoom_anim:

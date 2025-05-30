@@ -6,7 +6,7 @@ from PySide6.QtGui import QFont
 from PySide6.QtCore import Signal, Slot
 
 
-class FontToolbar(QWidget):
+class FontToolBar(QWidget):
     font_changed = Signal(QFont)
 
     def __init__(self, parent=None):
