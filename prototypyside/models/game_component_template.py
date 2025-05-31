@@ -7,6 +7,7 @@ import json
 from pathlib import Path
 from PySide6.QtWidgets import QMessageBox
 
+from prototypyside.models.game_component_elements import create_element
 # Use TYPE_CHECKING for type hinting
 if TYPE_CHECKING:
     from prototypyside.models.game_component_elements import GameComponentElement
@@ -44,7 +45,8 @@ class GameComponentTemplate(QObject): # NOW INHERITS QObject
 
     def add_element(self, element_type: str, name: str, rect: QRectF) -> 'GameComponentElement':
         from prototypyside.models.game_component_elements import GameComponentElement
-        element = GameComponentElement.create(element_type, name, rect, self) # Pass self (QObject) as parent_qobject
+        # element = GameComponentElement.create(element_type, name, rect, self) # Pass self (QObject) as parent_qobject
+        element = create_element(element_type, name, rect, self)
         max_z = max([e.zValue() for e in self.elements] + [0]) if self.elements else 0
         element.setZValue(max_z + 100)
         self.elements.append(element)

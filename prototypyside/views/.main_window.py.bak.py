@@ -60,6 +60,15 @@ class MainDesignerWindow(QMainWindow):
         self.setup_status_bar() # Moved to after setup_ui calls so all elements are ready
         self.setup_shortcuts() # NEW: Setup keyboard shortcuts
 
+    # def mousePressEvent(self, event: QMouseEvent):
+    #     super().mousePressEvent(event)
+
+    # def mouseMoveEvent(self, event: QMouseEvent):
+    #     super().mouseMoveEvent(event)
+
+    # def mouseReleaseEvent(self, event: QMouseEvent):
+    #     super().mouseReleaseEvent(event)
+
     def set_cli_mode(self, mode: bool):
         self._cli_mode = mode
 
@@ -960,32 +969,68 @@ class MainDesignerWindow(QMainWindow):
         if self.scene.selectedItems():
             self.scene.clearSelection()
 
-    @Slot(QPointF, str)
+    # @Slot(QPointF, str)
+    # def add_element_from_drop(self, scene_pos: QPointF, element_type: str):
+    #     self.scene.clearSelection()
+
+    #     default_width, default_height = 100, 40
+    #     if element_type == "TextElement": default_width, default_height = 180, 60
+    #     elif element_type == "ImageElement": default_width, default_height = 200, 150
+    #     elif element_type == "LabelElement": default_width, default_height = 120, 30
+    #     elif element_type == "ContainerElement": default_width, default_height = 250, 200
+
+    #     base_name = f"{element_type.replace('Element', '').lower()}_"
+    #     counter = 1
+    #     existing_names = {el.name for el in self.current_template.elements}
+    #     while f"{base_name}{counter}" in existing_names:
+    #         counter += 1
+    #     new_name = f"{base_name}{counter}"
+
+    #     new_rect_local = QRectF(0, 0, default_width, default_height)
+    #     new_element = self.current_template.add_element(element_type, new_name, new_rect_local)
+    #     self.scene.addItem(new_element)
+
+    #     center_offset_x = new_rect_local.width() / 2
+    #     center_offset_y = new_rect_local.height() / 2
+    #     new_element.setPos(scene_pos - QPointF(center_offset_x, center_offset_y))
+
+    #     new_element.setSelected(True)
     def add_element_from_drop(self, scene_pos: QPointF, element_type: str):
         self.scene.clearSelection()
 
+        # Define default dimensions based on element type
         default_width, default_height = 100, 40
-        if element_type == "TextElement": default_width, default_height = 180, 60
-        elif element_type == "ImageElement": default_width, default_height = 200, 150
-        elif element_type == "LabelElement": default_width, default_height = 120, 30
-        elif element_type == "ContainerElement": default_width, default_height = 250, 200
+        if element_type == "TextElement":
+            default_width, default_height = 180, 60
+        elif element_type == "ImageElement":
+            default_width, default_height = 200, 150
 
+        # Generate a unique name for the new element
         base_name = f"{element_type.replace('Element', '').lower()}_"
         counter = 1
-        existing_names = {el.name for el in self.current_template.elements}
+        existing_names = {el.get_name() for el in self.current_template.elements}
         while f"{base_name}{counter}" in existing_names:
             counter += 1
         new_name = f"{base_name}{counter}"
 
+        # Always use a rect starting at (0,0) for the internal drawing space
         new_rect_local = QRectF(0, 0, default_width, default_height)
-        new_element = self.current_template.add_element(element_type, new_name, new_rect_local)
+
+        # Create the element using the GameComponentTemplate
+        new_element = self.current_template.add_element(
+            element_type, new_name, new_rect_local
+        )
+
+        # Add it to the scene
         self.scene.addItem(new_element)
 
-        center_offset_x = new_rect_local.width() / 2
-        center_offset_y = new_rect_local.height() / 2
-        new_element.setPos(scene_pos - QPointF(center_offset_x, center_offset_y))
+        # ✅ Snap top-left corner directly
+        if self.snap_to_grid:
+            scene_pos = self.scene.snap_to_grid(scene_pos)
 
+        new_element.setPos(scene_pos)
         new_element.setSelected(True)
+
 
     @Slot()
     def update_game_component_dimensions(self):

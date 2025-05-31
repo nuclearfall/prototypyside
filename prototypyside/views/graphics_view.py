@@ -1,7 +1,7 @@
 # graphics_view.py
 # prototypyside/views/designer_graphics_view.py
 from PySide6.QtWidgets import QGraphicsView, QPinchGesture, QGestureEvent
-from PySide6.QtGui import QWheelEvent, QPainter, QTransform
+from PySide6.QtGui import QWheelEvent, QPainter, QTransform, QMouseEvent
 from PySide6.QtCore import Qt, QPointF, QEvent, QRectF, QSizeF, QObject, QVariantAnimation, QEasingCurve
 import sys
 
@@ -59,7 +59,7 @@ class DesignerGraphicsView(QGraphicsView):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        self.update_min_scale()
+        # self.update_min_scale()
 
     def gestureEvent(self, event: QGestureEvent) -> bool:
         print(f"gestureEvent triggered {self._pinch_direction}")
@@ -111,52 +111,6 @@ class DesignerGraphicsView(QGraphicsView):
             self._gesture_active = False
             self._pinch_direction = None
             self._pinch_last_factor = 1.0
-
-    # def handlePinchGesture(self, pinch: QPinchGesture):
-    #     if pinch.state() == Qt.GestureStarted:
-    #         self._gesture_active = True
-    #         self._pinch_direction = None
-    #         self._pinch_last_factor = 1.0
-
-    #     elif pinch.state() == Qt.GestureUpdated:
-    #         if not self._gesture_active:
-    #             return  # Ignore spurious gestures
-
-    #         scale_factor = pinch.scaleFactor()
-    #         raw_delta = scale_factor / self._pinch_last_factor
-
-    #         # Lock direction once
-    #         if self._pinch_direction is None:
-    #             if raw_delta > 1.01:
-    #                 self._pinch_direction = 'in'
-    #             elif raw_delta < 0.99:
-    #                 self._pinch_direction = 'out'
-    #             else:
-    #                 return  # Still undecided, wait for clearer delta
-
-    #         # Prevent reversal mid-gesture
-    #         if self._pinch_direction == 'in' and raw_delta < 1.0:
-    #             return
-    #         if self._pinch_direction == 'out' and raw_delta > 1.0:
-    #             return
-
-    #         # Smooth scaling
-    #         sensitivity = self.PINCH_SENSITIVITY
-    #         eased_delta = raw_delta ** sensitivity
-    #         smoothed_delta = 1.0 + (eased_delta - 1.0)
-
-    #         new_scale = self.current_scale * smoothed_delta
-
-    #         if self.MIN_SCALE <= new_scale <= self.MAX_SCALE:
-    #             self.scaleView(smoothed_delta)
-    #             self.current_scale = max(MIN_SCALE, min(new_scale, self.MAX_SCALE))
-
-    #         self._pinch_last_factor = scale_factor
-
-    #     elif pinch.state() in (Qt.GestureFinished, Qt.GestureCanceled):
-    #         self._gesture_active = False
-    #         self._pinch_direction = None
-    #         self._pinch_last_factor = 1.0
 
 
     def wheelEvent(self, event: QWheelEvent):

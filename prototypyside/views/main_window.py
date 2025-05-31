@@ -14,7 +14,7 @@ from PySide6.QtWidgets import (QMainWindow, QGraphicsView, QGraphicsItem, QDockW
                                QHBoxLayout, QDialog, QToolBar, QCheckBox)
 
 from PySide6.QtCore import Qt, Signal, Slot, QPointF, QRectF, QSizeF, QObject, QSize, QTimer, QCoreApplication, QEvent # Added QTimer, QCoreApplication, QEvent
-from PySide6.QtGui import QPainter, QImage, QPixmap, QFont, QColor, QAction, QIcon, QPdfWriter, QTextDocument, QKeySequence, QShortcut # Added QKeySequence, QShortcut
+from PySide6.QtGui import QPainter, QImage, QPixmap, QFont, QColor, QAction, QIcon, QPdfWriter, QTextDocument, QKeySequence, QShortcut, QMouseEvent # Added QKeySequence, QShortcut
 
 # Import views components
 from prototypyside.views.palettes import ComponentListWidget
@@ -27,8 +27,7 @@ from prototypyside.widgets.font_toolbar import FontToolBar
 # Import models
 from prototypyside.models.game_component_template import GameComponentTemplate
 from prototypyside.models.game_component_elements import (GameComponentElement, TextElement,
-                                                     ImageElement, LabelElement,
-                                                     ContainerElement)
+                                                     ImageElement)
 from prototypyside.views.graphics_view import DesignerGraphicsView
 from prototypyside.services.export_manager import ExportManager # NEW: Import ExportManager
 
@@ -37,6 +36,7 @@ from prototypyside.services.export_manager import ExportManager # NEW: Import Ex
 class MainDesignerWindow(QMainWindow):
     def __init__(self):
         super().__init__()
+        self.scene = None
         self.dpi = 72
         self.current_template = GameComponentTemplate(parent=self)
         self.merged_templates: List[GameComponentTemplate] = []
@@ -57,6 +57,19 @@ class MainDesignerWindow(QMainWindow):
         self.setup_status_bar() # Moved to after setup_ui calls so all elements are ready
         self.setup_shortcuts() # NEW: Setup keyboard shortcuts
 
+    @Slot()
+    def update_game_component_scene(self):
+        """Updates the scene dimensions and view based on the current template."""
+        if not self.scene or not self.current_template:
+            return
+
+        new_rect = QRectF(0, 0, self.current_template.width_px, self.current_template.height_px)
+        self.scene.set_template_dimensions(self.current_template.width_px, self.current_template.height_px)
+        self.view.setSceneRect(new_rect)
+        self.view.fitInView(new_rect, Qt.KeepAspectRatio)
+        self.scene.update()
+
+
     def set_cli_mode(self, mode: bool):
         self._cli_mode = mode
 
@@ -68,11 +81,9 @@ class MainDesignerWindow(QMainWindow):
         self.current_template.template_changed.connect(self.update_game_component_scene)
         self.current_template.element_z_order_changed.connect(self.update_layers_panel)
 
-        self.scene = GameComponentGraphicsScene(
-            self.current_template.width_px,
-            self.current_template.height_px,
-            self
-        )
+
+        scene_rect = QRectF(0, 0, self.current_template.width_px, self.current_template.height_px)
+        self.scene = GameComponentGraphicsScene(scene_rect, self)
 
         self.view = DesignerGraphicsView(self.scene)
         self.view.setRenderHints(QPainter.Antialiasing |
@@ -148,8 +159,6 @@ class MainDesignerWindow(QMainWindow):
         components = [
             ("Text Field", "TextElement", "T"),
             ("Image Container", "ImageElement", "🖼️"),
-            ("Static Label", "LabelElement", "🏷️"),
-            ("Data Container", "ContainerElement", "📦")
         ]
 
         for name, etype, icon in components:
@@ -475,52 +484,63 @@ class MainDesignerWindow(QMainWindow):
 
     @Slot()
     def new_template(self):
+        # Disconnect previous signals safely
         try:
             self.current_template.element_z_order_changed.disconnect(self.update_layers_panel)
             self.current_template.template_changed.disconnect(self.update_game_component_scene)
-            self.scene.selectionChanged.disconnect(self.on_selection_changed)
-            self.scene.element_dropped.disconnect(self.add_element_from_drop)
-        except (TypeError, RuntimeError):
+            if self.scene:
+                self.scene.selectionChanged.disconnect(self.on_selection_changed)
+                self.scene.element_dropped.disconnect(self.add_element_from_drop)
+        except (AttributeError, TypeError, RuntimeError):
             pass
 
+        # Clean up old scene and view
         if hasattr(self, 'scene') and self.scene:
             for item in self.scene.items():
                 self.scene.removeItem(item)
-            del self.scene
-        if hasattr(self, 'view') and self.view:
-            self.view.close()
-            self.view.deleteLater()
-            del self.view
+            self.scene.clear()
+            self.scene.deleteLater()
+            self.scene = None
 
+        if hasattr(self, 'view') and self.view:
+            self.view.setParent(None)
+            self.view.deleteLater()
+            self.view = None
+
+        # Create new template and reset merged templates
         self.current_template = GameComponentTemplate(parent=self)
         self.merged_templates = []
 
-        self.scene = GameComponentGraphicsScene(
-            self.current_template.width_px,
-            self.current_template.height_px,
-            self.dpi
-        )
+        # Create scene rect based on current template size
+        scene_rect = QRectF(0, 0, self.current_template.width_px, self.current_template.height_px)
+        self.scene = GameComponentGraphicsScene(scene_rect, self)
 
+        # Create and configure the view
         self.view = DesignerGraphicsView(self.scene)
-        self.view.setRenderHints(QPainter.Antialiasing | QPainter.TextAntialiasing | QPainter.SmoothPixmapTransform)
+        self.view.setRenderHints(
+            QPainter.Antialiasing |
+            QPainter.TextAntialiasing |
+            QPainter.SmoothPixmapTransform
+        )
         self.view.setDragMode(QGraphicsView.NoDrag)
         self.view.setAcceptDrops(True)
         self.view.viewport().setAcceptDrops(True)
-        self.view.setSceneRect(0, 0, self.current_template.width_px, self.current_template.height_px)
+        self.view.setSceneRect(scene_rect)
         self.setCentralWidget(self.view)
 
+        # Connect updated signals
         self.current_template.template_changed.connect(self.update_game_component_scene)
         self.current_template.element_z_order_changed.connect(self.update_layers_panel)
         self.scene.selectionChanged.connect(self.on_selection_changed)
         self.scene.element_dropped.connect(self.add_element_from_drop)
 
-        # self.game_component_width.setValue(self.current_template.width_in)
-        # self.game_component_height.setValue(self.current_template.height_in)
-
+        # Update view and UI
         self.on_selection_changed()
-        #self.view.fitInView(self.scene.sceneRect(), Qt.KeepAspectRatio)
+        self.view.fitInView(scene_rect, Qt.KeepAspectRatio)
+        self.scene.update()
 
         self.show_status_message("New template created.", "info")
+
 
     @Slot()
     def save_template(self):
@@ -635,7 +655,7 @@ class MainDesignerWindow(QMainWindow):
     @Slot(QFont)
     def on_font_toolbar_font_changed(self, font: QFont):
         element = self.get_selected_element()
-        if element and isinstance(element, (TextElement, LabelElement)):
+        if element and isinstance(element, TextElement):
             element.set_style_property('font', font)
 
     @Slot()
@@ -783,7 +803,7 @@ class MainDesignerWindow(QMainWindow):
             else:
                 self.alignment_combo.setCurrentIndex(4)
 
-            if isinstance(selected_element, (TextElement, LabelElement)):
+            if isinstance(selected_element, TextElement):
                 current_font = selected_element._style.get('font', QFont("Arial", 12))
                 if not isinstance(current_font, QFont):
                     current_font = QFont("Arial", 12)
@@ -832,7 +852,7 @@ class MainDesignerWindow(QMainWindow):
             else:
                 self.alignment_combo.setCurrentIndex(4)
 
-            if isinstance(element, (TextElement, LabelElement)):
+            if isinstance(element, TextElement):
                 current_font = element._style.get('font', QFont("Arial", 12))
                 if not isinstance(current_font, QFont):
                      current_font = QFont("Arial", 12)
@@ -895,32 +915,80 @@ class MainDesignerWindow(QMainWindow):
         if self.scene.selectedItems():
             self.scene.clearSelection()
 
-    @Slot(QPointF, str)
     def add_element_from_drop(self, scene_pos: QPointF, element_type: str):
         self.scene.clearSelection()
 
+        # Define default dimensions based on element type
         default_width, default_height = 100, 40
-        if element_type == "TextElement": default_width, default_height = 180, 60
-        elif element_type == "ImageElement": default_width, default_height = 200, 150
-        elif element_type == "LabelElement": default_width, default_height = 120, 30
-        elif element_type == "ContainerElement": default_width, default_height = 250, 200
+        if element_type == "TextElement":
+            default_width, default_height = 180, 60
+        elif element_type == "ImageElement":
+            default_width, default_height = 200, 150
 
+        # Generate a unique name for the new element
         base_name = f"{element_type.replace('Element', '').lower()}_"
         counter = 1
-        existing_names = {el.name for el in self.current_template.elements}
+        existing_names = {el.get_name() for el in self.current_template.elements}
         while f"{base_name}{counter}" in existing_names:
             counter += 1
         new_name = f"{base_name}{counter}"
 
+        # Always use a rect starting at (0,0) for the internal drawing space
         new_rect_local = QRectF(0, 0, default_width, default_height)
-        new_element = self.current_template.add_element(element_type, new_name, new_rect_local)
+
+        # Create the element using the GameComponentTemplate
+        new_element = self.current_template.add_element(
+            element_type, new_name, new_rect_local
+        )
+
+        # Add it to the scene
         self.scene.addItem(new_element)
 
-        center_offset_x = new_rect_local.width() / 2
-        center_offset_y = new_rect_local.height() / 2
-        new_element.setPos(scene_pos - QPointF(center_offset_x, center_offset_y))
+        # Snap top-left corner of visual bounds to grid
+        if self.snap_to_grid:
+            scene_pos = self.scene.snap_to_grid(scene_pos)
+
+        visual_offset = new_element.boundingRect().topLeft()
+        new_element.setPos(scene_pos - visual_offset)
 
         new_element.setSelected(True)
+
+    # @Slot(QPointF, str)
+    # def add_element_from_drop(self, scene_pos: QPointF, element_type: str):
+    #     self.scene.clearSelection()
+
+    #     # Define default dimensions based on element type
+    #     default_width, default_height = 100, 40
+    #     if element_type == "TextElement":
+    #         default_width, default_height = 180, 60
+    #     elif element_type == "ImageElement":
+    #         default_width, default_height = 200, 150
+
+    #     # Generate a unique name for the new element
+    #     base_name = f"{element_type.replace('Element', '').lower()}_"
+    #     counter = 1
+    #     existing_names = {el.get_name() for el in self.current_template.elements}
+    #     while f"{base_name}{counter}" in existing_names:
+    #         counter += 1
+    #     new_name = f"{base_name}{counter}"
+
+    #     # Always use a rect starting at (0,0) for the internal drawing space
+    #     new_rect_local = QRectF(0, 0, default_width, default_height)
+
+    #     # Create the element using the GameComponentTemplate
+    #     new_element = self.current_template.add_element(
+    #         element_type, new_name, new_rect_local
+    #     )
+
+    #     # Add it to the scene
+    #     self.scene.addItem(new_element)
+
+    #     # Center it at the drop position by offsetting by half the dimensions
+    #     center_offset = QPointF(default_width / 2, default_height / 2)
+    #     new_element.setPos(scene_pos - center_offset)
+
+    #     new_element.setSelected(True)
+
 
     @Slot()
     def update_game_component_dimensions(self):
@@ -1101,10 +1169,6 @@ class MainDesignerWindow(QMainWindow):
             self.show_status_message("Background image selection cancelled.", "info") # Status bar message for cancellation
 
     @Slot()
-    def update_game_component_scene(self):
-        self.scene.update()
-
-    @Slot()
     def load_csv_and_merge(self):
         path, _ = QFileDialog.getOpenFileName(
             self, "Open CSV Data for Merge", "", "CSV Files (*.csv)")
@@ -1280,9 +1344,10 @@ class MainDesignerWindow(QMainWindow):
 
     @Slot(int)
     def update_element_border_width(self, px: int):
+        style =  self._current_selected_element.get_style()
         if not self._current_selected_element:
             return
-        if hasattr(self._current_selected_element, 'set_border_width'):
+        if px != 0:
             self._current_selected_element.set_border_width(px)
             self._current_selected_element.element_changed.emit()
             self.scene.update()
