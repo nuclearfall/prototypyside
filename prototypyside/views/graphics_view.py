@@ -2,7 +2,7 @@
 # prototypyside/views/designer_graphics_view.py
 from PySide6.QtWidgets import QGraphicsView, QPinchGesture, QGestureEvent
 from PySide6.QtGui import QWheelEvent, QPainter, QTransform, QMouseEvent
-from PySide6.QtCore import Qt, QPointF, QEvent, QRectF, QSizeF, QObject, QVariantAnimation, QEasingCurve
+from PySide6.QtCore import Qt, QPointF, QEvent, QRectF, QSizeF, QObject, QVariantAnimation, QEasingCurve, QTimer
 import sys
 
 IS_MAC = sys.platform == 'darwin'

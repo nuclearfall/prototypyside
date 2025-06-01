@@ -1,8 +1,11 @@
 from PySide6.QtCore import Qt, QRectF, QPointF, Signal, QObject
 from PySide6.QtGui import QColor, QFont, QPen, QBrush, QPainter
-from PySide6.QtWidgets import QGraphicsItem
+from PySide6.QtWidgets import QGraphicsItem, QGraphicsSceneDragDropEvent
 from typing import Optional, Dict, Any
 from prototypyside.views.graphics_items import ResizeHandle
+from prototypyside.utils.qt_helpers import qrectf_to_list, list_to_qrectf
+from prototypyside.utils.unit_converter import parse_dimension, format_dimension
+from prototypyside.utils.style_serialization_helpers import save_style, load_style
 from prototypyside.config import HandleType
 
 
@@ -12,19 +15,17 @@ class GameComponentElement(QGraphicsItem, QObject):
     def __init__(self, name: str, rect: QRectF, parent_qobject: Optional[QObject] = None):
         QObject.__init__(self, parent_qobject)
         QGraphicsItem.__init__(self)
-
+        self.element_type = None
         self.name = name
         self._rect = QRectF(0, 0, rect.width(), rect.height())
         self.setPos(rect.topLeft())
 
-        self._style: Dict[str, Any] = {
-            'font': QFont("Arial", 12),
-            'color': QColor(0, 0, 0),
-            'bg_color': QColor(255, 255, 255, 0),
-            'border_color': QColor(0, 0, 0),
-            'border_width': 1,
-            'alignment': Qt.AlignCenter
-        }
+        self._style = {
+                'color': QColor(0, 0, 0),
+                'bg_color': QColor(255, 255, 255, 0),
+                'border_color': QColor(0, 0, 0),
+                'border_width': "1 px",
+            }
 
         self._content: Optional[str] = None
 
@@ -51,32 +52,68 @@ class GameComponentElement(QGraphicsItem, QObject):
         return self._rect
         
     def paint(self, painter: QPainter, option, widget=None):
-        painter.setBrush(QBrush(self._style.get("bg_color")))
+        # Fill background
+        bg_color = self._style.get("bg_color", QColor(255, 255, 255, 0))
+        if not isinstance(bg_color, QColor):
+            bg_color = QColor(bg_color)  # fallback
+        painter.setBrush(QBrush(bg_color))
         painter.setPen(Qt.NoPen)
         painter.drawRect(self._rect)
 
-        border_width = self._style.get("border_width", 0)
+        # Draw border if specified
+        raw_border_width = self._style.get("border_width", "0")
+        try:
+            border_width = parse_dimension(self.get_border_width())
+        except (ValueError, TypeError):
+            border_width = 0
+
         if border_width > 0:
-            pen = QPen(self._style.get("border_color", Qt.black))
+            border_color = self._style.get("border_color", QColor(0, 0, 0))
+            if not isinstance(border_color, QColor):
+                border_color = QColor(border_color)
+            pen = QPen(border_color)
             pen.setWidthF(border_width)
             painter.setPen(pen)
             painter.setBrush(Qt.NoBrush)
             painter.drawRect(self._rect)
 
+        # Optional: draw resize handles
         if self.handles_visible:
             self.draw_handles()
 
     def to_dict(self) -> Dict[str, Any]:
+        style_data = save_style(self._style)
         return {
             'type': self.__class__.__name__,
             'name': self.name,
             'rect': [self._rect.x(), self._rect.y(), self._rect.width(), self._rect.height()],
             'content': self._content,
-            'style': self._style,
+            'style': style_data,
             'pos_x': self.pos().x(),
             'pos_y': self.pos().y(),
             'z_value': self.zValue()
         }
+
+    @classmethod
+    def from_dict(cls, data: Dict[str, Any], parent_qobject: Optional[QObject] = None) -> "GameComponentElement":
+        from prototypyside.models.game_component_elements import create_element  # Avoid circular import
+
+        name = data.get("name", "unnamed")
+        rect = list_to_qrectf(data.get("rect", [0, 0, 100, 40]))
+        element_type = data.get("type")
+
+        # Use existing factory to create the correct subclass
+        element = create_element(element_type, name, rect, parent_qobject)
+
+        # Populate fields
+        element._content = data.get("content")
+        style_patch = load_style(data.get("style", {}))
+        element._style.update(style_patch)
+        element.setPos(QPointF(data.get("pos_x", 0), data.get("pos_y", 0)))
+        element.setZValue(data.get("z_value", 0))
+
+        return element
+
 
     def set_content(self, content: str):
         self._content = content
@@ -149,6 +186,7 @@ class GameComponentElement(QGraphicsItem, QObject):
             handle = self._handles.get(handle_type)
             if handle:
                 handle.setPos(pos)
+
     def resize_from_handle(self, handle: ResizeHandle, delta: QPointF, start_scene_rect: QRectF):
         self.prepareGeometryChange()
 
@@ -207,10 +245,25 @@ class GameComponentElement(QGraphicsItem, QObject):
         self.update_handles()
         self.element_changed.emit()
 
+    def clone(self):
+        """Clone the element via its serialized dictionary structure."""
+        data = self.to_dict()
+        data["name"] = f"{data['name']}_copy" if "name" in data else "unnamed_copy"
+        return type(self).from_dict(data)
 
 
 
 class TextElement(GameComponentElement):
+    def __init__(self, name: str, rect: QRectF, parent_qobject: Optional[QObject] = None):
+        super().__init__(name, rect, parent_qobject)
+
+        self.element_type = "TextElement"
+        self._style.update({
+            'font': QFont("Arial", 12),
+            'color': QColor(0, 0, 0),
+            'alignment': Qt.AlignCenter,
+        })
+
     def paint(self, painter: QPainter, option, widget=None):
         super().paint(painter, option, widget)
         painter.setFont(self._style.get("font", QFont("Arial", 12)))
@@ -223,11 +276,18 @@ class TextElement(GameComponentElement):
 class ImageElement(GameComponentElement):
     def __init__(self, name: str, rect: QRectF, parent_qobject: Optional[QObject] = None):
         super().__init__(name, rect, parent_qobject)
+
+        self.element_type = "ImageElement"
         self._pixmap: Optional[QPixmap] = None
-        self._original_content: Optional[str] = None
+        self._content: Optional[str] = None
+        self._style.update({
+            'maintain_aspect': True,
+            'alignment': Qt.AlignCenter,
+        })
+        self.setAcceptDrops(True)
 
     def set_content(self, content: str):
-        self._original_content = content
+        self._content = content
         try:
             pixmap = QPixmap(content)
             self._pixmap = pixmap if not pixmap.isNull() else None
@@ -238,15 +298,56 @@ class ImageElement(GameComponentElement):
 
     def paint(self, painter: QPainter, option, widget=None):
         super().paint(painter, option, widget)
+
         if self._pixmap:
-            scaled = self._pixmap.scaled(self._rect.size().toSize(), Qt.KeepAspectRatio, Qt.SmoothTransformation)
-            x = self._rect.x() + (self._rect.width() - scaled.width()) / 2
-            y = self._rect.y() + (self._rect.height() - scaled.height()) / 2
-            painter.drawPixmap(QPointF(x, y), scaled)
+            if self._style.get("maintain_aspect", True):
+                scaled = self._pixmap.scaled(
+                    self._rect.size().toSize(),
+                    Qt.KeepAspectRatio,
+                    Qt.SmoothTransformation
+                )
+                x = self._rect.x() + (self._rect.width() - scaled.width()) / 2
+                y = self._rect.y() + (self._rect.height() - scaled.height()) / 2
+                painter.drawPixmap(QPointF(x, y), scaled)
+            else:
+                painter.drawPixmap(self._rect.topLeft(), self._pixmap.scaled(
+                    self._rect.size().toSize(),
+                    Qt.IgnoreAspectRatio,
+                    Qt.SmoothTransformation
+                ))
         else:
+            # Draw placeholder box and prompt
             painter.setPen(QPen(Qt.gray, 1, Qt.DashLine))
+            painter.setBrush(Qt.NoBrush)
             painter.drawRect(self._rect)
-            painter.drawText(self._rect, Qt.AlignCenter, "Image\n(Not Found)")
+
+            painter.setPen(QPen(Qt.darkGray))
+            font = painter.font()
+            font.setPointSize(10)
+            font.setItalic(True)
+            painter.setFont(font)
+
+            placeholder_text = "Drop Image\nor Double Click to Set"
+            painter.drawText(self._rect, Qt.AlignCenter, placeholder_text)
+
+    def dragEnterEvent(self, event: QGraphicsSceneDragDropEvent):
+        if event.mimeData().hasUrls():
+            event.acceptProposedAction()
+
+    def dropEvent(self, event: QGraphicsSceneDragDropEvent):
+        if event.mimeData().hasUrls():
+            url = event.mimeData().urls()[0]
+            file_path = url.toLocalFile()
+            if file_path.lower().endswith((".png", ".jpg", ".jpeg", ".bmp", ".gif")):
+                self.set_content(file_path)
+            event.acceptProposedAction()
+
+    def mouseDoubleClickEvent(self, event):
+        from PySide6.QtWidgets import QFileDialog
+        path, _ = QFileDialog.getOpenFileName(None, "Select Image", "", "Images (*.png *.jpg *.bmp *.gif)")
+        if path:
+            self.set_content(path)
+    
 
 def create_element(element_type: str, name: str, rect: QRectF, parent_qobject: Optional[QObject] = None) -> GameComponentElement:
     if element_type == "TextElement":

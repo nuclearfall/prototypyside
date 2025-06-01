@@ -1,20 +1,19 @@
 # prototypyside/models/game_component_template.py (REVISED to inherit QObject)
 
-from PySide6.QtCore import QObject, QRectF, Signal # Import QObject and Signal
+from PySide6.QtCore import Qt, QObject, QRectF, QPointF, Signal # Import QObject and Signal
+from PySide6.QtGui import QPainter, QPixmap, QColor, QImage
+from PySide6.QtWidgets import QGraphicsItem
 from typing import List, Dict, Any, Optional, TYPE_CHECKING
 import csv
 import json
 from pathlib import Path
 from PySide6.QtWidgets import QMessageBox
 
-from prototypyside.models.game_component_elements import create_element
-# Use TYPE_CHECKING for type hinting
-if TYPE_CHECKING:
-    from prototypyside.models.game_component_elements import GameComponentElement
-else:
-    GameComponentElement = object
 
+from prototypyside.models.game_component_elements import create_element
 from prototypyside.utils.qt_helpers import list_to_qrectf
+# Use TYPE_CHECKING for type hinting
+from prototypyside.models.game_component_elements import GameComponentElement
 
 
 class GameComponentTemplate(QObject): # NOW INHERITS QObject
@@ -23,8 +22,8 @@ class GameComponentTemplate(QObject): # NOW INHERITS QObject
 
     def __init__(self, width=2.5, height=3.5, dpi=300, parent: QObject = None): # Add parent arg
         super().__init__(parent) # Call QObject's init with parent
-        self.width_in = width
-        self.height_in = height
+        self.width_in = parse_dimension(width) if isinstance(width, str) else float(width)
+        self.height_in = parse_dimension(height) if isinstance(height, str) else float(height)
         self.dpi = dpi
         self.elements: List['GameComponentElement'] = []
         self.background_image_path: Optional[str] = None
@@ -46,7 +45,7 @@ class GameComponentTemplate(QObject): # NOW INHERITS QObject
     def add_element(self, element_type: str, name: str, rect: QRectF) -> 'GameComponentElement':
         from prototypyside.models.game_component_elements import GameComponentElement
         # element = GameComponentElement.create(element_type, name, rect, self) # Pass self (QObject) as parent_qobject
-        element = create_element(element_type, name, rect, self)
+        element = create_element(element_type, name, rect, parent_qobject=self)
         max_z = max([e.zValue() for e in self.elements] + [0]) if self.elements else 0
         element.setZValue(max_z + 100)
         self.elements.append(element)
@@ -66,25 +65,25 @@ class GameComponentTemplate(QObject): # NOW INHERITS QObject
             self.template_changed.emit() # Re-add signal emission
             self.element_z_order_changed.emit() # Re-add signal emission
 
-    # def load_csv(self, filepath: str):
-    #     try:
-    #         with open(filepath, newline='', encoding='utf-8') as csvfile:
-    #             reader = csv.DictReader(csvfile)
-    #             data_rows = list(reader)
-    #             if not data_rows:
-    #                 QMessageBox.warning(None, "CSV Load Error", "The CSV file is empty or has no data rows.")
-    #                 return
+    def load_csv(self, filepath: str):
+        try:
+            with open(filepath, newline='', encoding='utf-8') as csvfile:
+                reader = csv.DictReader(csvfile)
+                data_rows = list(reader)
+                if not data_rows:
+                    QMessageBox.warning(None, "CSV Load Error", "The CSV file is empty or has no data rows.")
+                    return
 
-    #             data_row = data_rows[0]
-    #             for element in self.elements:
-    #                 if element.name in data_row:
-    #                     element.set_content(data_row[element.name])
-    #         self.template_changed.emit() # Re-add signal emission
-    #     except FileNotFoundError:
-    #         QMessageBox.warning(None, "CSV Load Error", f"File not found: {filepath}")
-    #     except Exception as e:
-    #         QMessageBox.critical(None, "CSV Load Error", f"An error occurred: {str(e)}")
-    #         print(f"CSV Load Error: {str(e)}")
+                data_row = data_rows[0]
+                for element in self.elements:
+                    if element.name in data_row:
+                        element.set_content(data_row[element.name])
+            self.template_changed.emit() # Re-add signal emission
+        except FileNotFoundError:
+            QMessageBox.warning(None, "CSV Load Error", f"File not found: {filepath}")
+        except Exception as e:
+            QMessageBox.critical(None, "CSV Load Error", f"An error occurred: {str(e)}")
+            print(f"CSV Load Error: {str(e)}")
 
     def set_background_image(self, path: str):
         if Path(path).exists():
@@ -100,39 +99,32 @@ class GameComponentTemplate(QObject): # NOW INHERITS QObject
             'height_in': self.height_in,
             'dpi': self.dpi,
             'background_image_path': self.background_image_path,
-            'elements': [element.to_dict() for element in self.elements]
+            'elements': [e.to_dict() for e in self.elements]
         }
-
+        
     @classmethod
-    def from_dict(cls, data: Dict[str, Any], parent: QObject = None) -> 'GameComponentTemplate': # Add parent arg
+    def from_dict(cls, data: Dict[str, Any], parent: QObject = None) -> 'GameComponentTemplate':
         template = cls(
             width=data.get('width_in', 2.5),
             height=data.get('height_in', 3.5),
             dpi=data.get('dpi', 300),
-            parent=parent # Pass parent to constructor
+            parent=parent
         )
         template.background_image_path = data.get('background_image_path')
 
-        from prototypyside.models.game_component_elements import GameComponentElement
-
-        loaded_elements = []
         for element_data in data.get('elements', []):
-            element_type = element_data.get('type')
-            name = element_data.get('name')
-            rect_data = element_data.get('rect')
-            content = element_data.get('content')
-            style_data = element_data.get('style')
-            pos_x = element_data.get('pos_x')
-            pos_y = element_data.get('pos_y')
-            z_value = element_data.get('z_value', 0)
+            element_type = element_data.get("type")
+            if not element_type:
+                continue
 
-            if all([element_type, name, rect_data]):
-                rect = list_to_qrectf(rect_data)
-                element = GameComponentElement.from_dict(element_data, template, parent)
-                loaded_elements.append(element)
+            # Dispatch to correct class via base class factory method
+            element = GameComponentElement.from_dict(element_data, parent_qobject=template)
+            template.elements.append(element)
 
-        template.elements = sorted(loaded_elements, key=lambda e: e.zValue())
+        template.elements.sort(key=lambda e: e.zValue())
+        template.template_changed.emit()
         return template
+
 
     def reorder_element_z(self, element: 'GameComponentElement', direction: int):
         if element not in self.elements:

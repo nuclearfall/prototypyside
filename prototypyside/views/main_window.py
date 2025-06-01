@@ -21,9 +21,11 @@ from prototypyside.views.palettes import ComponentListWidget
 from prototypyside.views.layers_panel import LayersListWidget
 from prototypyside.views.graphics_scene import GameComponentGraphicsScene
 
+from prototypyside.widgets.page_size_dialog import PageSizeDialog
 from prototypyside.widgets.unit_field import UnitField
 from prototypyside.widgets.font_toolbar import FontToolBar
-
+from prototypyside.widgets.page_size_selector import PageSizeSelector
+from prototypyside.widgets.pdf_export_dialog import PDFExportDialog
 # Import models
 from prototypyside.models.game_component_template import GameComponentTemplate
 from prototypyside.models.game_component_elements import (GameComponentElement, TextElement,
@@ -66,7 +68,7 @@ class MainDesignerWindow(QMainWindow):
         new_rect = QRectF(0, 0, self.current_template.width_px, self.current_template.height_px)
         self.scene.set_template_dimensions(self.current_template.width_px, self.current_template.height_px)
         self.view.setSceneRect(new_rect)
-        self.view.fitInView(new_rect, Qt.KeepAspectRatio)
+        # self.view.fitInView(new_rect, Qt.KeepAspectRatio)
         self.scene.update()
 
 
@@ -536,10 +538,11 @@ class MainDesignerWindow(QMainWindow):
 
         # Update view and UI
         self.on_selection_changed()
-        self.view.fitInView(scene_rect, Qt.KeepAspectRatio)
+
         self.scene.update()
 
         self.show_status_message("New template created.", "info")
+        QTimer.singleShot(0, lambda: self.view.fitInView(self.scene.sceneRect(), Qt.KeepAspectRatio))
 
 
     @Slot()
@@ -573,7 +576,7 @@ class MainDesignerWindow(QMainWindow):
                 self.merged_templates = []
 
                 self.show_status_message(f"Template loaded from {path}", "success")
-                self.view.fitInView(self.scene.sceneRect(), Qt.KeepAspectRatio)
+  
             except json.JSONDecodeError:
                 QMessageBox.critical(self, "Load Error", "Invalid JSON file.")
                 self.show_status_message("Load Error: Invalid JSON file.", "error")
@@ -582,55 +585,66 @@ class MainDesignerWindow(QMainWindow):
                 self.show_status_message(f"Error loading template: {e}", "error")
 
     def load_template_instance(self, new_template: GameComponentTemplate):
-        try:
-            self.current_template.element_z_order_changed.disconnect(self.update_layers_panel)
-            self.current_template.template_changed.disconnect(self.update_game_component_scene)
-            self.scene.selectionChanged.disconnect(self.on_selection_changed)
-            self.scene.element_dropped.disconnect(self.add_element_from_drop)
-        except (TypeError, RuntimeError):
-            pass
-
+        # Clean up old scene and view
         if hasattr(self, 'scene') and self.scene:
             for item in self.scene.items():
                 self.scene.removeItem(item)
             del self.scene
+
         if hasattr(self, 'view') and self.view:
             self.view.close()
             self.view.deleteLater()
             del self.view
 
+        # Disconnect old template signals
+        try:
+            self.current_template.element_z_order_changed.disconnect(self.update_layers_panel)
+            self.current_template.template_changed.disconnect(self.update_game_component_scene)
+        except (TypeError, RuntimeError):
+            pass
+
+        # Disconnect old scene signals if it exists
+        try:
+            self.scene.selectionChanged.disconnect(self.on_selection_changed)
+            self.scene.element_dropped.disconnect(self.add_element_from_drop)
+        except (AttributeError, TypeError, RuntimeError):
+            pass
+
+        # Replace current template
         self.current_template = new_template
 
+        # Create new scene and view
         self.scene = GameComponentGraphicsScene(
-            self.current_template.width_px,
-            self.current_template.height_px,
-            self
+            QRectF(0, 0, self.current_template.width_px, self.current_template.height_px),
+            parent=self
         )
-
         self.view = DesignerGraphicsView(self.scene)
 
-        self.view.setRenderHints(QPainter.Antialiasing | QPainter.TextAntialiasing | QPainter.SmoothPixmapTransform)
+        # Configure view
+        self.view.setRenderHints(
+            QPainter.Antialiasing | QPainter.TextAntialiasing | QPainter.SmoothPixmapTransform
+        )
         self.view.setDragMode(QGraphicsView.NoDrag)
         self.view.setAcceptDrops(True)
         self.view.viewport().setAcceptDrops(True)
         self.setCentralWidget(self.view)
 
+        # Connect new signals
         self.current_template.template_changed.connect(self.update_game_component_scene)
         self.current_template.element_z_order_changed.connect(self.update_layers_panel)
         self.scene.selectionChanged.connect(self.on_selection_changed)
         self.scene.element_dropped.connect(self.add_element_from_drop)
 
+        # Add template elements to scene
         for element in self.current_template.elements:
             self.scene.addItem(element)
 
+        # Set scene rect and refresh selection panel
         self.view.setSceneRect(0, 0, self.current_template.width_px, self.current_template.height_px)
-        self.setCentralWidget(self.view)
-
-
-        # self.game_component_width.setValue(self.current_template.width_in)
-        # self.game_component_height.setValue(self.current_template.height_in)
-
+        # Update UI panels
+        self.update_layers_panel()
         self.on_selection_changed()
+        QTimer.singleShot(0, lambda: self.view.fitInView(self.scene.sceneRect(), Qt.KeepAspectRatio))
 
 
     def get_selected_element(self) -> Optional['GameComponentElement']:
@@ -707,8 +721,6 @@ class MainDesignerWindow(QMainWindow):
             self.current_template.width_px,
             self.current_template.height_px
         )
-
-        QTimer.singleShot(0, lambda: self.view.fitInView(self.scene.sceneRect(), Qt.KeepAspectRatio))
 
         self.scene.update()
         self.view.update()
@@ -1006,7 +1018,7 @@ class MainDesignerWindow(QMainWindow):
         self.scene.setSceneRect(new_scene_rect)
         self.view.setSceneRect(new_scene_rect)
 
-        self.view.fitInView(self.scene.sceneRect(), Qt.KeepAspectRatio)
+        # self.view.fitInView(self.scene.sceneRect(), Qt.KeepAspectRatio)
 
         self.current_template.template_changed.emit()
 
@@ -1311,6 +1323,8 @@ class MainDesignerWindow(QMainWindow):
         else:
             self.show_status_message("PNG Export Failed.", "error")
 
+
+
     @Slot()
     def export_pdf_gui(self):
         templates_to_export = self.merged_templates if self.merged_templates else [self.current_template]
@@ -1319,20 +1333,29 @@ class MainDesignerWindow(QMainWindow):
             self.show_status_message("PDF Export Failed: No templates to export.", "error")
             return
 
-        path_str, _ = QFileDialog.getSaveFileName(
-            self, "Export to PDF", "merged_output.pdf", "PDF Files (*.pdf)") # Suggest merged_output.pdf by default
-        
-        if not path_str:
+        dialog = PDFExportDialog(self)
+        if not dialog.exec():
             self.show_status_message("PDF Export cancelled.", "info")
             return
 
-        output_file_path = Path(path_str)
+        filenames = dialog.selectedFiles()
+        if not filenames:
+            self.show_status_message("PDF Export cancelled.", "info")
+            return
 
-        if self.export_manager.export_pdf(templates_to_export, output_file_path=output_file_path, is_cli_mode=False):
+        output_file_path = Path(filenames[0])
+        page_size = dialog.get_page_size()
+
+        if self.export_manager.export_pdf(
+            templates_to_export,
+            output_file_path=output_file_path,
+            page_size=page_size,
+            is_cli_mode=False
+        ):
             self.show_status_message(f"Successfully exported PDF to {output_file_path.resolve()}", "success")
         else:
             QMessageBox.critical(self, "PDF Export Error", "An error occurred during PDF export.")
-            self.show_status_message(f"PDF Export Failed.", "error")
+            self.show_status_message("PDF Export Failed.", "error")
 
 
     # --- CLI Export Methods (public for main.py to call) ---

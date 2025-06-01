@@ -1,7 +1,7 @@
 from PySide6.QtWidgets import QGraphicsItem
 
-def has_flag(item: QGraphicsItem, flag: QGraphicsItem.GraphicsItemFlag) -> bool:
-    return bool(item.flags() & flag)
+def has_flag(item, flag):
+    return bool(item and item.flags() & flag)
 
 def set_flag(item: QGraphicsItem, flag: QGraphicsItem.GraphicsItemFlag, enabled: bool = True):
     item.setFlag(flag, enabled)

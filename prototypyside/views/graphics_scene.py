@@ -13,6 +13,7 @@ from prototypyside.views.graphics_items import ResizeHandle
 from typing import Optional, TYPE_CHECKING
 import math
 
+from prototypyside.utils.qt_helpers import list_to_qrectf
 if TYPE_CHECKING:
     from prototypyside.views.main_window import MainDesignerWindow
     from prototypyside.models.game_component_template import GameComponentTemplate
@@ -49,6 +50,8 @@ class GameComponentGraphicsScene(QGraphicsScene):
         self.connecting_line: Optional[QGraphicsRectItem] = None
         self._dragging_item = None
         self._drag_offset = None
+        self.is_duplicating = False
+        self.duplicate_element = None
 
         self.setSceneRect(0, 0, self._template_width_px, self._template_height_px)
 
@@ -136,13 +139,6 @@ class GameComponentGraphicsScene(QGraphicsScene):
         x = math.floor(pos.x() / spacing) * spacing
         y = math.floor(pos.y() / spacing) * spacing
         return QPointF(x, y)
-    # def snap_to_grid(self, pos: QPointF) -> QPointF:
-    #     if not self.is_snap_to_grid:
-    #         return pos
-    #     spacing = self.get_grid_spacing()
-    #     x = round(pos.x() / spacing) * spacing
-    #     y = round(pos.y() / spacing) * spacing
-    #     return QPointF(x, y)
 
     def apply_snap(self, pos: QPointF, grid_size: float = 10.0) -> QPointF:
         return self.snap_to_grid(pos, grid_size)
@@ -150,6 +146,7 @@ class GameComponentGraphicsScene(QGraphicsScene):
     def mousePressEvent(self, event: QGraphicsSceneMouseEvent):
         item = self.itemAt(event.scenePos(), self.views()[0].transform())
 
+        # Handle resize logic (unchanged)
         if isinstance(item, ResizeHandle):
             self._resizing = True
             self.resize_handle = item
@@ -158,11 +155,21 @@ class GameComponentGraphicsScene(QGraphicsScene):
             self.resize_start_scene_rect = self.resizing_element.sceneBoundingRect()
             return
 
-        if is_movable(item):
+        # Option-key duplication
+        if event.modifiers() & Qt.AltModifier and is_movable(item):
+            clone = item.clone()
+            clone.setPos(item.pos())
+            self.addItem(clone)
+            self.clearSelection()
+            clone.setSelected(True)
+            self._dragging_item = clone
+            self._drag_offset = event.scenePos() - clone.pos()
+        elif is_movable(item):
             self._dragging_item = item
             self._drag_offset = event.scenePos() - item.pos()
 
         super().mousePressEvent(event)
+
 
 
     def mouseMoveEvent(self, event: QGraphicsSceneMouseEvent):
@@ -197,41 +204,6 @@ class GameComponentGraphicsScene(QGraphicsScene):
 
         super().mouseReleaseEvent(event)
 
-    # def mousePressEvent(self, event: QGraphicsSceneMouseEvent):
-    #     item = self.itemAt(event.scenePos(), self.views()[0].transform())
-
-    #     if isinstance(item, ResizeHandle):
-    #         self._resizing = True
-    #         self.resize_handle = item
-    #         self.resizing_element = item.parentItem()
-    #         self.resize_start_scene_pos = event.scenePos()
-    #         self.resize_start_scene_rect = self.resizing_element.sceneBoundingRect()  # ✅ Accurate global bounds
-    #         return  # Skip default to prevent selection change
-
-    #     super().mousePressEvent(event)
-
-
-    # def mouseMoveEvent(self, event: QGraphicsSceneMouseEvent):
-    #     if self._resizing and self.resizing_element:
-    #         delta = event.scenePos() - self.resize_start_scene_pos
-    #         self.resizing_element.resize_from_handle(
-    #             self.resize_handle,
-    #             delta,
-    #             self.resize_start_scene_rect
-    #         )
-    #         return
-
-    #     super().mouseMoveEvent(event)
-
-    # def mouseReleaseEvent(self, event: QGraphicsSceneMouseEvent):
-    #     if self._resizing:
-    #         self._resizing = False
-    #         self.resize_handle = None
-    #         self.resizing_element = None
-    #         self.resize_start_scene_pos = None
-    #         self.resize_start_scene_rect = None
-
-    #     super().mouseReleaseEvent(event)
 
     def dragEnterEvent(self, event: QGraphicsSceneDragDropEvent):
         if event.mimeData().hasFormat('text/plain'):
@@ -251,8 +223,17 @@ class GameComponentGraphicsScene(QGraphicsScene):
             scene_pos = event.scenePos()
             self.element_dropped.emit(scene_pos, element_type)
             event.acceptProposedAction()
+        elif event.mimeData().hasUrls():
+            # Let the item at the drop location handle the event
+            item = self.itemAt(event.scenePos(), QTransform())
+            if item and item.flags() & QGraphicsItem.ItemIsSelectable:
+                # Forward the event manually to the item
+                item.dropEvent(event)
+            else:
+                super().dropEvent(event)
         else:
             super().dropEvent(event)
+
 
     def get_selected_element(self) -> Optional['GameComponentElement']:
         selected_items = self.selectedItems()
