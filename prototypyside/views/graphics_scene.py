@@ -33,6 +33,9 @@ class GameComponentGraphicsScene(QGraphicsScene):
         self._template_width_px = int(scene_rect.width())
         self._template_height_px = int(scene_rect.height())
         self.setBackgroundBrush(QColor(240, 240, 240))
+
+        self._alt_drag_duplicate = None
+        self._alt_drag_started = False
         self._resizing = False
         self._dragging_item = None
         self._drag_offset = None
@@ -170,7 +173,15 @@ class GameComponentGraphicsScene(QGraphicsScene):
 
         super().mousePressEvent(event)
 
+    def _generate_unique_name(self, template, base_name):
+        existing_names = {e.name for e in template.elements}
+        if base_name not in existing_names:
+            return base_name
 
+        counter = 1
+        while f"{base_name}_{counter}" in existing_names:
+            counter += 1
+        return f"{base_name}_{counter}"
 
     def mouseMoveEvent(self, event: QGraphicsSceneMouseEvent):
         if self._resizing and self.resizing_element:
@@ -183,6 +194,28 @@ class GameComponentGraphicsScene(QGraphicsScene):
             return
 
         elif self._dragging_item:
+            if event.modifiers() & Qt.AltModifier and not self._alt_drag_started:
+                self._alt_drag_started = True
+
+                if hasattr(self._dragging_item, 'to_dict') and hasattr(self._dragging_item, 'template'):
+                    orig_item = self._dragging_item
+                    template = orig_item.template
+
+                    element_dict = orig_item.to_dict()
+                    element_dict["name"] = self._generate_unique_name(template, element_dict["name"])
+
+                    new_item = type(orig_item).from_dict(element_dict, parent_qobject=template)
+                    template.add_element(new_item)
+
+                    new_item.setPos(orig_item.pos() + QPointF(10, 10))  # Offset to visualize the duplication
+                    self.clearSelection()
+                    new_item.setSelected(True)
+
+                    self._dragging_item = new_item
+                    self._was_dragging = True
+                    return  # Don't reposition just yet — wait for next move event
+
+            # Regular or post-duplicate dragging
             new_pos = event.scenePos() - self._drag_offset
             if self.is_snap_to_grid:
                 new_pos = self.snap_to_grid(new_pos)
@@ -193,6 +226,7 @@ class GameComponentGraphicsScene(QGraphicsScene):
         super().mouseMoveEvent(event)
 
 
+
     def mouseReleaseEvent(self, event: QGraphicsSceneMouseEvent):
         self._dragging_item = None
         self._drag_offset = None
@@ -201,6 +235,8 @@ class GameComponentGraphicsScene(QGraphicsScene):
         self.resizing_element = None
         self.resize_start_scene_rect = None
         self.resize_start_scene_pos = None
+        self._alt_drag_duplicate = None
+        self._alt_drag_started = False
 
         super().mouseReleaseEvent(event)
 
