@@ -1,0 +1,14 @@
+__pycache__/
+*.pyc
+*.bak
+*.db
+*.sqlite3
+*.pdf
+*.png
+*.jpg
+venv/
+.DS_Store
+*.sublime-project
+*.sublime-workspace
+build/
+dist/
