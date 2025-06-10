@@ -9,7 +9,7 @@ HANDLE_SIZE = 8
 HANDLE_COLOR = QColor(0, 120, 215)
 HANDLE_GRAB_WIDTH = 10 # Larger grab area for handles
 
-MEASURE_INCREMENT = {"cm": 0.5, "in": 0.25, "\"": 0.25, "px": 20}
+MEASURE_INCREMENT = {"cm": 0.20, "in": 0.0625, "\"": 0.0625, "px": 20}
 MEASURE_ADJUSTMENT = {"cm": 0.05, "in": 0.0125, "px": 5}
 
 # Define handle positions for clarity

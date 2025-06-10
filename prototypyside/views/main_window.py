@@ -23,29 +23,30 @@ from prototypyside.views.graphics_scene import GameComponentGraphicsScene
 
 from prototypyside.widgets.page_size_dialog import PageSizeDialog
 from prototypyside.widgets.unit_field import UnitField
-from prototypyside.widgets.font_toolbar import FontToolBar
+from prototypyside.widgets.font_toolbar import FontToolbar
 from prototypyside.widgets.page_size_selector import PageSizeSelector
 from prototypyside.widgets.pdf_export_dialog import PDFExportDialog
 # Import models
 from prototypyside.models.game_component_template import GameComponentTemplate
 from prototypyside.models.game_component_elements import (GameComponentElement, TextElement,
                                                      ImageElement)
+from prototypyside.services.app_settings import AppSettings
 from prototypyside.views.graphics_view import DesignerGraphicsView
 from prototypyside.services.export_manager import ExportManager # NEW: Import ExportManager
-
+from prototypyside.services.property_setter import PropertySetter 
+from prototypyside.widgets.property_panel import PropertyPanel
 
 
 class MainDesignerWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.scene = None
-        self.dpi = 72
+        self.settings = AppSettings(unit='px', display_dpi=300, print_dpi=300)
         self.current_template = GameComponentTemplate(parent=self)
         self.merged_templates: List[GameComponentTemplate] = []
         self.setWindowTitle("Professional Game Component Designer")
         self.resize(1400, 900)
         self.setMinimumSize(800, 600)
-        self.current_unit = 'px'
 
         self._current_selected_element: Optional['GameComponentElement'] = None
         self.palette_dock: Optional[QDockWidget] = None
@@ -59,6 +60,28 @@ class MainDesignerWindow(QMainWindow):
         self.setup_status_bar() # Moved to after setup_ui calls so all elements are ready
         self.setup_shortcuts() # NEW: Setup keyboard shortcuts
 
+    def on_property_changed(self, change):
+        element = self.get_selected_element()
+        if not element or not change:
+            return
+            
+        setter = PropertySetter(element, self.settings, self.scene)
+        
+        if isinstance(change, tuple) and len(change) == 2:
+            prop, value = change
+            setter_fn = getattr(setter, f"set_{prop}", None)
+            if callable(setter_fn):
+                setter_fn(value)
+            else:
+                print(f"No setter for: {prop}")
+
+    def update_property_panel(self):
+        """Refresh property panel when selection changes"""
+        element = self.get_selected_element()
+        self.property_panel.set_target(element)
+        if element:
+            self.property_panel.refresh()
+
     @Slot()
     def update_game_component_scene(self):
         """Updates the scene dimensions and view based on the current template."""
@@ -70,6 +93,7 @@ class MainDesignerWindow(QMainWindow):
         self.view.setSceneRect(new_rect)
         # self.view.fitInView(new_rect, Qt.KeepAspectRatio)
         self.scene.update()
+
 
 
     def set_cli_mode(self, mode: bool):
@@ -85,7 +109,7 @@ class MainDesignerWindow(QMainWindow):
 
 
         scene_rect = QRectF(0, 0, self.current_template.width_px, self.current_template.height_px)
-        self.scene = GameComponentGraphicsScene(scene_rect, self)
+        self.scene = GameComponentGraphicsScene(scene_rect, self, self.settings)
 
         self.view = DesignerGraphicsView(self.scene)
         self.view.setRenderHints(QPainter.Antialiasing |
@@ -177,143 +201,159 @@ class MainDesignerWindow(QMainWindow):
 
     def setup_property_editor(self):
         property_dock = QDockWidget("Properties", self)
-        property_widget = QWidget()
-        main_layout = QVBoxLayout(property_widget) # Use property_widget as the parent for the layout
+        property_dock_widget = QWidget()
+        property_dock_layout = QVBoxLayout(property_dock_widget)
+        property_dock_layout.setContentsMargins(0, 0, 0, 0)
 
-        # Add a QScrollArea for the properties to enable OS-specific scrolling
-        scroll_area = QScrollArea(self) # Parent the scroll area to main window or self
-        scroll_area.setWidgetResizable(True) # Allow the widget inside to resize
-        scroll_area.setFrameShape(QScrollArea.NoFrame) # No extra frame around the scrolled content
+        self.property_panel = PropertyPanel(settings=self.settings, parent=self)
+        self.property_panel.property_changed.connect(self.on_property_changed)
+        property_dock_layout.addWidget(self.property_panel)
 
-        # Create a container widget for all your property groups
-        scroll_content_widget = QWidget()
-        properties_layout = QVBoxLayout(scroll_content_widget) # This layout holds all your groups
-
-        # Element Properties Group
-        element_group = QGroupBox("Element Properties")
-        element_layout = QFormLayout()
-
-        self.name_edit = QLineEdit()
-        self.name_edit.textChanged.connect(self.update_selected_name)
-        element_layout.addRow("Name:", self.name_edit)
-
-        self.content_edit = QLineEdit()
-        self.content_edit.textChanged.connect(self.update_selected_content)
-        element_layout.addRow("Content:", self.content_edit)
-
-        element_group.setLayout(element_layout)
-        properties_layout.addWidget(element_group) # Add to the scrollable layout
-
-        # Geometry Group
-        geometry_group = QGroupBox("Geometry")
-        form_layout = QFormLayout()
-
-        # Geometry Fields (UnitFields)
-        self.element_x_field = UnitField(initial_px=None, unit=self.current_unit, dpi=self.current_template.dpi)
-        self.element_y_field = UnitField(initial_px=None, unit=self.current_unit, dpi=self.current_template.dpi)
-        self.element_width_field = UnitField(initial_px=None, unit=self.current_unit, dpi=self.current_template.dpi)
-        self.element_height_field = UnitField(initial_px=None, unit=self.current_unit, dpi=self.current_template.dpi)
-
-        self.element_x_field.editingFinishedWithValue.connect(lambda px: self.update_element_geometry("x", px))
-        self.element_y_field.editingFinishedWithValue.connect(lambda px: self.update_element_geometry("y", px))
-        self.element_width_field.editingFinishedWithValue.connect(lambda px: self.update_element_geometry("width", px))
-        self.element_height_field.editingFinishedWithValue.connect(lambda px: self.update_element_geometry("height", px))
-
-        form_layout.addRow("X:", self.element_x_field)
-        form_layout.addRow("Y:", self.element_y_field)
-        form_layout.addRow("Width:", self.element_width_field)
-        form_layout.addRow("Height:", self.element_height_field)
-
-        geometry_group.setLayout(form_layout)
-        properties_layout.addWidget(geometry_group)
-        # Appearance Group
-        appearance_group = QGroupBox("Appearance")
-        appearance_layout = QFormLayout()
-
-        self.color_btn = QPushButton("Text Color")
-        self.color_btn.clicked.connect(self.change_text_color)
-        appearance_layout.addRow(self.color_btn)
-
-        self.bg_color_btn = QPushButton("Background Color")
-        self.bg_color_btn.clicked.connect(self.change_bg_color)
-        appearance_layout.addRow(self.bg_color_btn)
-
-        self.border_color_btn = QPushButton("Border Color")
-        self.border_color_btn.clicked.connect(self.change_border_color)
-        appearance_layout.addRow(self.border_color_btn)
-
-        # Border Width (UnitField)
-        self.border_width_field = UnitField(None, unit=self.current_unit, dpi=self.current_template.dpi)
-        self.border_width_field.editingFinishedWithValue.connect(
-            lambda px: self.update_element_border_width(px)
-        )
-        appearance_layout.addRow("Border Width:", self.border_width_field)
-
-        self.alignment_combo = QComboBox()
-        self.alignment_map = {
-            0: Qt.AlignLeft | Qt.AlignTop, 1: Qt.AlignHCenter | Qt.AlignTop, 2: Qt.AlignRight | Qt.AlignTop,
-            3: Qt.AlignLeft | Qt.AlignVCenter, 4: Qt.AlignHCenter | Qt.AlignVCenter, 5: Qt.AlignRight | Qt.AlignVCenter,
-            6: Qt.AlignLeft | Qt.AlignBottom, 7: Qt.AlignHCenter | Qt.AlignBottom, 8: Qt.AlignRight | Qt.AlignBottom
-        }
-        self.reverse_alignment_map = {v: k for k, v in self.alignment_map.items()}
-        self.alignment_combo.addItems(["Top Left", "Top Center", "Top Right",
-                                       "Center Left", "Center", "Center Right",
-                                       "Bottom Left", "Bottom Center", "Bottom Right"])
-        self.alignment_combo.currentIndexChanged.connect(self.update_alignment)
-        appearance_layout.addRow("Alignment:", self.alignment_combo)
-
-        appearance_group.setLayout(appearance_layout)
-        properties_layout.addWidget(appearance_group) # Add to the scrollable layout
-
-        # Game Component Properties Group
-        game_component_props_group = QGroupBox("Game Component Properties")
-        game_component_props_layout = QFormLayout()
-
-        self.set_bg_image_btn = QPushButton("Set Background Image")
-        self.set_bg_image_btn.clicked.connect(self.set_game_component_background_image)
-        game_component_props_layout.addRow(self.set_bg_image_btn)
-
-        game_component_props_group.setLayout(game_component_props_layout)
-        properties_layout.addWidget(game_component_props_group) # Add to the scrollable layout
-
-        # Actions Group (Now contains only Export buttons)
-        actions_group = QGroupBox("Export Actions") # Renamed for clarity
-        actions_layout = QVBoxLayout()
-
-        export_btn = QPushButton("Export as PNG")
-        export_btn.clicked.connect(self.export_png_gui)
-        actions_layout.addWidget(export_btn)
-
-        export_pdf_btn = QPushButton("Export as PDF")
-        export_pdf_btn.clicked.connect(self.export_pdf_gui)
-        actions_layout.addWidget(export_pdf_btn)
-
-        actions_group.setLayout(actions_layout)
-        properties_layout.addWidget(actions_group) # Add to the scrollable layout
-
-        # NEW: Element Management Group (for Remove button) - Prominently placed
-        element_management_group = QGroupBox("Element Management")
-        element_management_layout = QVBoxLayout()
-
-        self.remove_element_btn = QPushButton("Remove Selected Element") # Made an instance variable
+        self.remove_element_btn = QPushButton("Remove Selected Element")
         self.remove_element_btn.clicked.connect(self.remove_selected_element)
-        element_management_layout.addWidget(self.remove_element_btn)
+        property_dock_layout.addWidget(self.remove_element_btn)
 
-        element_management_group.setLayout(element_management_layout)
-        properties_layout.addWidget(element_management_group) # Add to the scrollable layout
-
-
-        properties_layout.addStretch() # Pushes everything to the top within the scrollable content
-
-        scroll_area.setWidget(scroll_content_widget) # Set the scrollable content widget
-
-        # Now add the scroll area to the main_layout of the property_widget
-        main_layout.addWidget(scroll_area)
-
-
-        property_dock.setWidget(property_widget)
-        property_dock.setMinimumWidth(250)
+        property_dock.setWidget(property_dock_widget)
         self.addDockWidget(Qt.RightDockWidgetArea, property_dock)
+
+
+        # property_dock = QDockWidget("Properties", self)
+        # property_widget = QWidget()
+        # main_layout = QVBoxLayout(property_widget) # Use property_widget as the parent for the layout
+
+        # # Add a QScrollArea for the properties to enable OS-specific scrolling
+        # scroll_area = QScrollArea(self) # Parent the scroll area to main window or self
+        # scroll_area.setWidgetResizable(True) # Allow the widget inside to resize
+        # scroll_area.setFrameShape(QScrollArea.NoFrame) # No extra frame around the scrolled content
+
+        # # Create a container widget for all your property groups
+        # scroll_content_widget = QWidget()
+        # properties_layout = QVBoxLayout(scroll_content_widget) # This layout holds all your groups
+
+        # # Element Properties Group
+        # element_group = QGroupBox("Element Properties")
+        # element_layout = QFormLayout()
+
+        # self.name_edit = QLineEdit()
+        # self.name_edit.textChanged.connect(self.update_selected_name)
+        # element_layout.addRow("Name:", self.name_edit)
+
+        # self.content_edit = QLineEdit()
+        # self.content_edit.textChanged.connect(self.update_selected_content)
+        # element_layout.addRow("Content:", self.content_edit)
+
+        # element_group.setLayout(element_layout)
+        # properties_layout.addWidget(element_group) # Add to the scrollable layout
+
+        # # Geometry Group
+        # geometry_group = QGroupBox("Geometry")
+        # form_layout = QFormLayout()
+
+        # # Geometry Fields (UnitFields)
+        # self.element_x_field = UnitField(initial_px=None, unit=self.settings.unit, dpi=self.current_template.dpi)
+        # self.element_y_field = UnitField(initial_px=None, unit=self.settings.unit, dpi=self.current_template.dpi)
+        # self.element_width_field = UnitField(initial_px=None, unit=self.settings.unit, dpi=self.current_template.dpi)
+        # self.element_height_field = UnitField(initial_px=None, unit=self.settings.unit, dpi=self.current_template.dpi)
+
+        # self.element_x_field.editingFinishedWithValue.connect(lambda px: self.update_element_geometry("x", px))
+        # self.element_y_field.editingFinishedWithValue.connect(lambda px: self.update_element_geometry("y", px))
+        # self.element_width_field.editingFinishedWithValue.connect(lambda px: self.update_element_geometry("width", px))
+        # self.element_height_field.editingFinishedWithValue.connect(lambda px: self.update_element_geometry("height", px))
+
+        # form_layout.addRow("X:", self.element_x_field)
+        # form_layout.addRow("Y:", self.element_y_field)
+        # form_layout.addRow("Width:", self.element_width_field)
+        # form_layout.addRow("Height:", self.element_height_field)
+
+        # geometry_group.setLayout(form_layout)
+        # properties_layout.addWidget(geometry_group)
+        # # Appearance Group
+        # appearance_group = QGroupBox("Appearance")
+        # appearance_layout = QFormLayout()
+
+        # self.color_btn = QPushButton("Text Color")
+        # self.color_btn.clicked.connect(self.change_text_color)
+        # appearance_layout.addRow(self.color_btn)
+
+        # self.bg_color_btn = QPushButton("Background Color")
+        # self.bg_color_btn.clicked.connect(self.change_bg_color)
+        # appearance_layout.addRow(self.bg_color_btn)
+
+        # self.border_color_btn = QPushButton("Border Color")
+        # self.border_color_btn.clicked.connect(self.change_border_color)
+        # appearance_layout.addRow(self.border_color_btn)
+
+        # # Border Width (UnitField)
+        # self.border_width_field = UnitField(None, unit=self.settings.unit, dpi=self.current_template.dpi)
+        # self.border_width_field.editingFinishedWithValue.connect(
+        #     lambda px: self.update_element_border_width(px)
+        # )
+        # appearance_layout.addRow("Border Width:", self.border_width_field)
+
+        # self.alignment_combo = QComboBox()
+        # self.alignment_map = {
+        #     0: Qt.AlignLeft | Qt.AlignTop, 1: Qt.AlignHCenter | Qt.AlignTop, 2: Qt.AlignRight | Qt.AlignTop,
+        #     3: Qt.AlignLeft | Qt.AlignVCenter, 4: Qt.AlignHCenter | Qt.AlignVCenter, 5: Qt.AlignRight | Qt.AlignVCenter,
+        #     6: Qt.AlignLeft | Qt.AlignBottom, 7: Qt.AlignHCenter | Qt.AlignBottom, 8: Qt.AlignRight | Qt.AlignBottom
+        # }
+        # self.reverse_alignment_map = {v: k for k, v in self.alignment_map.items()}
+        # self.alignment_combo.addItems(["Top Left", "Top Center", "Top Right",
+        #                                "Center Left", "Center", "Center Right",
+        #                                "Bottom Left", "Bottom Center", "Bottom Right"])
+        # self.alignment_combo.currentIndexChanged.connect(self.update_alignment)
+        # appearance_layout.addRow("Alignment:", self.alignment_combo)
+
+        # appearance_group.setLayout(appearance_layout)
+        # properties_layout.addWidget(appearance_group) # Add to the scrollable layout
+
+        # # Game Component Properties Group
+        # game_component_props_group = QGroupBox("Game Component Properties")
+        # game_component_props_layout = QFormLayout()
+
+        # self.set_bg_image_btn = QPushButton("Set Background Image")
+        # self.set_bg_image_btn.clicked.connect(self.set_game_component_background_image)
+        # game_component_props_layout.addRow(self.set_bg_image_btn)
+
+        # game_component_props_group.setLayout(game_component_props_layout)
+        # properties_layout.addWidget(game_component_props_group) # Add to the scrollable layout
+
+        # # Actions Group (Now contains only Export buttons)
+        # actions_group = QGroupBox("Export Actions") # Renamed for clarity
+        # actions_layout = QVBoxLayout()
+
+        # export_btn = QPushButton("Export as PNG")
+        # export_btn.clicked.connect(self.export_png_gui)
+        # actions_layout.addWidget(export_btn)
+
+        # export_pdf_btn = QPushButton("Export as PDF")
+        # export_pdf_btn.clicked.connect(self.export_pdf_gui)
+        # actions_layout.addWidget(export_pdf_btn)
+
+        # actions_group.setLayout(actions_layout)
+        # properties_layout.addWidget(actions_group) # Add to the scrollable layout
+
+        # # NEW: Element Management Group (for Remove button) - Prominently placed
+        # element_management_group = QGroupBox("Element Management")
+        # element_management_layout = QVBoxLayout()
+
+
+        # element_management_layout.addWidget(self.remove_element_btn)
+
+        # element_management_group.setLayout(element_management_layout)
+        # properties_layout.addWidget(element_management_group) # Add to the scrollable layout
+
+
+        # properties_layout.addStretch() # Pushes everything to the top within the scrollable content
+
+        # scroll_area.setWidget(scroll_content_widget) # Set the scrollable content widget
+
+        # # Now add the scroll area to the main_layout of the property_widget
+        # main_layout.addWidget(scroll_area)
+
+
+        # property_dock.setWidget(property_widget)
+        # property_dock.setMinimumWidth(250)
+        # self.addDockWidget(Qt.RightDockWidgetArea, property_dock)
 
         self.set_element_controls_enabled(False) # Ensure this disables the new button too
 
@@ -389,7 +429,7 @@ class MainDesignerWindow(QMainWindow):
         self.update_color_display()
 
     def create_font_toolbar(self):
-        self.font_toolbar_widget = FontToolBar(self)
+        self.font_toolbar_widget = FontToolbar(self)
         font_toolbar = self.addToolBar("Font Tools")
         font_toolbar.addWidget(self.font_toolbar_widget)
         self.font_toolbar_widget.font_changed.connect(self.on_font_toolbar_font_changed)
@@ -403,7 +443,7 @@ class MainDesignerWindow(QMainWindow):
         # Unit Selector
         self.unit_selector = QComboBox()
         self.unit_selector.addItems(["in", "cm", "px"])
-        self.unit_selector.setCurrentText(self.current_unit)
+        self.unit_selector.setCurrentText(self.settings.unit)
         self.unit_selector.currentTextChanged.connect(self.on_unit_change)
         self.measure_toolbar.addWidget(QLabel("Unit:"))
         self.measure_toolbar.addWidget(self.unit_selector)
@@ -428,14 +468,14 @@ class MainDesignerWindow(QMainWindow):
 
         self.template_width_field = UnitField(
             initial_px=self.current_template.width_px,
-            unit=self.current_unit,
+            unit=self.settings.unit,
             dpi=self.current_template.dpi
         )
         self.template_width_field.editingFinishedWithValue.connect(self.on_template_width_changed)
 
         self.template_height_field = UnitField(
             initial_px=self.current_template.height_px,
-            unit=self.current_unit,
+            unit=self.settings.unit,
             dpi=self.current_template.dpi
         )
         self.template_height_field.editingFinishedWithValue.connect(self.on_template_height_changed)
@@ -515,7 +555,7 @@ class MainDesignerWindow(QMainWindow):
 
         # Create scene rect based on current template size
         scene_rect = QRectF(0, 0, self.current_template.width_px, self.current_template.height_px)
-        self.scene = GameComponentGraphicsScene(scene_rect, self)
+        self.scene = GameComponentGraphicsScene(scene_rect, self, self.settings)
 
         # Create and configure the view
         self.view = DesignerGraphicsView(self.scene)
@@ -616,7 +656,7 @@ class MainDesignerWindow(QMainWindow):
         # Create new scene and view
         self.scene = GameComponentGraphicsScene(
             QRectF(0, 0, self.current_template.width_px, self.current_template.height_px),
-            parent=self
+            parent=self, settings=self.settings
         )
         self.view = DesignerGraphicsView(self.scene)
 
@@ -684,8 +724,8 @@ class MainDesignerWindow(QMainWindow):
 
     @Slot(str)
     def on_unit_change(self, unit: str):
-        self.current_unit = unit
-        self.scene.unit = unit
+        self.settings.unit = unit
+        #self.scene.unit = unit
 
         # Update the unit display in the UnitFields
         self.template_width_field.set_unit(unit)
@@ -729,6 +769,7 @@ class MainDesignerWindow(QMainWindow):
     @Slot()
     def on_template_dpi_changed(self):
         new_dpi = self.game_component_dpi_spin.value()
+        self.settings.dpi = new_dpi
         self.current_template.dpi = new_dpi
 
         # Update UnitFields to reflect new DPI
@@ -784,52 +825,24 @@ class MainDesignerWindow(QMainWindow):
         selected_element = self.get_selected_element()
 
         if self._current_selected_element and self._current_selected_element != selected_element:
-            # Disconnect previous
             try:
                 self._current_selected_element.element_changed.disconnect(self.on_element_data_changed)
             except TypeError:
                 pass
 
-            # 🔽 Hide handles on previous selection
-            self._current_selected_element.hide_handles()
-
         self._current_selected_element = selected_element
 
         if selected_element:
-            # 🔼 Show handles on new selection
-            selected_element.show_handles()
-
             self.set_element_controls_enabled(True)
-            self.font_toolbar_widget.setEnabled(True)
-
-            self.name_edit.blockSignals(True)
-            self.content_edit.blockSignals(True)
-            self.alignment_combo.blockSignals(True)
-
-            self.name_edit.setText(selected_element.name)
-            self.content_edit.setText(selected_element.get_content() or "")
-            self.refresh_element_property_panel()
-            current_alignment = selected_element._style.get('alignment', Qt.AlignCenter)
-            if current_alignment in self.reverse_alignment_map:
-                self.alignment_combo.setCurrentIndex(self.reverse_alignment_map[current_alignment])
-            else:
-                self.alignment_combo.setCurrentIndex(4)
-
-            if isinstance(selected_element, TextElement):
-                current_font = selected_element._style.get('font', QFont("Arial", 12))
-                if not isinstance(current_font, QFont):
-                    current_font = QFont("Arial", 12)
-                self.font_toolbar_widget.set_font(current_font)
-                self.font_toolbar_widget.setEnabled(True)
-            else:
-                self.font_toolbar_widget.setEnabled(False)
-
-            self.name_edit.blockSignals(False)
-            self.content_edit.blockSignals(False)
-            self.alignment_combo.blockSignals(False)
-
+            self.font_toolbar_widget.setEnabled(isinstance(selected_element, TextElement))
+            
+            # Update property panel with selected element
+            self.property_panel.set_target(selected_element)
+            self.property_panel.refresh()
+            
             selected_element.element_changed.connect(self.on_element_data_changed)
 
+            # Update layers list selection
             self.layers_list.blockSignals(True)
             self.layers_list.clearSelection()
             for i in range(self.layers_list.count()):
@@ -839,41 +852,40 @@ class MainDesignerWindow(QMainWindow):
                     self.layers_list.scrollToItem(item)
                     break
             self.layers_list.blockSignals(False)
-
         else:
             self.set_element_controls_enabled(False)
             self.font_toolbar_widget.setEnabled(False)
+            self.property_panel.set_target(None)  # Clear the panel
             self.layers_list.blockSignals(True)
             self.layers_list.clearSelection()
             self.layers_list.blockSignals(False)
-
 
     @Slot()
     def on_element_data_changed(self):
         element = self.get_selected_element()
         if element and element == self._current_selected_element:
-            self.name_edit.blockSignals(True)
-            self.content_edit.blockSignals(True)
-            self.alignment_combo.blockSignals(True)
+            # self.name_edit.blockSignals(True)
+            # self.content_edit.blockSignals(True)
+            # self.alignment_combo.blockSignals(True)
 
-            self.name_edit.setText(element.name)
-            self.content_edit.setText(element.get_content() or "")
-            current_alignment = element._style.get('alignment', Qt.AlignCenter)
-            if current_alignment in self.reverse_alignment_map:
-                self.alignment_combo.setCurrentIndex(self.reverse_alignment_map[current_alignment])
-            else:
-                self.alignment_combo.setCurrentIndex(4)
+            # self.name_edit.setText(element.name)
+            # self.content_edit.setText(element.get_content() or "")
+            # current_alignment = element._style.get('alignment', Qt.AlignCenter)
+            # if current_alignment in self.reverse_alignment_map:
+            #     self.alignment_combo.setCurrentIndex(self.reverse_alignment_map[current_alignment])
+            # else:
+            #     self.alignment_combo.setCurrentIndex(4)
 
-            if isinstance(element, TextElement):
-                current_font = element._style.get('font', QFont("Arial", 12))
-                if not isinstance(current_font, QFont):
-                     current_font = QFont("Arial", 12)
-                self.font_toolbar_widget.set_font(current_font)
+            # if isinstance(element, TextElement):
+            #     current_font = element._style.get('font', QFont("Arial", 12))
+            #     if not isinstance(current_font, QFont):
+            #          current_font = QFont("Arial", 12)
+            #     self.font_toolbar_widget.set_font(current_font)
 
-            self.name_edit.blockSignals(False)
-            self.content_edit.blockSignals(False)
-            self.alignment_combo.blockSignals(False)
-
+            # self.name_edit.blockSignals(False)
+            # self.content_edit.blockSignals(False)
+            # self.alignment_combo.blockSignals(False)
+            self.property_panel.refresh()
             element.update()
             self.scene.update()
 
@@ -1029,14 +1041,15 @@ class MainDesignerWindow(QMainWindow):
         self.show_status_message("Game Component dimensions and DPI have been updated.", "info")
 
     def set_element_controls_enabled(self, enabled: bool):
-        self.name_edit.setEnabled(enabled)
-        self.content_edit.setEnabled(enabled)
-        self.color_btn.setEnabled(enabled)
-        self.bg_color_btn.setEnabled(enabled)
-        self.border_color_btn.setEnabled(enabled)
-        self.alignment_combo.setEnabled(enabled)
+        # self.name_edit.setEnabled(enabled)
+        # self.content_edit.setEnabled(enabled)
+        # self.color_btn.setEnabled(enabled)
+        # self.bg_color_btn.setEnabled(enabled)
+        # self.border_color_btn.setEnabled(enabled)
+        # self.alignment_combo.setEnabled(enabled)
+        # self.remove_element_btn.setEnabled(enabled)
+        self.property_panel.setEnabled(enabled)
         self.remove_element_btn.setEnabled(enabled)
-
 
     @Slot()
     def remove_selected_element(self):
@@ -1062,50 +1075,51 @@ class MainDesignerWindow(QMainWindow):
 
         if element:
             rect = element.rect
+            self.property_panel.set_target(element)
+            self.property_panel.refresh()
+        #     self.element_x_field.set_dpi(dpi)
+        #     self.element_x_field.set_unit(self.settings.unit)
+        #     self.element_x_field.set_px_value(element.pos().x())
 
-            self.element_x_field.set_dpi(dpi)
-            self.element_x_field.set_unit(self.current_unit)
-            self.element_x_field.set_px_value(element.pos().x())
+        #     self.element_y_field.set_dpi(dpi)
+        #     self.element_y_field.set_unit(self.settings.unit)
+        #     self.element_y_field.set_px_value(element.pos().y())
 
-            self.element_y_field.set_dpi(dpi)
-            self.element_y_field.set_unit(self.current_unit)
-            self.element_y_field.set_px_value(element.pos().y())
+        #     self.element_width_field.set_dpi(dpi)
+        #     self.element_width_field.set_unit(self.settings.unit)
+        #     self.element_width_field.set_px_value(rect.width())
 
-            self.element_width_field.set_dpi(dpi)
-            self.element_width_field.set_unit(self.current_unit)
-            self.element_width_field.set_px_value(rect.width())
+        #     self.element_height_field.set_dpi(dpi)
+        #     self.element_height_field.set_unit(self.settings.unit)
+        #     self.element_height_field.set_px_value(rect.height())
 
-            self.element_height_field.set_dpi(dpi)
-            self.element_height_field.set_unit(self.current_unit)
-            self.element_height_field.set_px_value(rect.height())
+        #     self.border_width_field.set_dpi(dpi)
+        #     self.border_width_field.set_unit(self.settings.unit)
+        #     if hasattr(element, "border_width"):
+        #         self.border_width_field.set_px_value(element.border_width)
+        #     else:
+        #         self.border_width_field.set_px_value(0)
 
-            self.border_width_field.set_dpi(dpi)
-            self.border_width_field.set_unit(self.current_unit)
-            if hasattr(element, "border_width"):
-                self.border_width_field.set_px_value(element.border_width)
-            else:
-                self.border_width_field.set_px_value(0)
+        #     # Enable fields
+        #     self.element_x_field.setEnabled(True)
+        #     self.element_y_field.setEnabled(True)
+        #     self.element_width_field.setEnabled(True)
+        #     self.element_height_field.setEnabled(True)
+        #     self.border_width_field.setEnabled(True)
 
-            # Enable fields
-            self.element_x_field.setEnabled(True)
-            self.element_y_field.setEnabled(True)
-            self.element_width_field.setEnabled(True)
-            self.element_height_field.setEnabled(True)
-            self.border_width_field.setEnabled(True)
+        # else:
+        #     # Disable and clear all fields
+        #     self.element_x_field.set_px_value(None)
+        #     self.element_y_field.set_px_value(None)
+        #     self.element_width_field.set_px_value(None)
+        #     self.element_height_field.set_px_value(None)
+        #     self.border_width_field.set_px_value(None)
 
-        else:
-            # Disable and clear all fields
-            self.element_x_field.set_px_value(None)
-            self.element_y_field.set_px_value(None)
-            self.element_width_field.set_px_value(None)
-            self.element_height_field.set_px_value(None)
-            self.border_width_field.set_px_value(None)
-
-            self.element_x_field.setEnabled(False)
-            self.element_y_field.setEnabled(False)
-            self.element_width_field.setEnabled(False)
-            self.element_height_field.setEnabled(False)
-            self.border_width_field.setEnabled(False)
+        #     self.element_x_field.setEnabled(False)
+        #     self.element_y_field.setEnabled(False)
+        #     self.element_width_field.setEnabled(False)
+        #     self.element_height_field.setEnabled(False)
+        #     self.border_width_field.setEnabled(False)
 
             
     #### Paint Toolbar ####
@@ -1137,9 +1151,9 @@ class MainDesignerWindow(QMainWindow):
     @Slot()
     def on_element_dimension_changed(self, element, attr, px):
         setattr(element, attr, px)
+        self.property_panel.refresh()
         self.scene.update()
         self.view.update()
-
 
     @Slot(str, int)
     def update_element_geometry(self, prop: str, px: int):
@@ -1288,7 +1302,7 @@ class MainDesignerWindow(QMainWindow):
                 )
                 painter.drawPixmap(0, 0, scaled_bg)
 
-        temp_scene = GameComponentGraphicsScene(template.width_px, template.height_px, None)
+        temp_scene = GameComponentGraphicsScene(QRectF(0, 0, template.width_px, template.height_px), None, settings=self.settings)
         for element in template.elements:
             temp_scene.addItem(element)
 

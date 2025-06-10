@@ -41,6 +41,9 @@ class UnitField(QLineEdit):
         self._active = px is not None
         self._sync_display()
 
+    def setValue(self, px: Optional[int]):
+        self.set_px_value(px)
+
     def get_px_value(self) -> Optional[int]:
         return self._px_value if self._active else None
 

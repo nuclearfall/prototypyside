@@ -41,6 +41,12 @@ class GameComponentElement(QGraphicsItem, QObject):
     def setPos(self, *args):
         print(f"[setPos] Called with: {args}")
         super().setPos(*args)
+        self.element_changed.emit() # Emit when rectangle changes
+
+    def setRect(self, rect):
+        _, _, w, h = rect.getRect()
+        self._rect = QRectF(0, 0, w, h)
+        self.element_changed.emit() # Emit when rectangle changes
 
     def itemChange(self, change, value):
         print(f"[itemChange] Change: {change}, Value: {value}")

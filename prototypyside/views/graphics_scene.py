@@ -28,8 +28,13 @@ class GameComponentGraphicsScene(QGraphicsScene):
     element_dropped = Signal(QPointF, str)
     selectionChanged = Signal()
 
-    def __init__(self, scene_rect: QRectF, parent=None):
+    def __init__(self, scene_rect: QRectF, parent=None, settings=None):
         super().__init__(scene_rect, parent)
+        if settings:
+            self.settings = settings
+        else:
+            raise ValueError
+
         self._template_width_px = int(scene_rect.width())
         self._template_height_px = int(scene_rect.height())
         self.setBackgroundBrush(QColor(240, 240, 240))
@@ -106,8 +111,8 @@ class GameComponentGraphicsScene(QGraphicsScene):
         if not getattr(self.parent(), "show_grid", True):
             return
 
-        unit = getattr(self.parent(), "current_unit", "in")
-        dpi = 72
+        unit = self.settings.unit
+        dpi = self.settings.dpi
         base = parse_dimension("1 " + unit, dpi)
         spacing = int(round(base * MEASURE_INCREMENT[unit]))
 
@@ -130,8 +135,8 @@ class GameComponentGraphicsScene(QGraphicsScene):
             y += spacing
 
     def get_grid_spacing(self) -> int:
-        unit = getattr(self.parent(), "current_unit", "in")
-        dpi = 72
+        unit = self.settings.unit
+        dpi = self.settings.dpi
         base = parse_dimension("1 " + unit, dpi)
         return int(round(base * MEASURE_INCREMENT[unit]))
 
@@ -274,5 +279,6 @@ class GameComponentGraphicsScene(QGraphicsScene):
     def get_selected_element(self) -> Optional['GameComponentElement']:
         selected_items = self.selectedItems()
         if selected_items and isinstance(selected_items[0], GameComponentElement):
+            self.property_panel.get_all(selected_items[0])
             return selected_items[0]
         return None
