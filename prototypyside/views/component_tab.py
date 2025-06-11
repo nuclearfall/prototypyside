@@ -208,6 +208,7 @@ class ComponentTab(QWidget):
         self.property_panel.property_changed.connect(self.on_property_changed)
 
         self.remove_element_btn = QPushButton("Remove Selected Element")
+        self.remove_element_btn.setMaximumWidth(200)
         self.remove_element_btn.clicked.connect(self.remove_selected_element)
         self.set_element_controls_enabled(False) # Ensure this disables the new button too
 
@@ -260,6 +261,7 @@ class ComponentTab(QWidget):
             unit=self.settings.unit,
             dpi=self.current_template.dpi
         )
+        self.template_width_field.setMaximumWidth(100)
         self.template_width_field.editingFinishedWithValue.connect(self.on_template_width_changed)
 
         self.template_height_field = UnitField(
@@ -268,7 +270,7 @@ class ComponentTab(QWidget):
             dpi=self.current_template.dpi
         )
         self.template_height_field.editingFinishedWithValue.connect(self.on_template_height_changed)
-
+        self.template_height_field.setMaximumWidth(100)
         self.measure_toolbar.addWidget(QLabel("Width:"))
         self.measure_toolbar.addWidget(self.template_width_field)
         self.measure_toolbar.addWidget(QLabel("Height:"))
@@ -480,7 +482,7 @@ class ComponentTab(QWidget):
 
         base_name = f"{element_type.replace('Element', '').lower()}_"
         counter = 1
-        existing_names = {el.get_name() for el in self.current_template.elements}
+        existing_names = {el.name for el in self.current_template.elements}
         while f"{base_name}{counter}" in existing_names:
             counter += 1
         new_name = f"{base_name}{counter}"
@@ -488,7 +490,7 @@ class ComponentTab(QWidget):
         new_rect_local = QRectF(0, 0, default_width, default_height)
 
         new_element = self.current_template.add_element(
-            element_type, new_name, new_rect_local
+            element_type, None, new_rect_local
         )
 
         self.scene.addItem(new_element)

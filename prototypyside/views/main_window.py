@@ -58,6 +58,7 @@ class MainDesignerWindow(QMainWindow):
         self.addDockWidget(Qt.TopDockWidgetArea, self.toolbar_dock)
         self.toolbar_dock.setFeatures(QDockWidget.NoDockWidgetFeatures)
         self.toolbar_dock.setTitleBarWidget(QWidget())
+        self.toolbar_dock.setFeatures(QDockWidget.NoDockWidgetFeatures)
         # Component Palette Dock
         self.palette_dock = QDockWidget("Components", self)
         # The actual palette widget will be dynamic based on the active tab
@@ -216,7 +217,8 @@ class MainDesignerWindow(QMainWindow):
             prop_panel_layout = QVBoxLayout(prop_panel_container)
             prop_panel_layout.setContentsMargins(0,0,0,0) # Remove extra margins
             prop_panel_layout.addWidget(active_tab.property_panel)
-            prop_panel_layout.addWidget(active_tab.remove_element_btn) # Use the tab's remove button
+            prop_panel_layout.addWidget(active_tab.remove_element_btn, alignment=Qt.AlignCenter) # Use the tab's remove button
+            prop_panel_layout.addStretch(1)
             self.properties_dock.setWidget(prop_panel_container)
 
             self.layers_dock.setWidget(active_tab.layers_list)
