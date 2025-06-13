@@ -76,6 +76,7 @@ class ProtoRegistry(QObject):
         obj = self._factory.create(pid=pid, **kwargs)
         self.generate_name(obj)
         self.register(obj)
+        print(f"{obj.pid}:{obj.name} registered.")
 
         template = getattr(obj, "template", None)
         if template:
@@ -195,7 +196,7 @@ class ProtoRegistry(QObject):
         return obj
 
     def to_dict(self) -> dict:
-        return {pid: obj.to_dict() for pid, obj in self._objects.items()}
+        return {pid: self.obj_to_dict(pid) for pid in self._objects}
 
     def from_dict(self, data: dict):
         self._objects.clear()
@@ -207,9 +208,9 @@ class ProtoRegistry(QObject):
         data = {
             "root": root_pid,
             "objects": self.to_dict()
-        }
+        } 
         with open(path, "w") as f:
-            json.dump(data, f, indent=2)
+            json.dump(data, f, indent=4)
 
     def load_from_file(self, path: str):
         with open(path, "r") as f:

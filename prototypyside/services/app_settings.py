@@ -26,7 +26,7 @@ class AppSettings(QObject):
         return self.display_dpi
 
     @dpi.setter
-    def display_dpi(self, value):
+    def dpi(self, value):
         if self._display_dpi != value:
             self._display_dpi = value
             self.display_dpi_changed.emit(value)

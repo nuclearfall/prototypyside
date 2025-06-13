@@ -13,7 +13,8 @@ OBJ_BASE_NAMES = {
     "ct": "Component Template",
     "ci": "Component Instance",
     "lt": "Page Layout Template",
-    "ls": "Layout Slot"
+    "ls": "Layout Slot",
+    "pr": "Proto Registry"
 }
 
 def parse_pid(pid_str: str) -> Tuple[Optional[str], Optional[str]]:

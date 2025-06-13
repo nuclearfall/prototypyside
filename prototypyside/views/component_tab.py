@@ -38,17 +38,14 @@ class ComponentTab(QWidget):
     status_message_signal = Signal(str, str, int) # message, type, timeout_ms
     tab_title_changed = Signal(str) # For updating the tab title if needed
 
-    def __init__(self, parent, settings, registry, template_data: Optional[Dict] = None):
+    def __init__(self, parent, registry, template: Optional[Dict] = None):
         super().__init__(parent)
-
-        self.settings = AppSettings(unit='px', display_dpi=300, print_dpi=300)
         self.registry = registry
+        self.settings = AppSettings(unit='px', display_dpi=300, print_dpi=300)
+        print(f"settings should be loaded here: {self.settings} with dpi: {self.settings.dpi}")
 
-        if template_data is None:
-            self.current_template = registry.create('ct')  # Create new template
-        else:
-            self.current_template = self.registry.obj_from_dict(template_data)  # Recreate from data
-            self.settings.dpi = template_data.get("dpi", self.settings.dpi)
+        self.current_template = template
+        self.settings.dpi = template.dpi
         self.merged_templates: List[ComponentTemplate] = []
         self._current_selected_element: Optional['ComponentElement'] = None
         self.export_manager = ExportManager()
@@ -65,10 +62,7 @@ class ComponentTab(QWidget):
         self.setup_ui()
         self.setup_shortcuts()
 
-        if template_data:
-            self.load_template_data(template_data)
-        else:
-            self.update_game_component_scene() # Initialize with default template
+        self.update_game_component_scene() # Initialize with default template
 
     def setup_ui(self):
         main_layout = QVBoxLayout(self)
@@ -133,45 +127,45 @@ class ComponentTab(QWidget):
         delete_shortcut = QShortcut(QKeySequence.Delete, self)
         delete_shortcut.activated.connect(self.remove_selected_element)
 
-    def load_template_data(self, template_data: Dict):
-        # Disconnect previous signals from old template/scene safely
-        try:
-            self.current_template.element_z_order_changed.disconnect(self.update_layers_panel)
-            self.current_template.template_changed.disconnect(self.update_game_component_scene)
-            if self.scene: # Check if scene exists before disconnecting
-                self.scene.selectionChanged.disconnect(self.on_selection_changed)
-                self.scene.element_dropped.disconnect(self.add_element_from_drop)
-        except (AttributeError, TypeError, RuntimeError):
-            pass # Ignore if signals are not connected or objects don't exist
+    # def load_template_data(self, template_data: Dict):
+    #     # Disconnect previous signals from old template/scene safely
+    #     try:
+    #         self.current_template.element_z_order_changed.disconnect(self.update_layers_panel)
+    #         self.current_template.template_changed.disconnect(self.update_game_component_scene)
+    #         if self.scene: # Check if scene exists before disconnecting
+    #             self.scene.selectionChanged.disconnect(self.on_selection_changed)
+    #             self.scene.element_dropped.disconnect(self.add_element_from_drop)
+    #     except (AttributeError, TypeError, RuntimeError):
+    #         pass # Ignore if signals are not connected or objects don't exist
 
-        # Clear existing scene items
-        if self.scene:
-            for item in self.scene.items():
-                self.scene.removeItem(item)
-            self.scene.clear()
+    #     # Clear existing scene items
+    #     if self.scene:
+    #         for item in self.scene.items():
+    #             self.scene.removeItem(item)
+    #         self.scene.clear()
 
-        # Create new template from data
-        self.current_template = self.registry.obj_from_dict(template_data)
+        # # Create new template from data
+        # self.current_template = self.registry.obj_from_dict(template_data)
 
-        # Update scene dimensions and clear existing scene
-        self.scene.set_template_dimensions(self.current_template.width_px, self.current_template.height_px)
-        self.view.setSceneRect(0, 0, self.current_template.width_px, self.current_template.height_px)
+        # # Update scene dimensions and clear existing scene
+        # self.scene.set_template_dimensions(self.current_template.width_px, self.current_template.height_px)
+        # self.view.setSceneRect(0, 0, self.current_template.width_px, self.current_template.height_px)
 
-        # Add template elements to scene
-        for element in self.current_template.elements:
-            self.scene.addItem(element)
+        # # Add template elements to scene
+        # for element in self.current_template.elements:
+        #     self.scene.addItem(element)
 
-        # Connect new signals
-        self.current_template.template_changed.connect(self.update_game_component_scene)
-        self.current_template.element_z_order_changed.connect(self.update_layers_panel)
-        self.scene.selectionChanged.connect(self.on_selection_changed)
-        self.scene.element_dropped.connect(self.add_element_from_drop)
+        # # Connect new signals
+        # self.current_template.template_changed.connect(self.update_game_component_scene)
+        # self.current_template.element_z_order_changed.connect(self.update_layers_panel)
+        # self.scene.selectionChanged.connect(self.on_selection_changed)
+        # self.scene.element_dropped.connect(self.add_element_from_drop)
 
-        self.tab_title_changed.emit(self.current_template.name if self.current_template.name else "New Template")
-        self.update_layers_panel()
-        self.on_selection_changed()
-        QTimer.singleShot(0, lambda: self.view.fitInView(self.scene.sceneRect(), Qt.KeepAspectRatio))
-        self.show_status_message(f"Template loaded.", "success")
+        # self.tab_title_changed.emit(self.current_template.name if self.current_template.name else "New Template")
+        # self.update_layers_panel()
+        # self.on_selection_changed()
+        # QTimer.singleShot(0, lambda: self.view.fitInView(self.scene.sceneRect(), Qt.KeepAspectRatio))
+        # self.show_status_message(f"Template loaded.", "success")
 
 
     @Slot()
@@ -314,12 +308,12 @@ class ComponentTab(QWidget):
 
     @Slot(int)
     def on_template_width_changed(self, new_px):
-        self.current_template.set_width_px(new_px)
+        self.current_template.width_px = new_px
         self.update_template_scene_rect()
 
     @Slot(int)
     def on_template_height_changed(self, new_px):
-        self.current_template.set_height_px(new_px)
+        self.current_template.height_px = new_px
         self.update_template_scene_rect()
 
     def update_template_scene_rect(self):

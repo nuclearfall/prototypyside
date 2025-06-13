@@ -9,10 +9,9 @@ import json
 from pathlib import Path
 from PySide6.QtWidgets import QMessageBox
 
-
 #from prototypyside.models.game_component_elements import create_element
 from prototypyside.utils.qt_helpers import list_to_qrectf
-from prototypyside.utils.unit_converter import to_px
+from prototypyside.utils.unit_converter import to_px, format_dimension
 # Use TYPE_CHECKING for type hinting
 if TYPE_CHECKING:
     from prototypyside.models.component_elements import ComponentElement
@@ -21,12 +20,14 @@ class ComponentTemplate(QObject): # NOW INHERITS QObject
     template_changed = Signal() # Re-add signal
     element_z_order_changed = Signal() # Re-add signal
 
-    def __init__(self, pid, width=2.5, height=3.5, dpi=300, parent: QObject = None, name="Component Template"): # Add parent arg
+    def __init__(self, pid, width="2.5 in", height="3.5 in", dpi=300, parent: QObject = None, name="Component Template"): # Add parent arg
         super().__init__(parent) # Call QObject's init with parent
         self._pid = pid
         self.name = name
-        self.width = parse_dimension(width) if isinstance(width, str) else float(width)
-        self.height = parse_dimension(height) if isinstance(height, str) else float(height)
+        self.width = width
+        self.height = height
+        self._width_px = to_px(width, dpi=dpi)
+        self._height_px = to_px(height, dpi=dpi)
         self.dpi = dpi
         self.elements: List['ComponentElement'] = []
         self.background_image_path: Optional[str] = None
@@ -42,19 +43,23 @@ class ComponentTemplate(QObject): # NOW INHERITS QObject
         
     @property
     def width_px(self) -> int:
-        return to_px(self.width * self.dpi)
+        return self._width_px
 
-    # @width_px.setter
-    # def width_px(self, px: int):
-    #     to_px(self.width) = px / self.dpi
+    @width_px.setter
+    def width_px(self, px: int):
+        self._width_px = px
+        self.width = format_dimension(px, dpi=self.dpi)
+        self.template_changed.emit()
 
     @property
     def height_px(self) -> int:
-        return to_px(self.height * self.dpi)
+        return self._height_px
 
-    # @height_px.setter
-    # def height_px(self, px: int):
-    #     self.height_in = px / self.dpi
+    @height_px.setter
+    def height_px(self, px: int):
+        self._height_px = px
+        self.height = format_dimension(px, dpi=self.dpi)
+        self.template_changed.emit()
 
 
     def add_element(self, element) -> 'ComponentElement':           

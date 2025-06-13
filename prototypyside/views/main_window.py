@@ -144,7 +144,9 @@ class MainDesignerWindow(QMainWindow):
 
     @Slot()
     def add_new_component_tab(self):
-        new_tab = ComponentTab(parent=self, settings=self.settings, registry=self.registry)
+        new_template = self.registry.create("ct")
+        print(new_template.to_dict())
+        new_tab = ComponentTab(parent=self, registry=self.registry, template=new_template)
         # Connect the tab's status message signal to the main window's slot
         new_tab.status_message_signal.connect(self.show_status_message)
         new_tab.tab_title_changed.connect(self.on_tab_title_changed)
@@ -162,9 +164,10 @@ class MainDesignerWindow(QMainWindow):
 
         if path:
             try:
-                with open(path, 'r', encoding='utf-8') as f:
-                    data = json.load(f)
-                new_tab = registry.create_from_dict(pid='ct', parent=parent, settings=self.settings, registry=self.registry, template_data=data)
+                loaded_template = self.registry.load_from_file(path)
+                #new_tab = registry.create_from_dict(pid='ct', parent=parent, settings=self.settings, registry=self.registry, template_data=data)
+                new_tab = ComponentTab(parent=self, registry=self.registry, template=loaded_template)
+
                 new_tab.status_message_signal.connect(self.show_status_message)
                 new_tab.tab_title_changed.connect(self.on_tab_title_changed)
 
@@ -245,6 +248,8 @@ class MainDesignerWindow(QMainWindow):
     @Slot()
     def save_current_tab_template(self):
         current_tab = self.get_current_tab()
+        current_template = current_tab.current_template
+        print(f"Preparing to Save. Current template PID is {current_template.pid}")
         if not current_tab:
             self.show_status_message("No active tab to save.", "warning")
             return
@@ -255,8 +260,10 @@ class MainDesignerWindow(QMainWindow):
 
         if path:
             try:
-                with open(path, 'w', encoding='utf-8') as f:
-                    json.dump(current_tab.get_template_data(), f, indent=4)
+                root_pid = current_template.pid
+                print(f"Saving template with root pid: {root_pid}")
+                
+                self.registry.save_to_file(root_pid, path)
                 self.show_status_message(f"Template saved to {path}", "success")
                 current_tab.tab_title_changed.emit(Path(path).stem) # Update tab title
             except Exception as e:
