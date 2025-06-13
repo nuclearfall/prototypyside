@@ -164,8 +164,7 @@ class MainDesignerWindow(QMainWindow):
             try:
                 with open(path, 'r', encoding='utf-8') as f:
                     data = json.load(f)
-
-                new_tab = ComponentTab(parent=self, template_data=data)
+                new_tab = registry.create_from_dict(pid='ct', parent=parent, settings=self.settings, registry=self.registry, template_data=data)
                 new_tab.status_message_signal.connect(self.show_status_message)
                 new_tab.tab_title_changed.connect(self.on_tab_title_changed)
 

@@ -41,10 +41,14 @@ class ComponentTab(QWidget):
     def __init__(self, parent, settings, registry, template_data: Optional[Dict] = None):
         super().__init__(parent)
 
-        self.settings = AppSettings(unit='px', display_dpi=300, print_dpi=300) # Each tab gets its own settings
+        self.settings = AppSettings(unit='px', display_dpi=300, print_dpi=300)
         self.registry = registry
+
         if template_data is None:
-            self.current_template = registry.create('ct', ) # Each tab gets its own template
+            self.current_template = registry.create('ct')  # Create new template
+        else:
+            self.current_template = self.registry.obj_from_dict(template_data)  # Recreate from data
+            self.settings.dpi = template_data.get("dpi", self.settings.dpi)
         self.merged_templates: List[ComponentTemplate] = []
         self._current_selected_element: Optional['ComponentElement'] = None
         self.export_manager = ExportManager()
@@ -147,7 +151,7 @@ class ComponentTab(QWidget):
             self.scene.clear()
 
         # Create new template from data
-        self.current_template = ComponentTemplate.from_dict(template_data, parent=self)
+        self.current_template = self.registry.obj_from_dict(template_data)
 
         # Update scene dimensions and clear existing scene
         self.scene.set_template_dimensions(self.current_template.width_px, self.current_template.height_px)
@@ -379,6 +383,8 @@ class ComponentTab(QWidget):
     @Slot()
     def on_selection_changed(self):
         selected_element = self.get_selected_element()
+        if self._current_selected_element:
+            self._current_selected_element.hide_handles()
 
         if self._current_selected_element and self._current_selected_element != selected_element:
             try:
@@ -408,6 +414,7 @@ class ComponentTab(QWidget):
                     self.layers_list.scrollToItem(item)
                     break
             self.layers_list.blockSignals(False)
+            selected_element.show_handles()
         else:
             self.set_element_controls_enabled(False)
             #  self.font_toolbar_widget.setEnabled(False)

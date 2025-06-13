@@ -17,6 +17,9 @@ class ComponentElement(QGraphicsItem, QObject):
         QObject.__init__(self, parent_qobject)
         QGraphicsItem.__init__(self)
         self._pid = pid 
+        self.template_pid: Optional[str] = None
+        if isinstance(parent_qobject, QObject) and hasattr(parent_qobject, "pid"):
+            self.template_pid = parent_qobject.pid
         self.element_type = None
         self._name = name
         self._rect = QRectF(0, 0, rect.width(), rect.height())
@@ -214,7 +217,8 @@ class ComponentElement(QGraphicsItem, QObject):
     def to_dict(self) -> Dict[str, Any]:
         # Serialize properties directly
         return {
-            'type': self.__class__.__name__,
+            'pid': self._pid,
+            'template_pid': self.template_pid,
             'name': self.name,
             'rect': [self._rect.x(), self._rect.y(), self._rect.width(), self._rect.height()],
             'content': self._content,
@@ -229,11 +233,12 @@ class ComponentElement(QGraphicsItem, QObject):
         }
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any], parent_qobject=None):
+    def from_dict(cls, data: Dict[str, Any]):
+        pid = data.get("pid")
         name = data.get("name", "Element")
         rect = list_to_qrectf(data.get("rect", [0, 0, 100, 40]))
-
-        element = create_element(data.get("type"), name, rect, parent_qobject)
+        element = cls(pid=pid, rect=rect, parent_qobject=None, name=name)
+        element.template_pid = data.get("template_pid")
 
         # Shared properties
         element.content      = data.get("content", "")
@@ -246,8 +251,6 @@ class ComponentElement(QGraphicsItem, QObject):
         element.setZValue(data.get("z_value", 0))
 
         return element
-
-
 
     def resize_from_handle(self, handle: ResizeHandle, delta: QPointF, start_scene_rect: QRectF):
         self.prepareGeometryChange()
@@ -353,8 +356,8 @@ class TextElement(ComponentElement):
         return data
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any], parent_qobject=None):
-        element = super().from_dict(data, parent_qobject)
+    def from_dict(cls, data: Dict[str, Any]):
+        element = super().from_dict(data)
         font_string = data.get("font", "Arial,12")
         font = QFont()
         if not font.fromString(font_string):
@@ -416,8 +419,8 @@ class ImageElement(ComponentElement):
         return data
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any], parent_qobject=None):
-        element = super().from_dict(data, parent_qobject)
+    def from_dict(cls, data: Dict[str, Any]):
+        element = super().from_dict(data)
         element.keep_aspect = data.get("keep_aspect", True)
         return element
 

@@ -12,6 +12,7 @@ from PySide6.QtWidgets import QMessageBox
 
 #from prototypyside.models.game_component_elements import create_element
 from prototypyside.utils.qt_helpers import list_to_qrectf
+from prototypyside.utils.unit_converter import to_px
 # Use TYPE_CHECKING for type hinting
 if TYPE_CHECKING:
     from prototypyside.models.component_elements import ComponentElement
@@ -24,61 +25,42 @@ class ComponentTemplate(QObject): # NOW INHERITS QObject
         super().__init__(parent) # Call QObject's init with parent
         self._pid = pid
         self.name = name
-        self.width_in = parse_dimension(width) if isinstance(width, str) else float(width)
-        self.height_in = parse_dimension(height) if isinstance(height, str) else float(height)
+        self.width = parse_dimension(width) if isinstance(width, str) else float(width)
+        self.height = parse_dimension(height) if isinstance(height, str) else float(height)
         self.dpi = dpi
         self.elements: List['ComponentElement'] = []
         self.background_image_path: Optional[str] = None
-        self._name_counters = {
-            'ImageElement': 1,
-            'TextElement': 1
-        }
-
-    def generate_name(self, element_type):
-        base_name = f"{element_type.replace('Element', '').lower()}_"
-        for name, val in self._name_counters.items():
-            if element_type == name:
-                new_name = base_name + str(val)
-                self._name_counters[name] += 1
-                return new_name
 
     @property
-    def pid(self) -> int:
+    def pid(self) -> str:
         return self._pid
+
+    @pid.setter
+    def pid(self, value):
+        self._pid = value
+        self.template_changed.emit()
         
     @property
     def width_px(self) -> int:
-        return int(self.width_in * self.dpi)
+        return to_px(self.width * self.dpi)
+
+    # @width_px.setter
+    # def width_px(self, px: int):
+    #     to_px(self.width) = px / self.dpi
 
     @property
     def height_px(self) -> int:
-        return int(self.height_in * self.dpi)
+        return to_px(self.height * self.dpi)
 
-    def set_width_px(self, px: int):
-        self.width_in = px / self.dpi
+    # @height_px.setter
+    # def height_px(self, px: int):
+    #     self.height_in = px / self.dpi
 
-    def set_height_px(self, px: int):
-        self.height_in = px / self.dpi
 
     def add_element(self, element) -> 'ComponentElement':           
-        # from prototypyside.models.game_component_elements import TextElement, ImageElement
-        # if not name or name in self._name_counters.keys():
-        #     name = self.generate_name(element_type)
-        # if element_type == "TextElement" and isinstance(rect, QRectF):
-        #     element = TextElement(name, rect, parent_qobject=self)
-        # elif element_type == "ImageElement" and isinstance(rect, QRectF):
-        #     element = ImageElement(name, rect, parent_qobject=self)
-        # else:
-        #     raise TypeError
-        #     print(f"Elements must be of type ImageElement or TextElement, not: {element_type}")
         max_z = max([e.zValue() for e in self.elements] + [0]) if self.elements else 0
         element.setZValue(max_z + 100)
         self.elements.append(element)
-        # Re-connect element_changed for new elements
-        # This connection should ideally happen in the MainDesignerWindow when elements are added to scene.
-        # However, if template needs to be notified of element changes for its own internal state, keep it.
-        # For now, let's connect it in MainDesignerWindow when adding to scene for clarity.
-        # element.element_changed.connect(self.template_changed) # REMOVE THIS LINE (connect in MainDesignerWindow)
         self.template_changed.emit()
         self.element_z_order_changed.emit() 
         return element
@@ -86,9 +68,9 @@ class ComponentTemplate(QObject): # NOW INHERITS QObject
     def remove_element(self, element: 'ComponentElement'):
         if element in self.elements:
             self.elements.remove(element)
-            # Removed disconnect for element_changed as it's now managed by MainDesignerWindow
-            self.template_changed.emit() # Re-add signal emission
-            self.element_z_order_changed.emit() # Re-add signal emission
+            element.template_pid = None  # Optional: sever reference
+            self.template_changed.emit()
+            self.element_z_order_changed.emit()
 
     def load_csv(self, filepath: str):
         try:
@@ -120,36 +102,29 @@ class ComponentTemplate(QObject): # NOW INHERITS QObject
 
     def to_dict(self) -> Dict[str, Any]:
         return {
-            'width_in': self.width_in,
-            'height_in': self.height_in,
+            'pid': self.pid,
+            'name': self.name,
+            'width': self.width,
+            'height': self.height,
             'dpi': self.dpi,
             'background_image_path': self.background_image_path,
-            'elements': [e.to_dict() for e in self.elements]
+            'element_pids': [e.pid for e in self.elements]  # 🔄 save only references
         }
-        
+  
     @classmethod
     def from_dict(cls, data: Dict[str, Any], parent: QObject = None) -> 'ComponentTemplate':
         template = cls(
-            width=data.get('width_in', 2.5),
-            height=data.get('height_in', 3.5),
+            pid=data['pid'],
+            width=data.get('width', 2.5),
+            height=data.get('height', 3.5),
             dpi=data.get('dpi', 300),
-            parent=parent
+            parent=parent,
+            name=data.get('name', "Component Template")
         )
+
         template.background_image_path = data.get('background_image_path')
-
-        for element_data in data.get('elements', []):
-            element_type = element_data.get("type")
-            if not element_type:
-                continue
-
-            # Dispatch to correct class via base class factory method
-            element = ComponentElement.from_dict(element_data, parent_qobject=template)
-            template.elements.append(element)
-
-        template.elements.sort(key=lambda e: e.zValue())
-        template.template_changed.emit()
+        template._pending_element_pids = data.get('element_pids', [])  # <- defer element resolution
         return template
-
 
     def reorder_element_z(self, element: 'ComponentElement', direction: int):
         if element not in self.elements:
