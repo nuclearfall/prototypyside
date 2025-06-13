@@ -10,13 +10,13 @@ from prototypyside.config import (
 )
 
 if TYPE_CHECKING:
-    from prototypyside.models.game_component_elements import GameComponentElement
+    from prototypyside.models.game_component_elements import ComponentElement
 else:
-    GameComponentElement = object
+    ComponentElement = object
 
 
 class ResizeHandle(QGraphicsRectItem):
-    def __init__(self, parent_item: 'GameComponentElement', handle_type: HandleType):
+    def __init__(self, parent_item: 'ComponentElement', handle_type: HandleType):
         size = HANDLE_SIZE
         half_size = size / 2
         super().__init__(-half_size, -half_size, size, size, parent_item)

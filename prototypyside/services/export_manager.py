@@ -6,9 +6,9 @@ from typing import List, Optional
 from PySide6.QtCore import QSize, QSizeF, Qt, QRectF
 from PySide6.QtGui import QPainter, QImage, QPixmap, QPdfWriter, QPageSize
 
-# Assuming GameComponentTemplate and GameComponentGraphicsScene are importable
-from prototypyside.models.game_component_template import GameComponentTemplate
-from prototypyside.views.graphics_scene import GameComponentGraphicsScene
+# Assuming ComponentTemplate and ComponentGraphicsScene are importable
+from prototypyside.models.component_template import ComponentTemplate
+from prototypyside.views.graphics_scene import ComponentGraphicsScene
 from prototypyside.widgets.page_size_selector import PageSizeSelector
 from prototypyside.widgets.page_size_dialog import PageSizeDialog
 
@@ -18,9 +18,9 @@ class ExportManager:
         # No initial state needed, as methods will take templates directly
         pass
 
-    def _render_template_to_image(self, template: GameComponentTemplate) -> Optional[QImage]:
+    def _render_template_to_image(self, template: ComponentTemplate) -> Optional[QImage]:
         """
-        Renders a single GameComponentTemplate instance to a QImage.
+        Renders a single ComponentTemplate instance to a QImage.
         This is a helper method used by both PNG and PDF export.
         """
         image = QImage(template.width_px, template.height_px, QImage.Format_ARGB32)
@@ -44,7 +44,7 @@ class ExportManager:
 
         # Create a temporary scene for rendering the template elements
         scene_rect = QRectF(0, 0, template.width_px, template.height_px)
-        temp_scene = GameComponentGraphicsScene(scene_rect, parent=None)
+        temp_scene = ComponentGraphicsScene(scene_rect, parent=None)
         for element in template.elements:
             temp_scene.addItem(element)
 
@@ -61,9 +61,9 @@ class ExportManager:
 
         return image
 
-    def export_png(self, templates: List[GameComponentTemplate], output_dir: Path, is_cli_mode: bool = False) -> bool:
+    def export_png(self, templates: List[ComponentTemplate], output_dir: Path, is_cli_mode: bool = False) -> bool:
         """
-        Exports a list of GameComponentTemplates as individual PNG images.
+        Exports a list of ComponentTemplates as individual PNG images.
         Handles both GUI (through MainDesignerWindow) and CLI modes.
         Returns True on success, False on failure.
         """
@@ -124,7 +124,7 @@ class ExportManager:
         is_cli_mode: bool = False
     ) -> bool:
         """
-        Exports a list of GameComponentTemplates as a single PDF document.
+        Exports a list of ComponentTemplates as a single PDF document.
         Handles both GUI (through MainDesignerWindow) and CLI modes.
         Returns True on success, False on failure.
         """

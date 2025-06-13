@@ -18,6 +18,8 @@ from prototypyside.views.component_tab import ComponentTab
 # (e.g., AppSettings if it's truly global, not per-tab)
 from prototypyside.services.app_settings import AppSettings
 from prototypyside.widgets.page_size_dialog import PageSizeDialog # Used in New Template dialog
+from prototypyside.services.proto_registry import ProtoRegistry
+
 
 class MainDesignerWindow(QMainWindow):
     def __init__(self):
@@ -27,8 +29,8 @@ class MainDesignerWindow(QMainWindow):
         self.setMinimumSize(800, 600)
 
         # Main application settings, might be shared or passed to tabs
-        self.app_settings = AppSettings(unit='px', display_dpi=300, print_dpi=300)
-
+        self.settings = AppSettings(unit='px', display_dpi=300, print_dpi=300)
+        self.registry = ProtoRegistry()
         self.tab_widget: Optional[QTabWidget] = None
         self.palette_dock: Optional[QDockWidget] = None
         self.layers_dock: Optional[QDockWidget] = None
@@ -142,7 +144,7 @@ class MainDesignerWindow(QMainWindow):
 
     @Slot()
     def add_new_component_tab(self):
-        new_tab = ComponentTab(parent=self)
+        new_tab = ComponentTab(parent=self, settings=self.settings, registry=self.registry)
         # Connect the tab's status message signal to the main window's slot
         new_tab.status_message_signal.connect(self.show_status_message)
         new_tab.tab_title_changed.connect(self.on_tab_title_changed)

@@ -2,10 +2,10 @@ from PySide6.QtWidgets import QGraphicsItem
 from PySide6.QtCore import Signal
 
 
-from prototypyside.models.game_component_template import GameComponentTemplate
-from prototypyside.models.game_component_elements import TextElement, ImageElement
+from prototypyside.models.component_template import ComponentTemplate
+from prototypyside.models.component_elements import TextElement, ImageElement
 
-class GameComponentInstance(QGraphicsItem):
+class ComponentInstance(QGraphicsItem):
     update_cache = Signal()
     def __init__(self, template, data, rect, parent=None):
         super().__init__(parent)

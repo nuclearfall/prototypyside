@@ -4,6 +4,7 @@ from PySide6.QtCore import QObject, Signal
 
 from prototypyside.utils.proto_helpers import (VALID_ID_PREFIXES, 
         ELEMENT_PREFIXES, parse_pid, get_prefix, issue_pid, is_pid_prefix)
+from prototypyside.services.proto_factory import ProtoFactory
 
 
 ### All Proto Objects Must be Created Through the Registry ###
@@ -12,9 +13,9 @@ class ProtoRegistry(QObject):
     object_removed = Signal(str)    # pid
     object_added = Signal(str)      # pid
 
-    def __init__(self, factory):
+    def __init__(self):
         super().__init__()
-        self._factory = factory
+        self._factory = ProtoFactory()
         self._objects: dict[str, object] = {}
 
     def register(self, obj):
@@ -34,12 +35,12 @@ class ProtoRegistry(QObject):
             obj.update_cache.connect(lambda: self.object_changed.emit(pid))
 
     def create(self, pid: str, **kwargs) -> object:
-
-        prefix, uuid = parse_pid(pid)
-        if uuid is None and is_pid_prefix(pid):
+        print(f"pid prefix: {pid}")
+        if is_pid_prefix(pid):
             pid = issue_pid(pid)
+            print(f"Issued pid: {pid}")
         print(kwargs)
-        obj = self._factory.create(pid, **kwargs)
+        obj = self._factory.create(pid=pid, **kwargs)
         self.register(obj)
         return obj
 

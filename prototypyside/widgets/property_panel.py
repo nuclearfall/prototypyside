@@ -1,5 +1,5 @@
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QLineEdit, QPushButton, QComboBox,
-                                 QGroupBox, QFormLayout, QCheckBox, QColorDialog)
+                                 QGroupBox, QFormLayout, QCheckBox, QColorDialog, QLabel)
 from PySide6.QtCore import Qt, Signal, QRectF
 from PySide6.QtGui import QColor, QPalette
 from prototypyside.widgets.unit_field import UnitField

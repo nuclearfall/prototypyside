@@ -4,11 +4,11 @@ import json
 from typing import Optional, Dict, Tuple, Type, Union, List
 from pathlib import Path
 
-from prototypyside.models.game_component_template import GameComponentTemplate
-from prototypyside.models.game_component_elements import TextElement, ImageElement
-from prototypyside.models.layout_model import LayoutSlot, LayoutTemplate
+from prototypyside.models.component_template import ComponentTemplate
+from prototypyside.models.component_elements import TextElement, ImageElement
+from prototypyside.models.layout_template import LayoutSlot, LayoutTemplate
 
-from prototypyside.models.component_instance import GameComponentInstance
+from prototypyside.models.component_instance import ComponentInstance
 from prototypyside.utils.proto_helpers import (
     VALID_ID_PREFIXES,
     ELEMENT_PREFIXES,
@@ -22,8 +22,8 @@ from prototypyside.utils.proto_helpers import (
 PROTO_OBJECTS: Dict[str, Type] = {
 "te": TextElement,
 "ie": ImageElement,
-"ct": GameComponentTemplate,
-"ci": GameComponentInstance,
+"ct": ComponentTemplate,
+"ci": ComponentInstance,
 "lt": LayoutTemplate,
 "ls": LayoutSlot,
 }
@@ -64,21 +64,19 @@ class ProtoFactory:
             return PROTO_OBJECTS[prefix]
         return None
 
-    def create(self, pid_str: str, **kwargs):
-        final_pid = self.protoid(pid_str)
-        obj_type = self.get_object_type(final_pid)
+    def create(self, pid: str, **kwargs):
+        obj_type = self.get_object_type(pid)
 
         if not obj_type:
-            raise ValueError(f"No object type mapped for pid prefix in: {final_pid}")
+            raise ValueError(f"No object type mapped for pid prefix in: {pid}")
 
         # Create the object
-        obj = obj_type(pid=final_pid, **kwargs)
+        obj = obj_type(pid=pid, **kwargs)
 
         # Safely add to template if defined
         template = getattr(obj, "template", None)
         if template:
             template.add_item(obj)
-
         return obj
 
 

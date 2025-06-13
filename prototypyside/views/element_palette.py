@@ -60,11 +60,12 @@ class ElementPalette(QListWidget):
         print(f"We've started dragging of prefix mime data: {prefix}")
 
         if prefix:
-            print(prefix)
-            mime_data.setText(prefix)
+            f"We've started dragging of prefix mime data: {prefix}"
+            mime_data.setText(item.data(Qt.UserRole))
 
         drag = QDrag(self)
         drag.setMimeData(mime_data)
+        print(mime_data)
         drag.exec(Qt.CopyAction)
 
     def mouseMoveEvent(self, event: QMouseEvent):

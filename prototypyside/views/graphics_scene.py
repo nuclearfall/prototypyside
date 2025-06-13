@@ -5,7 +5,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, QPointF, QRectF, Signal
 from PySide6.QtGui import QColor, QPen, QPainter, QPixmap, QTransform
 
-from prototypyside.config import MEASURE_INCREMENT
+from prototypyside.config import MEASURE_INCREMENT, LIGHTEST_GRAY, DARKEST_GRAY
 from prototypyside.utils.unit_converter import parse_dimension
 from prototypyside.utils.graphics_item_helpers import is_movable
 from prototypyside.views.graphics_items import ResizeHandle
@@ -16,15 +16,15 @@ import math
 from prototypyside.utils.qt_helpers import list_to_qrectf
 if TYPE_CHECKING:
     from prototypyside.views.main_window import MainDesignerWindow
-    from prototypyside.models.game_component_template import GameComponentTemplate
-    from prototypyside.models.game_component_elements import GameComponentElement
+    from prototypyside.models.component_template import ComponentTemplate
+    from prototypyside.models.component_elements import ComponentElement
 else:
     MainDesignerWindow = object
-    GameComponentTemplate = object
-    GameComponentElement = object
+    ComponentTemplate = object
+    ComponentElement = object
 
 
-class GameComponentGraphicsScene(QGraphicsScene):
+class ComponentGraphicsScene(QGraphicsScene):
     element_dropped = Signal(QPointF, str)
     selectionChanged = Signal()
 
@@ -53,7 +53,7 @@ class GameComponentGraphicsScene(QGraphicsScene):
         self.measure_by = "in"
         self.is_snap_to_grid = True
 
-        self.selected_item: Optional['GameComponentElement'] = None
+        self.selected_item: Optional['ComponentElement'] = None
         self._max_z_value = 0
         self.connecting_line: Optional[QGraphicsRectItem] = None
         self._dragging_item = None
@@ -77,7 +77,7 @@ class GameComponentGraphicsScene(QGraphicsScene):
 
         main_window: 'MainDesignerWindow' = self.parent()
         if main_window and hasattr(main_window, 'current_template') and main_window.current_template:
-            template: 'GameComponentTemplate' = main_window.current_template
+            template: 'ComponentTemplate' = main_window.current_template
             if template.background_image_path:
                 bg_pixmap = QPixmap(template.background_image_path)
                 if not bg_pixmap.isNull():
@@ -112,41 +112,52 @@ class GameComponentGraphicsScene(QGraphicsScene):
             return
 
         unit = self.settings.unit
-        dpi = self.settings.dpi
-        base = parse_dimension("1 " + unit, dpi)
-        spacing = int(round(base * MEASURE_INCREMENT[unit]))
+        levels = sorted(MEASURE_INCREMENT[unit].keys(), reverse=True)
+        num_levels = len(levels)
 
-        pen = QPen(QColor(220, 220, 220))
-        painter.setPen(pen)
+        # Gray from lightest (level 3) to darkest (level 1)
+        gray_range = LIGHTEST_GRAY - DARKEST_GRAY
 
-        left = int(rect.left())
-        right = int(rect.right())
-        top = int(rect.top())
-        bottom = int(rect.bottom())
+        for i, level in enumerate(levels):
+            spacing = self.get_grid_spacing(level)
 
-        x = left - (left % spacing)
-        while x < right:
-            painter.drawLine(x, top, x, bottom)
-            x += spacing
+            gray_value = LIGHTEST_GRAY - int(i * (gray_range / max(1, num_levels - 1)))
+            pen = QPen(QColor(gray_value, gray_value, gray_value))
+            painter.setPen(pen)
 
-        y = top - (top % spacing)
-        while y < bottom:
-            painter.drawLine(left, y, right, y)
-            y += spacing
+            left = int(rect.left())
+            right = int(rect.right())
+            top = int(rect.top())
+            bottom = int(rect.bottom())
 
-    def get_grid_spacing(self) -> int:
+            x = left - (left % spacing)
+            while x < right:
+                painter.drawLine(x, top, x, bottom)
+                x += spacing
+
+            y = top - (top % spacing)
+            while y < bottom:
+                painter.drawLine(left, y, right, y)
+                y += spacing
+
+
+    def get_grid_spacing(self, level: int) -> int:
         unit = self.settings.unit
         dpi = self.settings.dpi
         base = parse_dimension("1 " + unit, dpi)
-        return int(round(base * MEASURE_INCREMENT[unit]))
+        increment = MEASURE_INCREMENT[unit].get(level)
+        if increment is None:
+            raise ValueError(f"Invalid grid level {level} for unit '{unit}'")
+        return int(round(base * increment))
 
     def snap_to_grid(self, pos: QPointF) -> QPointF:
         if not self.is_snap_to_grid:
             return pos
-        spacing = self.get_grid_spacing()
+        spacing = self.get_grid_spacing(level=3)
         x = math.floor(pos.x() / spacing) * spacing
         y = math.floor(pos.y() / spacing) * spacing
         return QPointF(x, y)
+
 
     def apply_snap(self, pos: QPointF, grid_size: float = 10.0) -> QPointF:
         return self.snap_to_grid(pos, grid_size)
@@ -276,9 +287,9 @@ class GameComponentGraphicsScene(QGraphicsScene):
             super().dropEvent(event)
 
 
-    def get_selected_element(self) -> Optional['GameComponentElement']:
+    def get_selected_element(self) -> Optional['ComponentElement']:
         selected_items = self.selectedItems()
-        if selected_items and isinstance(selected_items[0], GameComponentElement):
+        if selected_items and isinstance(selected_items[0], ComponentElement):
             self.property_panel.get_all(selected_items[0])
             return selected_items[0]
         return None

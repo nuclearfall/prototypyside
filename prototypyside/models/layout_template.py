@@ -29,7 +29,7 @@ class LayoutSlot:
 
 
 @dataclass
-class LayoutModel:
+class LayoutTemplate:
     name: str
     page_size: Tuple[float, float]  # Width, height in points or mm
     associated_template_name: str

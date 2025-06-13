@@ -9,8 +9,34 @@ HANDLE_SIZE = 8
 HANDLE_COLOR = QColor(0, 120, 215)
 HANDLE_GRAB_WIDTH = 10 # Larger grab area for handles
 
-MEASURE_INCREMENT = {"cm": 0.20, "in": 0.0625, "\"": 0.0625, "px": 20}
-MEASURE_ADJUSTMENT = {"cm": 0.05, "in": 0.0125, "px": 5}
+MEASURE_INCREMENT = {
+    "cm": {
+        3: 0.25, 
+        2: .50,
+        1: 1,
+    },
+    "in": {
+        3: 0.0625,
+        2: 0.25,
+        1: 1.0
+    },
+    "px": {
+        3: 25,
+        2: 50,
+        1: 100,
+    },
+    "pt": {
+        3: 9,
+        2: 36,
+        1: 72 
+    }
+}
+
+
+VALID_MEASURES = [e for e in MEASURE_INCREMENT]
+
+LIGHTEST_GRAY = 240  # very light gray
+DARKEST_GRAY = 200  # dark gray (lower value = darker)
 
 # Define handle positions for clarity
 class HandleType(Enum):

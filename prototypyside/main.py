@@ -8,7 +8,7 @@ import json
 
 # Import your main window class
 from prototypyside.views.main_window import MainDesignerWindow
-from prototypyside.models.game_component_template import GameComponentTemplate
+from prototypyside.models.component_template import ComponentTemplate
 from prototypyside.services.export_manager import ExportManager # NEW: Import ExportManager
 
 if __name__ == "__main__":
@@ -75,7 +75,7 @@ if __name__ == "__main__":
         try:
             with open(template_path, 'r', encoding='utf-8') as f:
                 data = json.load(f)
-            new_template = GameComponentTemplate.from_dict(data, parent=designer)
+            new_template = ComponentTemplate.from_dict(data, parent=designer)
             designer.load_template_instance(new_template)
             print(f"CLI: Template loaded from {template_path}")
             template_loaded_successfully = True

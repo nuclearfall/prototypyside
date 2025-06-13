@@ -13,20 +13,21 @@ from PySide6.QtWidgets import QMessageBox
 #from prototypyside.models.game_component_elements import create_element
 from prototypyside.utils.qt_helpers import list_to_qrectf
 # Use TYPE_CHECKING for type hinting
-from prototypyside.models.game_component_elements import GameComponentElement
+if TYPE_CHECKING:
+    from prototypyside.models.component_elements import ComponentElement
 
-
-class GameComponentTemplate(QObject): # NOW INHERITS QObject
+class ComponentTemplate(QObject): # NOW INHERITS QObject
     template_changed = Signal() # Re-add signal
     element_z_order_changed = Signal() # Re-add signal
 
-    def __init__(self, width=2.5, height=3.5, dpi=300, parent: QObject = None, name="Component Template"): # Add parent arg
+    def __init__(self, pid, width=2.5, height=3.5, dpi=300, parent: QObject = None, name="Component Template"): # Add parent arg
         super().__init__(parent) # Call QObject's init with parent
+        self._pid = pid
         self.name = name
         self.width_in = parse_dimension(width) if isinstance(width, str) else float(width)
         self.height_in = parse_dimension(height) if isinstance(height, str) else float(height)
         self.dpi = dpi
-        self.elements: List['GameComponentElement'] = []
+        self.elements: List['ComponentElement'] = []
         self.background_image_path: Optional[str] = None
         self._name_counters = {
             'ImageElement': 1,
@@ -42,6 +43,10 @@ class GameComponentTemplate(QObject): # NOW INHERITS QObject
                 return new_name
 
     @property
+    def pid(self) -> int:
+        return self._pid
+        
+    @property
     def width_px(self) -> int:
         return int(self.width_in * self.dpi)
 
@@ -55,17 +60,17 @@ class GameComponentTemplate(QObject): # NOW INHERITS QObject
     def set_height_px(self, px: int):
         self.height_in = px / self.dpi
 
-    def add_element(self, element_type: str, name: str, rect: QRectF) -> 'GameComponentElement':           
-        from prototypyside.models.game_component_elements import TextElement, ImageElement
-        if not name or name in self._name_counters.keys():
-            name = self.generate_name(element_type)
-        if element_type == "TextElement" and isinstance(rect, QRectF):
-            element = TextElement(name, rect, parent_qobject=self)
-        elif element_type == "ImageElement" and isinstance(rect, QRectF):
-            element = ImageElement(name, rect, parent_qobject=self)
-        else:
-            raise TypeError
-            print(f"Elements must be of type ImageElement or TextElement, not: {element_type}")
+    def add_element(self, element) -> 'ComponentElement':           
+        # from prototypyside.models.game_component_elements import TextElement, ImageElement
+        # if not name or name in self._name_counters.keys():
+        #     name = self.generate_name(element_type)
+        # if element_type == "TextElement" and isinstance(rect, QRectF):
+        #     element = TextElement(name, rect, parent_qobject=self)
+        # elif element_type == "ImageElement" and isinstance(rect, QRectF):
+        #     element = ImageElement(name, rect, parent_qobject=self)
+        # else:
+        #     raise TypeError
+        #     print(f"Elements must be of type ImageElement or TextElement, not: {element_type}")
         max_z = max([e.zValue() for e in self.elements] + [0]) if self.elements else 0
         element.setZValue(max_z + 100)
         self.elements.append(element)
@@ -78,7 +83,7 @@ class GameComponentTemplate(QObject): # NOW INHERITS QObject
         self.element_z_order_changed.emit() 
         return element
 
-    def remove_element(self, element: 'GameComponentElement'):
+    def remove_element(self, element: 'ComponentElement'):
         if element in self.elements:
             self.elements.remove(element)
             # Removed disconnect for element_changed as it's now managed by MainDesignerWindow
@@ -123,7 +128,7 @@ class GameComponentTemplate(QObject): # NOW INHERITS QObject
         }
         
     @classmethod
-    def from_dict(cls, data: Dict[str, Any], parent: QObject = None) -> 'GameComponentTemplate':
+    def from_dict(cls, data: Dict[str, Any], parent: QObject = None) -> 'ComponentTemplate':
         template = cls(
             width=data.get('width_in', 2.5),
             height=data.get('height_in', 3.5),
@@ -138,7 +143,7 @@ class GameComponentTemplate(QObject): # NOW INHERITS QObject
                 continue
 
             # Dispatch to correct class via base class factory method
-            element = GameComponentElement.from_dict(element_data, parent_qobject=template)
+            element = ComponentElement.from_dict(element_data, parent_qobject=template)
             template.elements.append(element)
 
         template.elements.sort(key=lambda e: e.zValue())
@@ -146,7 +151,7 @@ class GameComponentTemplate(QObject): # NOW INHERITS QObject
         return template
 
 
-    def reorder_element_z(self, element: 'GameComponentElement', direction: int):
+    def reorder_element_z(self, element: 'ComponentElement', direction: int):
         if element not in self.elements:
             return
 

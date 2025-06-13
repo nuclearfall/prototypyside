@@ -9,13 +9,14 @@ from prototypyside.utils.style_serialization_helpers import save_style, load_sty
 from prototypyside.config import HandleType
 
 
-class GameComponentElement(QGraphicsItem, QObject):
+class ComponentElement(QGraphicsItem, QObject):
     element_changed = Signal()
 
-    def __init__(self, name: str, rect: QRectF,
-                 parent_qobject: Optional[QObject] = None):
+    def __init__(self, pid, rect: QRectF,
+                 parent_qobject: Optional[QObject] = None, name: str = "Element"):
         QObject.__init__(self, parent_qobject)
         QGraphicsItem.__init__(self)
+        self._pid = pid 
         self.element_type = None
         self._name = name
         self._rect = QRectF(0, 0, rect.width(), rect.height())
@@ -39,6 +40,9 @@ class GameComponentElement(QGraphicsItem, QObject):
         self.create_handles()
 
     # --- Property Getters and Setters (formerly handled by _style dict) ---
+    @property
+    def pid(self):
+        return self._pid
     @property
     def name(self):
         return self._name
@@ -311,10 +315,11 @@ class GameComponentElement(QGraphicsItem, QObject):
 
 
 
-class TextElement(GameComponentElement):
-    def __init__(self, name: str, rect: QRectF,
-                 parent_qobject: Optional[QObject] = None):
-        super().__init__(name, rect, parent_qobject)
+class TextElement(ComponentElement):
+    def __init__(self, pid, rect: QRectF,
+                 parent_qobject: Optional[QObject] = None, name: str = "Image Element"):
+
+        super().__init__(pid, rect, parent_qobject, name)
 
         self.element_type = "TextElement"
         self._font = QFont("Arial", 12)
@@ -358,13 +363,14 @@ class TextElement(GameComponentElement):
         return element
 
 
-class ImageElement(GameComponentElement):
-    def __init__(self, name: str, rect: QRectF,
-                 parent_qobject: Optional[QObject] = None):
-        super().__init__(name, rect, parent_qobject)
+class ImageElement(ComponentElement):
+    def __init__(self, pid, rect: QRectF,
+                 parent_qobject: Optional[QObject] = None, name: str = "Image Element"):
+        super().__init__(pid, rect, parent_qobject, name)
+
         self.element_type = "ImageElement"
         self._pixmap: Optional[QPixmap] = None
-        # _content is handled by GameComponentElement
+        # _content is handled by ComponentElement
         self.alignment = Qt.AlignCenter
         # Image-specific properties
         self._keep_aspect = True
@@ -467,11 +473,11 @@ class ImageElement(GameComponentElement):
         if path:
             self.content = path
     
-# def create_element(element_type: str, name: str, rect: QRectF, parent_qobject: Optional[QObject] = None) -> GameComponentElement:
-#     if element_type == "TextElement":
-#         return TextElement(name, rect, parent_qobject)
-#     elif element_type == "ImageElement":
-#         return ImageElement(name, rect, parent_qobject)
-#     else:
-#         return GameComponentElement(name, rect, parent_qobject)
+def create_element(element_type: str, name: str, rect: QRectF, parent_qobject: Optional[QObject] = None) -> ComponentElement:
+    if element_type == "TextElement":
+        return TextElement(name, rect, parent_qobject)
+    elif element_type == "ImageElement":
+        return ImageElement(name, rect, parent_qobject)
+    else:
+        return ComponentElement(name, rect, parent_qobject)
 

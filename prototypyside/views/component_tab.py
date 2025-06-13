@@ -16,7 +16,7 @@ from PySide6.QtGui import QPainter, QAction, QImage, QPixmap, QFont, QColor, QIc
 # Import views components
 from prototypyside.views.palettes import ComponentListWidget
 from prototypyside.views.layers_panel import LayersListWidget
-from prototypyside.views.graphics_scene import GameComponentGraphicsScene
+from prototypyside.views.graphics_scene import ComponentGraphicsScene
 from prototypyside.views.graphics_view import DesignerGraphicsView
 
 # Import widgets
@@ -26,9 +26,9 @@ from prototypyside.widgets.page_size_selector import PageSizeSelector # Potentia
 from prototypyside.widgets.pdf_export_dialog import PDFExportDialog
 from prototypyside.widgets.property_panel import PropertyPanel
 
-# Import models
-from prototypyside.models.game_component_template import GameComponentTemplate
-from prototypyside.models.game_component_elements import (GameComponentElement, TextElement, ImageElement)
+# Import models (no longer needed, using ProtoRegistry)
+# from prototypyside.models.game_component_template import ComponentTemplate
+from prototypyside.models.component_elements import (ComponentElement, TextElement, ImageElement)
 from prototypyside.services.app_settings import AppSettings
 from prototypyside.services.export_manager import ExportManager
 from prototypyside.services.property_setter import PropertySetter
@@ -38,15 +38,18 @@ class ComponentTab(QWidget):
     status_message_signal = Signal(str, str, int) # message, type, timeout_ms
     tab_title_changed = Signal(str) # For updating the tab title if needed
 
-    def __init__(self, parent: QWidget = None, template_data: Optional[Dict] = None):
+    def __init__(self, parent, settings, registry, template_data: Optional[Dict] = None):
         super().__init__(parent)
+
         self.settings = AppSettings(unit='px', display_dpi=300, print_dpi=300) # Each tab gets its own settings
-        self.current_template = GameComponentTemplate(parent=self) # Each tab gets its own template
-        self.merged_templates: List[GameComponentTemplate] = []
-        self._current_selected_element: Optional['GameComponentElement'] = None
+        self.registry = registry
+        if template_data is None:
+            self.current_template = registry.create('ct', ) # Each tab gets its own template
+        self.merged_templates: List[ComponentTemplate] = []
+        self._current_selected_element: Optional['ComponentElement'] = None
         self.export_manager = ExportManager()
 
-        self.scene: Optional[GameComponentGraphicsScene] = None
+        self.scene: Optional[ComponentGraphicsScene] = None
         self.view: Optional[DesignerGraphicsView] = None
         self.property_panel: Optional[PropertyPanel] = None
         self.layers_list: Optional[LayersListWidget] = None
@@ -87,7 +90,7 @@ class ComponentTab(QWidget):
 
         # Setup scene and view
         scene_rect = QRectF(0, 0, self.current_template.width_px, self.current_template.height_px)
-        self.scene = GameComponentGraphicsScene(scene_rect, self, self.settings) # Parent is self (ComponentTab)
+        self.scene = ComponentGraphicsScene(scene_rect, self, self.settings) # Parent is self (ComponentTab)
         self.view = DesignerGraphicsView(self.scene)
         self.view.setRenderHints(QPainter.Antialiasing | QPainter.TextAntialiasing | QPainter.SmoothPixmapTransform)
         self.view.setViewportUpdateMode(QGraphicsView.FullViewportUpdate)
@@ -144,7 +147,7 @@ class ComponentTab(QWidget):
             self.scene.clear()
 
         # Create new template from data
-        self.current_template = GameComponentTemplate.from_dict(template_data, parent=self)
+        self.current_template = ComponentTemplate.from_dict(template_data, parent=self)
 
         # Update scene dimensions and clear existing scene
         self.scene.set_template_dimensions(self.current_template.width_px, self.current_template.height_px)
@@ -192,8 +195,8 @@ class ComponentTab(QWidget):
         # This will be a widget that the QMainWindow will place in a DockWidget
         self.palette = ComponentListWidget()
         components = [
-            ("Text Field", "TextElement", "T"),
-            ("Image Container", "ImageElement", "🖼️"),
+            ("Text Field", "te", "T"),
+            ("Image Container", "ie", "🖼️"),
         ]
         for name, etype, icon in components:
             item = QListWidgetItem(f"{icon} {name}")
@@ -345,10 +348,10 @@ class ComponentTab(QWidget):
         self.current_template.template_changed.emit()
         self.show_status_message(f"DPI updated to {new_dpi}.", "info")
 
-    def get_selected_element(self) -> Optional['GameComponentElement']:
+    def get_selected_element(self) -> Optional['ComponentElement']:
         items = self.scene.selectedItems()
         if items:
-            return items[0] if isinstance(items[0], GameComponentElement) else None
+            return items[0] if isinstance(items[0], ComponentElement) else None
         return None
 
     # @Slot(QFont)
@@ -425,7 +428,7 @@ class ComponentTab(QWidget):
 
     @Slot(QGraphicsItem)
     def select_element_from_layers_list(self, element: QGraphicsItem):
-        if isinstance(element, GameComponentElement):
+        if isinstance(element, ComponentElement):
             self.scene.blockSignals(True)
             self.scene.clearSelection()
             element.setSelected(True)
@@ -473,13 +476,7 @@ class ComponentTab(QWidget):
 
     def add_element_from_drop(self, scene_pos: QPointF, element_type: str):
         self.scene.clearSelection()
-
-        default_width, default_height = 100, 40
-        if element_type == "TextElement":
-            default_width, default_height = 180, 60
-        elif element_type == "ImageElement":
-            default_width, default_height = 200, 150
-
+        print(f"{element_type}")
         base_name = f"{element_type.replace('Element', '').lower()}_"
         counter = 1
         existing_names = {el.name for el in self.current_template.elements}
@@ -487,10 +484,19 @@ class ComponentTab(QWidget):
             counter += 1
         new_name = f"{base_name}{counter}"
 
-        new_rect_local = QRectF(0, 0, default_width, default_height)
+        if element_type == "te":
+            default_width, default_height = 180, 60
+        elif element_type == "ie":
+            default_width, default_height = 200, 150
+        else:
+            raise ValueError(f"Unknown element type: {element_type}")
 
-        new_element = self.current_template.add_element(
-            element_type, None, new_rect_local
+        new_rect = QRectF(0, 0, default_width, default_height)
+        new_element = self.registry.create(
+            pid=element_type,
+            name=new_name,
+            rect=new_rect,
+            parent_qobject=self.current_template
         )
 
         self.scene.addItem(new_element)
@@ -500,8 +506,8 @@ class ComponentTab(QWidget):
 
         visual_offset = new_element.boundingRect().topLeft()
         new_element.setPos(scene_pos - visual_offset)
-
         new_element.setSelected(True)
+
 
     def set_element_controls_enabled(self, enabled: bool):
         self.property_panel.setEnabled(enabled)
@@ -585,7 +591,7 @@ class ComponentTab(QWidget):
             self.merged_templates = []
 
             for i, row_data in enumerate(data_rows):
-                merged_template = GameComponentTemplate.from_dict(self.current_template.to_dict(), parent=None)
+                merged_template = ComponentTemplate.from_dict(self.current_template.to_dict(), parent=None)
                 merged_template.background_image_path = self.current_template.background_image_path
 
                 for element in merged_template.elements:
