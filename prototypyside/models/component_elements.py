@@ -17,9 +17,7 @@ class ComponentElement(QGraphicsItem, QObject):
         QObject.__init__(self, parent_qobject)
         QGraphicsItem.__init__(self)
         self._pid = pid 
-        self.template_pid: Optional[str] = None
-        if isinstance(parent_qobject, QObject) and hasattr(parent_qobject, "pid"):
-            self.template_pid = parent_qobject.pid
+        self._template_pid: Optional[str] = parent_qobject.pid if parent_qobject else None
         self.element_type = None
         self._name = name
         self._rect = QRectF(0, 0, rect.width(), rect.height())
@@ -42,7 +40,18 @@ class ComponentElement(QGraphicsItem, QObject):
         self._handles: Dict[HandleType, ResizeHandle] = {}
         self.create_handles()
 
-    # --- Property Getters and Setters (formerly handled by _style dict) ---
+
+
+    # --- Property Getters and Setters --- #
+
+    @property
+    def template_pid(self):
+        return self._template_pid 
+
+    @template_pid.setter
+    def template_pid(self, pid_val):
+        self._template_pid = pid_val
+
     @property
     def pid(self):
         return self._pid
@@ -231,6 +240,8 @@ class ComponentElement(QGraphicsItem, QObject):
             'border_width': self.border_width, # Store as string
             'alignment': int(self.alignment), # Store Qt.AlignmentFlag as int
         }
+    def set_template(self, pid):
+        self._template_pid = pid
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]):
@@ -475,12 +486,5 @@ class ImageElement(ComponentElement):
         path, _ = QFileDialog.getOpenFileName(None, "Select Image", "", "Images (*.png *.jpg *.bmp *.gif)")
         if path:
             self.content = path
-    
-def create_element(element_type: str, name: str, rect: QRectF, parent_qobject: Optional[QObject] = None) -> ComponentElement:
-    if element_type == "TextElement":
-        return TextElement(name, rect, parent_qobject)
-    elif element_type == "ImageElement":
-        return ImageElement(name, rect, parent_qobject)
-    else:
-        return ComponentElement(name, rect, parent_qobject)
+            
 

@@ -165,7 +165,7 @@ class MainDesignerWindow(QMainWindow):
         if path:
             try:
                 loaded_template = self.registry.load_from_file(path)
-                #new_tab = registry.create_from_dict(pid='ct', parent=parent, settings=self.settings, registry=self.registry, template_data=data)
+                print(loaded_template)
                 new_tab = ComponentTab(parent=self, registry=self.registry, template=loaded_template)
 
                 new_tab.status_message_signal.connect(self.show_status_message)

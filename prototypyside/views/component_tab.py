@@ -62,7 +62,8 @@ class ComponentTab(QWidget):
         self.setup_ui()
         self.setup_shortcuts()
 
-        self.update_game_component_scene() # Initialize with default template
+        self._refresh_scene()
+
 
     def setup_ui(self):
         main_layout = QVBoxLayout(self)
@@ -326,6 +327,20 @@ class ComponentTab(QWidget):
         self.current_template.template_changed.emit()
         self.tab_title_changed.emit(self.current_template.name if self.current_template.name else "Unnamed Template")
 
+    def _refresh_scene(self):
+        # Clear old items (grid/background is drawn in drawBackground, not as items)
+        self.scene.clear()
+
+        # Make sure scene rect matches template (in case width/height changed)
+        self.scene.setSceneRect(0, 0,
+                                self.current_template.width_px,
+                                self.current_template.height_px)
+
+        # Add every element back into the QGraphicsScene
+        for element in self.current_template.elements:
+            self.scene.addItem(element)
+            element.hide_handles()
+
     @Slot()
     def on_template_dpi_changed(self):
         new_dpi = self.game_component_dpi_spin.value()
@@ -477,13 +492,6 @@ class ComponentTab(QWidget):
 
     def add_element_from_drop(self, scene_pos: QPointF, element_type: str):
         self.scene.clearSelection()
-        print(f"{element_type}")
-        base_name = f"{element_type.replace('Element', '').lower()}_"
-        counter = 1
-        existing_names = {el.name for el in self.current_template.elements}
-        while f"{base_name}{counter}" in existing_names:
-            counter += 1
-        new_name = f"{base_name}{counter}"
 
         if element_type == "te":
             default_width, default_height = 180, 60
@@ -495,11 +503,11 @@ class ComponentTab(QWidget):
         new_rect = QRectF(0, 0, default_width, default_height)
         new_element = self.registry.create(
             pid=element_type,
-            name=new_name,
+            name=None,
             rect=new_rect,
             parent_qobject=self.current_template
         )
-
+        
         self.scene.addItem(new_element)
 
         if self.snap_to_grid:

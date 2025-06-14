@@ -29,6 +29,8 @@ class ComponentTemplate(QObject): # NOW INHERITS QObject
         self._width_px = to_px(width, dpi=dpi)
         self._height_px = to_px(height, dpi=dpi)
         self.dpi = dpi
+        self.is_template = True
+        self.element_pids = []
         self.elements: List['ComponentElement'] = []
         self.background_image_path: Optional[str] = None
 
@@ -61,14 +63,18 @@ class ComponentTemplate(QObject): # NOW INHERITS QObject
         self.height = format_dimension(px, dpi=self.dpi)
         self.template_changed.emit()
 
-
     def add_element(self, element) -> 'ComponentElement':           
         max_z = max([e.zValue() for e in self.elements] + [0]) if self.elements else 0
         element.setZValue(max_z + 100)
         self.elements.append(element)
+        element.template_pid = self.pid
         self.template_changed.emit()
-        self.element_z_order_changed.emit() 
-        return element
+        self.element_z_order_changed.emit()
+
+    def insert_element(self, element):
+        element.template_pid = self.pid
+        self.elements.append[element]
+        self.template_changed.emit()
 
     def remove_element(self, element: 'ComponentElement'):
         if element in self.elements:
@@ -112,6 +118,7 @@ class ComponentTemplate(QObject): # NOW INHERITS QObject
             'width': self.width,
             'height': self.height,
             'dpi': self.dpi,
+            'is_template': self.is_template,
             'background_image_path': self.background_image_path,
             'element_pids': [e.pid for e in self.elements]  # 🔄 save only references
         }
@@ -128,7 +135,8 @@ class ComponentTemplate(QObject): # NOW INHERITS QObject
         )
 
         template.background_image_path = data.get('background_image_path')
-        template._pending_element_pids = data.get('element_pids', [])  # <- defer element resolution
+        template.element_pids = data.get('element_pids')
+        template._pending_element_pids = []
         return template
 
     def reorder_element_z(self, element: 'ComponentElement', direction: int):
