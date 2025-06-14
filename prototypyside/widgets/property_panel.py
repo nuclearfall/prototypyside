@@ -20,6 +20,7 @@ from prototypyside.utils.unit_converter import parse_dimension, to_px
 
 class PropertyPanel(QWidget):
     property_changed = Signal(tuple)  # (property_name, value)
+    geometry_changed = Signal(tuple)  # (property_name, value)
 
     def __init__(self, settings, parent=None):
         super().__init__(parent)
@@ -101,11 +102,11 @@ class PropertyPanel(QWidget):
         element_layout = QFormLayout()
 
         self.name_edit = QLineEdit()
-        self.name_edit.editingFinished.connect(lambda: self.property_changed.emit(("name", self.name_edit.text())))
+        self.name_edit.editingFinished.connect(lambda: self.geometry_changed.emit(("name", self.name_edit.text())))
         element_layout.addRow("Name:", self.name_edit)
 
         self.content_edit = QLineEdit()
-        self.content_edit.editingFinished.connect(lambda: self.property_changed.emit(("content", self.content_edit.text())))
+        self.content_edit.editingFinished.connect(lambda: self.geometry_changed.emit(("content", self.content_edit.text())))
         element_layout.addRow("Content:", self.content_edit)
 
         element_group.setLayout(element_layout)
@@ -280,17 +281,3 @@ class PropertyPanel(QWidget):
             self.aspect_checkbox.setChecked(bool(element.aspect_ratio))
         else:
             self.aspect_checkbox.setChecked(False)
-
-    # --- REMOVE THESE METHODS as they are replaced by ColorPickerWidget's internal logic ---
-    # def _choose_color(self, initial="#000000") -> str:
-    #     color = QColorDialog.getColor()
-    #     return color.name() if color.isValid() else initial
-
-    # def _on_color_btn_clicked(self):
-    #     self.property_changed.emit(("color", self._choose_color()))
-
-    # def _on_bg_color_btn_clicked(self):
-    #     self.property_changed.emit(("bg_color", self._choose_color()))
-
-    # def _on_border_color_btn_clicked(self):
-    #     self.property_changed.emit(("border_color", self._choose_color()))

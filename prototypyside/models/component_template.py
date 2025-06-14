@@ -63,12 +63,89 @@ class ComponentTemplate(QObject): # NOW INHERITS QObject
         self.height = format_dimension(px, dpi=self.dpi)
         self.template_changed.emit()
 
-    def add_element(self, element) -> 'ComponentElement':           
-        max_z = max([e.zValue() for e in self.elements] + [0]) if self.elements else 0
+    def add_element(self, element) -> 'ComponentElement':
+        # Use consistent z-value increments
+        print(f"Element added... {element.pid}:{element.name}")
+        max_z = max([e.zValue() for e in self.elements], default=0)
         element.setZValue(max_z + 100)
         self.elements.append(element)
         element.template_pid = self.pid
         self.template_changed.emit()
+        self.element_z_order_changed.emit()
+
+    def reorder_element_z(self, element: 'ComponentElement', direction: int):
+        if element not in self.elements:
+            return
+
+        # Create a stable ordering using indices as secondary key
+        sorted_elements = sorted(
+            enumerate(self.elements),
+            key=lambda x: (x[1].zValue(), x[0])
+        )
+        
+        # Find current position
+        current_idx = next((i for i, (idx, e) in enumerate(sorted_elements) if e is element), -1)
+        if current_idx == -1:
+            return
+
+        # Calculate new position
+        new_idx = current_idx + direction
+        
+        # Validate move boundaries
+        if new_idx < 0 or new_idx >= len(sorted_elements):
+            return
+
+        # Get adjacent element
+        adj_element = sorted_elements[new_idx][1]
+        
+        # Swap z-values using robust method
+        current_z = element.zValue()
+        adj_z = adj_element.zValue()
+        
+        # Handle z-value collisions
+        if direction > 0:
+            new_z = adj_z + 1
+        else:
+            new_z = adj_z - 1
+        
+        # Apply new z-values
+        element.setZValue(new_z)
+        adj_element.setZValue(current_z)
+        
+        # Maintain unique z-values by resetting the entire stack
+        self._normalize_z_values()
+        self.element_z_order_changed.emit()
+
+    def _normalize_z_values(self):
+        """Ensure all elements have unique, ordered z-values"""
+        # Sort by current z-value
+        sorted_elements = sorted(self.elements, key=lambda e: e.zValue())
+        
+        # Assign new values with fixed increments
+        for z_value, el in enumerate(sorted_elements, start=100):
+            el.setZValue(z_value * 100)  # Fixed increment of 100
+        
+        # Sort internal list to match new order
+        self.elements.sort(key=lambda e: e.zValue())
+
+    def bring_to_front(self, element: 'ComponentElement'):
+        if element not in self.elements:
+            return
+        
+        # Set to max + increment
+        max_z = max(e.zValue() for e in self.elements)
+        element.setZValue(max_z + 100)
+        self._normalize_z_values()
+        self.element_z_order_changed.emit()
+
+    def send_to_back(self, element: 'ComponentElement'):
+        if element not in self.elements:
+            return
+        
+        # Set to min - increment
+        min_z = min(e.zValue() for e in self.elements)
+        element.setZValue(min_z - 100)
+        self._normalize_z_values()
         self.element_z_order_changed.emit()
 
     def insert_element(self, element):

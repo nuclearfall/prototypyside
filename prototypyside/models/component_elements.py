@@ -55,6 +55,11 @@ class ComponentElement(QGraphicsItem, QObject):
     @property
     def pid(self):
         return self._pid
+
+    @pid.setter 
+    def pid(self, pid_str):
+        self._pid = pid_str
+
     @property
     def name(self):
         return self._name
@@ -235,7 +240,7 @@ class ComponentElement(QGraphicsItem, QObject):
             'pos_y': self.pos().y(),
             'z_value': self.zValue(),
             'color': self.color.name(), # Serialize QColor to hex string
-            'bg_color': self.bg_color.name(), # Serialize QColor to hex string
+            'bg_color': self.bg_color.name(QColor.HexArgb), # Serialize QColor to hex string
             'border_color': self.border_color.name(), # Serialize QColor to hex string
             'border_width': self.border_width, # Store as string
             'alignment': int(self.alignment), # Store Qt.AlignmentFlag as int
@@ -254,7 +259,7 @@ class ComponentElement(QGraphicsItem, QObject):
         # Shared properties
         element.content      = data.get("content", "")
         element.color        = QColor(data.get("color", "#000000"))
-        element.bg_color     = QColor(data.get("bg_color", "#ffffff"))
+        element.bg_color     = QColor(data.get("bg_color"))
         element.border_color = QColor(data.get("border_color", "#000000"))
         element.border_width = data.get("border_width", element.border_width)
         element.alignment    = Qt.AlignmentFlag(data.get("alignment", int(Qt.AlignLeft)))
@@ -324,7 +329,7 @@ class ComponentElement(QGraphicsItem, QObject):
     def clone(self):
         """Clone the element via its serialized dictionary structure."""
         data = self.to_dict()
-        data["name"] = f"{data['name']}_copy" if "name" in data else "unnamed_copy"
+        data["name"] = None
         return type(self).from_dict(data)
 
 

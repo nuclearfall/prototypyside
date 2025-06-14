@@ -26,6 +26,7 @@ else:
 
 class ComponentGraphicsScene(QGraphicsScene):
     element_dropped = Signal(QPointF, str)
+    element_cloned = Signal(ComponentElement, QPointF)
     selectionChanged = Signal()
 
     def __init__(self, scene_rect: QRectF, parent=None, settings=None):
@@ -174,30 +175,19 @@ class ComponentGraphicsScene(QGraphicsScene):
             self.resize_start_scene_rect = self.resizing_element.sceneBoundingRect()
             return
 
-        # Option-key duplication
+        # Alt+click duplication
         if event.modifiers() & Qt.AltModifier and is_movable(item):
-            clone = item.clone()
-            clone.setPos(item.pos())
-            self.addItem(clone)
-            self.clearSelection()
-            clone.setSelected(True)
-            self._dragging_item = clone
-            self._drag_offset = event.scenePos() - clone.pos()
-        elif is_movable(item):
+            # emit both the item to clone and the raw scene‐pos
+            self.element_cloned.emit(item, event.scenePos())
+            event.accept()
+            return
+
+        # normal click/drag
+        if is_movable(item):
             self._dragging_item = item
-            self._drag_offset = event.scenePos() - item.pos()
+            self._drag_offset   = event.scenePos() - item.pos()
 
         super().mousePressEvent(event)
-
-    def _generate_unique_name(self, template, base_name):
-        existing_names = {e.name for e in template.elements}
-        if base_name not in existing_names:
-            return base_name
-
-        counter = 1
-        while f"{base_name}_{counter}" in existing_names:
-            counter += 1
-        return f"{base_name}_{counter}"
 
     def mouseMoveEvent(self, event: QGraphicsSceneMouseEvent):
         if self._resizing and self.resizing_element:
@@ -209,37 +199,24 @@ class ComponentGraphicsScene(QGraphicsScene):
             )
             return
 
-        elif self._dragging_item:
-            if event.modifiers() & Qt.AltModifier and not self._alt_drag_started:
-                self._alt_drag_started = True
-
-                if hasattr(self._dragging_item, 'to_dict') and hasattr(self._dragging_item, 'template'):
-                    orig_item = self._dragging_item
-                    template = orig_item.template
-
-                    element_dict = orig_item.to_dict()
-                    element_dict["name"] = self._generate_unique_name(template, element_dict["name"])
-
-                    new_item = type(orig_item).from_dict(element_dict, parent_qobject=template)
-                    template.add_element(new_item)
-
-                    new_item.setPos(orig_item.pos() + QPointF(10, 10))  # Offset to visualize the duplication
-                    self.clearSelection()
-                    new_item.setSelected(True)
-
-                    self._dragging_item = new_item
-                    self._was_dragging = True
-                    return  # Don't reposition just yet — wait for next move event
-
-            # Regular or post-duplicate dragging
+        if self._dragging_item:
             new_pos = event.scenePos() - self._drag_offset
             if self.is_snap_to_grid:
                 new_pos = self.snap_to_grid(new_pos)
             self._dragging_item.setPos(new_pos)
-            self._was_dragging = True
             return
 
         super().mouseMoveEvent(event)
+
+        #     # Regular or post-duplicate dragging
+        #     new_pos = event.scenePos() - self._drag_offset
+        #     if self.is_snap_to_grid:
+        #         new_pos = self.snap_to_grid(new_pos)
+        #     self._dragging_item.setPos(new_pos)
+        #     self._was_dragging = True
+        #     return
+
+        # super().mouseMoveEvent(event)
 
 
 
@@ -290,6 +267,6 @@ class ComponentGraphicsScene(QGraphicsScene):
     def get_selected_element(self) -> Optional['ComponentElement']:
         selected_items = self.selectedItems()
         if selected_items and isinstance(selected_items[0], ComponentElement):
-            self.property_panel.get_all(selected_items[0])
+            #self.property_panel.get_all(selected_items[0])
             return selected_items[0]
         return None

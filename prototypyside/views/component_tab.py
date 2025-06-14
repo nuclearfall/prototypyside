@@ -1,5 +1,5 @@
 # prototypyside/views/component_tab.py
-
+from functools import partial
 import json
 import csv
 from pathlib import Path
@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QDockWidget,
                                QListWidgetItem, QLabel, QPushButton, QComboBox,
                                QSpinBox, QColorDialog, QFontDialog, QFileDialog, QMessageBox,
                                QCheckBox, QGraphicsItem, QGraphicsView,
-                               QGraphicsScene, QToolBar) # Added QToolBar for font/measure
+                               QGraphicsScene, QToolBar, QLineEdit) # Added QToolBar for font/measure
 from PySide6.QtCore import Qt, Signal, Slot, QPointF, QRectF, QSizeF, QObject, QSize, QTimer # Removed QCoreApplication, QEvent, QKeySequence, QShortcut
 from PySide6.QtGui import QPainter, QAction, QImage, QPixmap, QFont, QColor, QIcon, QKeySequence, QShortcut # Added QKeySequence, QShortcut here, removed from main_window
 
@@ -32,6 +32,8 @@ from prototypyside.models.component_elements import (ComponentElement, TextEleme
 from prototypyside.services.app_settings import AppSettings
 from prototypyside.services.export_manager import ExportManager
 from prototypyside.services.property_setter import PropertySetter
+from prototypyside.services.geometry_setter import GeometrySetter
+from prototypyside.services.undo_manager import UndoManager
 
 class ComponentTab(QWidget):
     # Signals for communication with MainDesignerWindow
@@ -43,12 +45,14 @@ class ComponentTab(QWidget):
         self.registry = registry
         self.settings = AppSettings(unit='px', display_dpi=300, print_dpi=300)
         print(f"settings should be loaded here: {self.settings} with dpi: {self.settings.dpi}")
-
+        self.undo_manager = UndoManager(self.registry)
+        self.geometry_setter = GeometrySetter(self.undo_manager)
         self.current_template = template
         self.settings.dpi = template.dpi
         self.merged_templates: List[ComponentTemplate] = []
         self._current_selected_element: Optional['ComponentElement'] = None
         self.export_manager = ExportManager()
+
 
         self.scene: Optional[ComponentGraphicsScene] = None
         self.view: Optional[DesignerGraphicsView] = None
@@ -63,6 +67,11 @@ class ComponentTab(QWidget):
         self.setup_shortcuts()
 
         self._refresh_scene()
+
+        # self.scene.selectionChanged.connect(self.on_selection_changed)
+        # self.scene.element_dropped.connect(self.add_element_from_drop)
+        # self.scene.element_cloned.connect(self.element_cloned)
+
 
 
     def setup_ui(self):
@@ -116,6 +125,7 @@ class ComponentTab(QWidget):
         self.current_template.element_z_order_changed.connect(self.update_layers_panel)
         self.scene.selectionChanged.connect(self.on_selection_changed)
         self.scene.element_dropped.connect(self.add_element_from_drop)
+        self.scene.element_cloned.connect(self.clone_element)
 
         # Initialize the property panel and layers panel (their widgets will be placed in docks in QMainWindow)
         self.setup_property_editor()
@@ -128,47 +138,6 @@ class ComponentTab(QWidget):
         delete_shortcut = QShortcut(QKeySequence.Delete, self)
         delete_shortcut.activated.connect(self.remove_selected_element)
 
-    # def load_template_data(self, template_data: Dict):
-    #     # Disconnect previous signals from old template/scene safely
-    #     try:
-    #         self.current_template.element_z_order_changed.disconnect(self.update_layers_panel)
-    #         self.current_template.template_changed.disconnect(self.update_game_component_scene)
-    #         if self.scene: # Check if scene exists before disconnecting
-    #             self.scene.selectionChanged.disconnect(self.on_selection_changed)
-    #             self.scene.element_dropped.disconnect(self.add_element_from_drop)
-    #     except (AttributeError, TypeError, RuntimeError):
-    #         pass # Ignore if signals are not connected or objects don't exist
-
-    #     # Clear existing scene items
-    #     if self.scene:
-    #         for item in self.scene.items():
-    #             self.scene.removeItem(item)
-    #         self.scene.clear()
-
-        # # Create new template from data
-        # self.current_template = self.registry.obj_from_dict(template_data)
-
-        # # Update scene dimensions and clear existing scene
-        # self.scene.set_template_dimensions(self.current_template.width_px, self.current_template.height_px)
-        # self.view.setSceneRect(0, 0, self.current_template.width_px, self.current_template.height_px)
-
-        # # Add template elements to scene
-        # for element in self.current_template.elements:
-        #     self.scene.addItem(element)
-
-        # # Connect new signals
-        # self.current_template.template_changed.connect(self.update_game_component_scene)
-        # self.current_template.element_z_order_changed.connect(self.update_layers_panel)
-        # self.scene.selectionChanged.connect(self.on_selection_changed)
-        # self.scene.element_dropped.connect(self.add_element_from_drop)
-
-        # self.tab_title_changed.emit(self.current_template.name if self.current_template.name else "New Template")
-        # self.update_layers_panel()
-        # self.on_selection_changed()
-        # QTimer.singleShot(0, lambda: self.view.fitInView(self.scene.sceneRect(), Qt.KeepAspectRatio))
-        # self.show_status_message(f"Template loaded.", "success")
-
-
     @Slot()
     def update_game_component_scene(self):
         """Updates the scene dimensions and view based on the current template."""
@@ -179,7 +148,7 @@ class ComponentTab(QWidget):
         self.scene.set_template_dimensions(self.current_template.width_px, self.current_template.height_px)
         self.view.setSceneRect(new_rect)
         self.scene.update()
-        QTimer.singleShot(0, lambda: self.view.fitInView(new_rect, Qt.KeepAspectRatio)) # Keep aspect ratio after update
+        #QTimer.singleShot(0, lambda: self.view.fitInView(new_rect, Qt.KeepAspectRatio)) # Keep aspect ratio after update
 
     def get_template_data(self) -> Dict:
         return self.current_template.to_dict()
@@ -208,7 +177,7 @@ class ComponentTab(QWidget):
         # This will be a widget that the QMainWindow will place in a DockWidget
         self.property_panel = PropertyPanel(settings=self.settings, parent=self)
         self.property_panel.property_changed.connect(self.on_property_changed)
-
+        self.property_panel.geometry_changed.connect(self.on_geometry_changed)
         self.remove_element_btn = QPushButton("Remove Selected Element")
         self.remove_element_btn.setMaximumWidth(200)
         self.remove_element_btn.clicked.connect(self.remove_selected_element)
@@ -217,9 +186,9 @@ class ComponentTab(QWidget):
     def setup_layers_panel(self):
         # This will be a widget that the QMainWindow will place in a DockWidget
         self.layers_list = LayersListWidget(self)
-        self.layers_list.element_selected_in_list.connect(self.select_element_from_layers_list)
+        self.layers_list.element_selected_in_list.connect(self.on_layers_list_item_clicked)
         self.layers_list.element_z_changed_requested.connect(self.reorder_element_z_from_list_event)
-
+        self.layers_list.itemClicked.connect(self.on_layers_list_item_clicked)
     # def create_font_toolbar(self):
     #     self.font_toolbar_widget = FontToolbar(self)
     #     font_toolbar = QToolBar("Font Tools")
@@ -237,26 +206,26 @@ class ComponentTab(QWidget):
         self.unit_selector.addItems(["in", "cm", "px"])
         self.unit_selector.setCurrentText(self.settings.unit)
         self.unit_selector.currentTextChanged.connect(self.on_unit_change)
-        self.measure_toolbar.addWidget(QLabel("Unit:"))
-        self.measure_toolbar.addWidget(self.unit_selector)
+
 
         # Snap to Grid
         self.snap_checkbox = QCheckBox("Snap to Grid")
         self.snap_checkbox.setChecked(True)
         self.snap_checkbox.stateChanged.connect(self.on_snap_toggle)
         self.snap_to_grid = True
-        self.measure_toolbar.addWidget(self.snap_checkbox)
+
 
         # Show Grid
         self.grid_checkbox = QCheckBox("Show Grid")
         self.grid_checkbox.setChecked(True)
         self.grid_checkbox.stateChanged.connect(self.on_grid_toggle)
         self.show_grid = True
-        self.measure_toolbar.addWidget(self.grid_checkbox)
 
-        # Template Dimensions
-        self.measure_toolbar.addSeparator()
-        self.measure_toolbar.addWidget(QLabel("Template:"))
+
+        self.template_name_field = QLineEdit()
+        self.template_name_field.setPlaceholderText(self.current_template.name)
+        self.template_name_field.editingFinished.connect(self.on_template_name_changed)
+        self.template_name_field.setMaximumWidth(150)
 
         self.template_width_field = UnitField(
             initial_px=self.current_template.width_px,
@@ -264,27 +233,38 @@ class ComponentTab(QWidget):
             dpi=self.current_template.dpi
         )
         self.template_width_field.setMaximumWidth(100)
-        self.template_width_field.editingFinishedWithValue.connect(self.on_template_width_changed)
+        self.template_width_field.editingFinishedWithValue.connect(partial(self.on_template_dimension_changed, "width_px"))
 
         self.template_height_field = UnitField(
             initial_px=self.current_template.height_px,
             unit=self.settings.unit,
             dpi=self.current_template.dpi
         )
-        self.template_height_field.editingFinishedWithValue.connect(self.on_template_height_changed)
+        self.template_height_field.editingFinishedWithValue.connect(partial(self.on_template_dimension_changed, "height_px"))
         self.template_height_field.setMaximumWidth(100)
-        self.measure_toolbar.addWidget(QLabel("Width:"))
-        self.measure_toolbar.addWidget(self.template_width_field)
-        self.measure_toolbar.addWidget(QLabel("Height:"))
-        self.measure_toolbar.addWidget(self.template_height_field)
 
         # DPI SpinBox
         self.game_component_dpi_spin = QSpinBox()
         self.game_component_dpi_spin.setRange(36, 1200)
         self.game_component_dpi_spin.setValue(self.current_template.dpi)
         self.game_component_dpi_spin.valueChanged.connect(self.on_template_dpi_changed)
+
+
+        self.measure_toolbar.addWidget(QLabel("Template:"))
+
+
+        self.measure_toolbar.addWidget(self.template_name_field)
+        self.measure_toolbar.addWidget(QLabel("Width:"))
+        self.measure_toolbar.addWidget(self.template_width_field)
+        self.measure_toolbar.addWidget(QLabel("Height:"))
+        self.measure_toolbar.addWidget(self.template_height_field)
         self.measure_toolbar.addWidget(QLabel("DPI:"))
         self.measure_toolbar.addWidget(self.game_component_dpi_spin)
+        self.measure_toolbar.addSeparator()
+        self.measure_toolbar.addWidget(QLabel("Unit:"))
+        self.measure_toolbar.addWidget(self.unit_selector)
+        self.measure_toolbar.addWidget(self.grid_checkbox)
+        self.measure_toolbar.addWidget(self.snap_checkbox)
         self.layout().addWidget(self.measure_toolbar)
 
     @Slot(str)
@@ -307,15 +287,17 @@ class ComponentTab(QWidget):
         self.measure_toolbar.update()
         self.scene.update()
 
-    @Slot(int)
-    def on_template_width_changed(self, new_px):
-        self.current_template.width_px = new_px
-        self.update_template_scene_rect()
+    @Slot()
+    def on_template_name_changed(self):
+        new_name = self.template_name_field.text().strip()
+        if new_name:
+            self.current_template.name = new_name
+            self.tab_title_changed.emit(new_name)
 
-    @Slot(int)
-    def on_template_height_changed(self, new_px):
-        self.current_template.height_px = new_px
-        self.update_template_scene_rect()
+    @Slot(str, int)
+    def on_template_dimension_changed(self, dimension, value):
+        setattr(self.current_template, dimension, value)
+        self._refresh_scene()
 
     def update_template_scene_rect(self):
         self.scene.set_template_dimensions(
@@ -361,17 +343,33 @@ class ComponentTab(QWidget):
         self.current_template.template_changed.emit()
         self.show_status_message(f"DPI updated to {new_dpi}.", "info")
 
-    def get_selected_element(self) -> Optional['ComponentElement']:
-        items = self.scene.selectedItems()
-        if items:
-            return items[0] if isinstance(items[0], ComponentElement) else None
-        return None
+
 
     # @Slot(QFont)
     # def on_font_toolbar_font_changed(self, font: QFont):
     #     element = self.get_selected_element()
     #     if element and isinstance(element, TextElement):
     #         element.set_style_property('font', font)
+
+    @Slot(tuple)
+    def on_geometry_changed(self, change):
+        element = self.get_selected_element()
+        if not element or not change:
+            return
+
+        field, value = change
+        r = element.rect()
+        x, y, w, h = r.x(), r.y(), r.width(), r.height()
+
+        match field.lower():
+            case "x": x = value
+            case "y": y = value
+            case "width": w = value
+            case "height": h = value
+            case _: return
+
+        new_rect = QRectF(x, y, w, h)
+        self.geometry_setter.set_rect(element, new_rect)
 
     @Slot()
     def on_property_changed(self, change):
@@ -389,48 +387,221 @@ class ComponentTab(QWidget):
             else:
                 print(f"No setter for: {prop}")
 
+    def get_selected_element(self) -> Optional['ComponentElement']:
+        items = self.scene.selectedItems()
+        if items:
+            return items[0] if isinstance(items[0], ComponentElement) else None
+        return None
+
+    def _handle_new_selection(self, new):
+        old = self._current_selected_element
+        if old is new:
+            return
+        
+        # Cleanup previous selection
+        if old:
+            old.hide_handles()
+            try:
+                old.element_changed.disconnect(self.on_element_data_changed)
+            except TypeError:  # Not connected
+                pass
+        
+        # Setup new selection
+        self._current_selected_element = new
+        if new:
+            new.show_handles()
+            new.element_changed.connect(self.on_element_data_changed)
+            self.property_panel.set_target(new)
+            self.property_panel.refresh()
+            self._update_layers_selection(new)
+        else:
+            self.property_panel.set_target(None)
+            self._clear_layers_selection()
+        
+        self.set_element_controls_enabled(bool(new))
+
     @Slot()
     def on_selection_changed(self):
-        selected_element = self.get_selected_element()
-        if self._current_selected_element:
-            self._current_selected_element.hide_handles()
-
-        if self._current_selected_element and self._current_selected_element != selected_element:
-            try:
-                self._current_selected_element.element_changed.disconnect(self.on_element_data_changed)
-            except TypeError:
-                pass
-
-        self._current_selected_element = selected_element
-
-        if selected_element:
-            self.set_element_controls_enabled(True)
-            # self.font_toolbar_widget.setEnabled(isinstance(selected_element, TextElement))
-            
-            # Update property panel with selected element
-            self.property_panel.set_target(selected_element)
-            self.property_panel.refresh()
-            
-            selected_element.element_changed.connect(self.on_element_data_changed)
-
-            # Update layers list selection
-            self.layers_list.blockSignals(True)
-            self.layers_list.clearSelection()
-            for i in range(self.layers_list.count()):
-                item = self.layers_list.item(i)
-                if item.data(Qt.UserRole) == selected_element:
-                    item.setSelected(True)
-                    self.layers_list.scrollToItem(item)
-                    break
-            self.layers_list.blockSignals(False)
-            selected_element.show_handles()
+        """Handles selection changes from both scene and layers list"""
+        # Get selection source (prioritize scene selection)
+        if self.scene.selectedItems():
+            selected = self.scene.selectedItems()[0]
         else:
-            self.set_element_controls_enabled(False)
-            #  self.font_toolbar_widget.setEnabled(False)
-            self.property_panel.set_target(None)  # Clear the panel
-            self.layers_list.blockSignals(True)
-            self.layers_list.clearSelection()
-            self.layers_list.blockSignals(False)
+            selected = None
+        
+        self._handle_new_selection(selected)
+
+    @Slot(QListWidgetItem)
+    def on_layers_list_item_clicked(self, item):
+        """Handles selection from layers list"""
+        element = item.data(Qt.UserRole)
+        if element:
+            self.scene.blockSignals(True)
+            self.scene.clearSelection()
+            element.setSelected(True)
+            self.scene.blockSignals(False)
+            self._handle_new_selection(element)
+
+    def _update_layers_selection(self, element):
+        """Sync layers list selection with current element"""
+        self.layers_list.blockSignals(True)
+        self.layers_list.clearSelection()
+        
+        for i in range(self.layers_list.count()):
+            item = self.layers_list.item(i)
+            if item.data(Qt.UserRole) is element:
+                item.setSelected(True)
+                self.layers_list.scrollToItem(item)
+                break
+        
+        self.layers_list.blockSignals(False)
+
+    def _clear_layers_selection(self):
+        self.layers_list.blockSignals(True)
+        self.layers_list.clearSelection()
+        self.layers_list.blockSignals(False)
+
+    @Slot()
+    def update_layers_panel(self):
+        self.layers_list.update_list(self.current_template.elements)
+
+    def _adjust_z_value(self, element, new_z):
+        """Helper for z-order operations"""
+        element.setZValue(new_z)
+        self.current_template.elements.sort(key=lambda e: e.zValue())
+        self.current_template.element_z_order_changed.emit()
+
+    @Slot(int)
+    def adjust_z_order_of_selected(self, direction: int):
+        if not (element := self.get_selected_element()):
+            return
+        
+        elements = self.current_template.elements
+        sorted_elements = sorted(elements, key=lambda e: e.zValue())
+        idx = sorted_elements.index(element)
+        
+        if direction > 0 and idx < len(sorted_elements) - 1:  # Move up
+            next_z = sorted_elements[idx + 1].zValue()
+            self._adjust_z_value(element, next_z + 1)
+        elif direction < 0 and idx > 0:  # Move down
+            prev_z = sorted_elements[idx - 1].zValue()
+            self._adjust_z_value(element, prev_z - 1)
+
+    @Slot()
+    def bring_selected_to_front(self):
+        if element := self.get_selected_element():
+            max_z = max(e.zValue() for e in self.current_template.elements)
+            if element.zValue() < max_z:
+                self._adjust_z_value(element, max_z + 1)
+
+    @Slot()
+    def send_selected_to_back(self):
+        if element := self.get_selected_element():
+            min_z = min(e.zValue() for e in self.current_template.elements)
+            if element.zValue() > min_z:
+                self._adjust_z_value(element, min_z - 1)
+
+    @Slot(object, int)
+    def reorder_element_z_from_list_event(self, element: object, direction: int):
+        # Reuse existing logic
+        self.adjust_z_order_of_selected(direction)
+
+    # def _handle_new_selection(self, new):
+    #     old = self._current_selected_element
+    #     if old is not new:
+    #         if old:
+    #             old.hideHandles()
+    #         if new:
+    #             new.showHandles()
+    #         self._current_selected_element = new
+
+    # @Slot()
+    # def on_selection_changed(self)
+
+    #     selected_element = self.get_selected_element()
+    #     if self._current_selected_element:
+    #         self._current_selected_element.hide_handles()
+
+    #     if self._current_selected_element and self._current_selected_element != selected_element:
+    #         try:
+    #             self._current_selected_element.element_changed.disconnect(self.on_element_data_changed)
+    #         except TypeError:
+    #             pass
+
+    #     self._current_selected_element = selected_element
+
+    #     if selected_element:
+    #         self.set_element_controls_enabled(True)
+    #         # self.font_toolbar_widget.setEnabled(isinstance(selected_element, TextElement))
+            
+    #         # Update property panel with selected element
+    #         self.property_panel.set_target(selected_element)
+    #         self.property_panel.refresh()
+            
+    #         selected_element.element_changed.connect(self.on_element_data_changed)
+
+    #         # Update layers list selection
+    #         self.layers_list.blockSignals(True)
+    #         self.layers_list.clearSelection()
+    #         for i in range(self.layers_list.count()):
+    #             item = self.layers_list.item(i)
+    #             if item.data(Qt.UserRole) == selected_element:
+    #                 item.setSelected(True)
+    #                 self.layers_list.scrollToItem(item)
+    #                 break
+    #         self.layers_list.blockSignals(False)
+    #         selected_element.show_handles()
+    #     else:
+    #         self.set_element_controls_enabled(False)
+    #         #  self.font_toolbar_widget.setEnabled(False)
+    #         self.property_panel.set_target(None)  # Clear the panel
+    #         self.layers_list.blockSignals(True)
+    #         self.layers_list.clearSelection()
+    #         self.layers_list.blockSignals(False)
+
+
+    @Slot(QGraphicsItem)
+    def select_element_from_layers_list(self, element: QGraphicsItem):
+        if isinstance(element, ComponentElement):
+            self.scene.blockSignals(True)
+            self.scene.clearSelection()
+            element.setSelected(True)
+            self.scene.blockSignals(False)
+
+    # @Slot()
+    # def update_layers_panel(self):
+    #     self.layers_list.update_list(self.current_template.elements)
+
+    # @Slot(int)
+    # def adjust_z_order_of_selected(self, direction: int):
+    #     element = self.get_selected_element()
+    #     if element:
+    #         self.current_template.reorder_element_z(element, direction)
+
+    # @Slot()
+    # def bring_selected_to_front(self):
+    #     element = self.get_selected_element()
+    #     if element:
+    #         max_z = max([e.zValue() for e in self.current_template.elements] + [0])
+    #         if element.zValue() < max_z:
+    #             element.setZValue(max_z + 1)
+    #             self.current_template.elements.sort(key=lambda e: e.zValue())
+    #             self.current_template.element_z_order_changed.emit()
+
+    # @Slot()
+    # def send_selected_to_back(self):
+    #     element = self.get_selected_element()
+    #     if element:
+    #         min_z = min([e.zValue() for e in self.current_template.elements] + [0])
+    #         if element.zValue() > min_z:
+    #             element.setZValue(min_z - 1)
+    #             self.current_template.elements.sort(key=lambda e: e.zValue())
+    #             self.current_template.element_z_order_changed.emit()
+
+    # @Slot(object, int)
+    # def reorder_element_z_from_list_event(self, element: object, direction: int):
+    #     self.current_template.elements.sort(key=lambda e: e.zValue())
+    #     self.current_template.element_z_order_changed.emit()
 
 
     @Slot()
@@ -441,49 +612,6 @@ class ComponentTab(QWidget):
             element.update()
             self.scene.update()
         self.update_layers_panel()
-
-    @Slot(QGraphicsItem)
-    def select_element_from_layers_list(self, element: QGraphicsItem):
-        if isinstance(element, ComponentElement):
-            self.scene.blockSignals(True)
-            self.scene.clearSelection()
-            element.setSelected(True)
-            self.scene.blockSignals(False)
-
-    @Slot()
-    def update_layers_panel(self):
-        self.layers_list.update_list(self.current_template.elements)
-
-    @Slot(int)
-    def adjust_z_order_of_selected(self, direction: int):
-        element = self.get_selected_element()
-        if element:
-            self.current_template.reorder_element_z(element, direction)
-
-    @Slot()
-    def bring_selected_to_front(self):
-        element = self.get_selected_element()
-        if element:
-            max_z = max([e.zValue() for e in self.current_template.elements] + [0])
-            if element.zValue() < max_z:
-                element.setZValue(max_z + 1)
-                self.current_template.elements.sort(key=lambda e: e.zValue())
-                self.current_template.element_z_order_changed.emit()
-
-    @Slot()
-    def send_selected_to_back(self):
-        element = self.get_selected_element()
-        if element:
-            min_z = min([e.zValue() for e in self.current_template.elements] + [0])
-            if element.zValue() > min_z:
-                element.setZValue(min_z - 1)
-                self.current_template.elements.sort(key=lambda e: e.zValue())
-                self.current_template.element_z_order_changed.emit()
-
-    @Slot(object, int)
-    def reorder_element_z_from_list_event(self, element: object, direction: int):
-        self.current_template.elements.sort(key=lambda e: e.zValue())
-        self.current_template.element_z_order_changed.emit()
 
     @Slot()
     def clear_scene_selection(self):
@@ -517,6 +645,22 @@ class ComponentTab(QWidget):
         new_element.setPos(scene_pos - visual_offset)
         new_element.setSelected(True)
 
+    @Slot(ComponentElement, QPointF)
+    def clone_element(self, original, press_scene_pos):
+        """Clone via the registry and immediately begin dragging."""
+        # 1) Do the registry‐based clone
+        original.hide_handles()
+        new = self.registry.clone(original)
+        self.scene.addItem(new)
+
+        # 2) Place it exactly on top of the original
+        new.setPos(original.pos())
+        new.setSelected(True)
+
+        # 3) Compute and stash the drag offset so mouseMoveEvent will pick it up
+        drag_offset = press_scene_pos - new.pos()
+        self.scene._dragging_item = new
+        self.scene._drag_offset   = drag_offset
 
     def set_element_controls_enabled(self, enabled: bool):
         self.property_panel.setEnabled(enabled)
