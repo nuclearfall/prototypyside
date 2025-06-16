@@ -73,6 +73,13 @@ class ComponentTemplate(QObject): # NOW INHERITS QObject
         self.template_changed.emit()
         self.element_z_order_changed.emit()
 
+    def remove_element(self, element: 'ComponentElement'):
+        if element in self.elements:
+            self.elements.remove(element)
+            element.template_pid = None  # Optional: sever reference
+            self.template_changed.emit()
+            self.element_z_order_changed.emit()
+
     def reorder_element_z(self, element: 'ComponentElement', direction: int):
         if element not in self.elements:
             return
@@ -147,18 +154,6 @@ class ComponentTemplate(QObject): # NOW INHERITS QObject
         element.setZValue(min_z - 100)
         self._normalize_z_values()
         self.element_z_order_changed.emit()
-
-    def insert_element(self, element):
-        element.template_pid = self.pid
-        self.elements.append[element]
-        self.template_changed.emit()
-
-    def remove_element(self, element: 'ComponentElement'):
-        if element in self.elements:
-            self.elements.remove(element)
-            element.template_pid = None  # Optional: sever reference
-            self.template_changed.emit()
-            self.element_z_order_changed.emit()
 
     def load_csv(self, filepath: str):
         try:

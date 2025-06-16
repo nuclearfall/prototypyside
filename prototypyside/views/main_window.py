@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (QMainWindow, QDockWidget, QTabWidget, QWidget,
                                QVBoxLayout, QLabel, QFileDialog, QMessageBox,
                                QToolBar, QPushButton, QHBoxLayout) # Added QPushButton, QHBoxLayout for temporary property panel layout
 from PySide6.QtCore import Qt, Signal, Slot, QTimer
-from PySide6.QtGui import QIcon, QAction
+from PySide6.QtGui import QIcon, QAction, QKeySequence, QShortcut, QUndoStack, QUndoGroup, QUndoCommand
 
 # Import the new ComponentTab
 from prototypyside.views.component_tab import ComponentTab
@@ -18,19 +18,20 @@ from prototypyside.views.component_tab import ComponentTab
 # (e.g., AppSettings if it's truly global, not per-tab)
 from prototypyside.services.app_settings import AppSettings
 from prototypyside.widgets.page_size_dialog import PageSizeDialog # Used in New Template dialog
-from prototypyside.services.proto_registry import ProtoRegistry
+from prototypyside.services.component_registry import ComponentRegistry
 
 
 class MainDesignerWindow(QMainWindow):
     def __init__(self):
         super().__init__()
+        self.undo_group = QUndoGroup(self)
         self.setWindowTitle("Professional Game Component Designer")
         self.resize(1400, 900)
         self.setMinimumSize(800, 600)
 
         # Main application settings, might be shared or passed to tabs
         self.settings = AppSettings(unit='px', display_dpi=300, print_dpi=300)
-        self.registry = ProtoRegistry()
+        self.registry = ComponentRegistry()
         self.tab_widget: Optional[QTabWidget] = None
         self.palette_dock: Optional[QDockWidget] = None
         self.layers_dock: Optional[QDockWidget] = None
@@ -142,11 +143,24 @@ class MainDesignerWindow(QMainWindow):
         exit_action = file_menu.addAction("E&xit")
         exit_action.triggered.connect(self.close)
 
+        undo_action = self.undo_group.createUndoAction(self, "&Undo")
+        undo_action.setShortcut(QKeySequence.Undo)
+
+        redo_action = self.undo_group.createRedoAction(self, "&Redo")
+        redo_action.setShortcut(QKeySequence.Redo)
+
+        edit_menu = self.menuBar().addMenu("&Edit")
+        edit_menu.addAction(undo_action)
+        edit_menu.addAction(redo_action)
+        undo_action.setShortcutContext(Qt.ApplicationShortcut)
+        redo_action.setShortcutContext(Qt.ApplicationShortcut)
+
     @Slot()
     def add_new_component_tab(self):
         new_template = self.registry.create("ct")
         print(new_template.to_dict())
         new_tab = ComponentTab(parent=self, registry=self.registry, template=new_template)
+        self.undo_group.addStack(new_tab.undo_stack)
         # Connect the tab's status message signal to the main window's slot
         new_tab.status_message_signal.connect(self.show_status_message)
         new_tab.tab_title_changed.connect(self.on_tab_title_changed)
@@ -167,7 +181,7 @@ class MainDesignerWindow(QMainWindow):
                 loaded_template = self.registry.load_from_file(path)
                 print(loaded_template)
                 new_tab = ComponentTab(parent=self, registry=self.registry, template=loaded_template)
-
+                self.undo_group.addStack(component_tab.undo_stack)
                 new_tab.status_message_signal.connect(self.show_status_message)
                 new_tab.tab_title_changed.connect(self.on_tab_title_changed)
 
@@ -208,6 +222,7 @@ class MainDesignerWindow(QMainWindow):
     @Slot(int)
     def on_tab_changed(self, index: int):
         active_tab = self.tab_widget.widget(index)
+        self.undo_group.setActiveStack(active_tab.undo_stack)
         if isinstance(active_tab, ComponentTab):
             # Update dock widgets with the content of the active tab
             self.toolbar_dock.setWidget(active_tab.measure_toolbar)
@@ -321,6 +336,8 @@ class MainDesignerWindow(QMainWindow):
             with open(filepath, 'r', encoding='utf-8') as f:
                 data = json.load(f)
             new_tab = ComponentTab(parent=self, template_data=data)
+            self.undo_group.addStack(component_tab.undo_stack)
+            
             new_tab.status_message_signal.connect(self.show_status_message)
             new_tab.tab_title_changed.connect(self.on_tab_title_changed)
             index = self.tab_widget.addTab(new_tab, new_tab.get_template_name())

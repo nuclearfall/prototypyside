@@ -4,7 +4,7 @@ import uuid
 from typing import Tuple, Optional
 
 
-# Move this here to avoid circular imports from proto_factory
+# Move this here to avoid circular imports from component_factory
 VALID_ID_PREFIXES = {"te", "ie", "ct", "ci", "lt", "ls"}
 ELEMENT_PREFIXES = {"te", "ie"}
 OBJ_BASE_NAMES = {

@@ -265,8 +265,12 @@ class ComponentGraphicsScene(QGraphicsScene):
 
 
     def get_selected_element(self) -> Optional['ComponentElement']:
+        """
+        Returns the first selected ComponentElement in the scene, if any.
+        """
         selected_items = self.selectedItems()
-        if selected_items and isinstance(selected_items[0], ComponentElement):
-            #self.property_panel.get_all(selected_items[0])
-            return selected_items[0]
+        # Filter for ComponentElement type, assuming it's the primary interactive item
+        for item in selected_items:
+            if isinstance(item, ComponentElement):
+                return item
         return None

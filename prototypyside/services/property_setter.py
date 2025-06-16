@@ -15,26 +15,10 @@ class PropertySetter:
             print(f"Attempting to set 'name' to {name}")
             self._notify()
 
-    def set_geometry(self, values: list[str]):
-        # Ensure values are not empty strings before parsing.
-        # Treat empty strings as "0" to avoid ValueError from parse_dimension.
-        x_str = values[0] if values[0] else "0"
-        y_str = values[1] if values[1] else "0"
-        w_str = values[2] if values[2] else "0"
-        h_str = values[3] if values[3] else "0"
-
-        # to_px_qrectf and to_px_pos will call parse_dimension internally.
-        # By ensuring x_str, y_str, w_str, h_str are "0" instead of "",
-        # parse_dimension will receive a valid input.
-        rect = to_px_qrectf(x_str, y_str, w_str, h_str, dpi=self.settings.dpi)
-        self.target.setRect(rect)
-        self.target.setPos(to_px_pos(x_str, y_str, dpi=self.settings.dpi))
-        self._notify()
-
     def set_border_width(self, value: str):
         if hasattr(self.target, "border_width"):
             # Pass the string value directly. GameComponentElement.paint will parse it.
-            self.target.set_border_width(value)
+            self.target.border_width = value
             self._notify()
 
     def set_font(self, font: QFont):

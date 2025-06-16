@@ -1,19 +1,32 @@
-from prototypyside.services.undo_manager import MoveElementCommand, ResizeElementCommand
+# prototypyside/services/geometry_setter.py (Updated)
+from PySide6.QtCore import QPointF, QRectF
+from PySide6.QtGui import QUndoStack # Import QUndoStack
+
+# Assuming these are defined in prototypyside.services.undo_manager
+from prototypyside.services.undo_commands import MoveElementCommand, ResizeElementCommand
+from typing import TYPE_CHECKING
+if TYPE_CHECKING:
+    from prototypyside.models.component_elements import ComponentElement
 
 class GeometrySetter:
-    def __init__(self, undo_manager):
-        self.undo_manager = undo_manager
+    def __init__(self, undo_stack: QUndoStack):
+        self.undo_stack = undo_stack
+        print("Geometry printing reaches here")
 
-    def set_rect(self, element, new_rect):
-        old_rect = element.rect()
+    def set_rect(self, element: 'ComponentElement', new_rect: QRectF):
+        old_rect = element.rect
         if old_rect != new_rect:
-            element.setRect(new_rect)
-            if self.undo_manager:
-                self.undo_manager.push(ResizeElementCommand(element, old_rect, new_rect))
+            # Create and push the command to the undo stack
+            command = ResizeElementCommand(element, new_rect, "Resize Element")
+            self.undo_stack.push(command)
+            # The command's redo() method will call element.setRect(new_rect)
+            # which correctly handles emitting element_changed and calling update().
 
-    def set_pos(self, element, new_pos):
-        old_pos = element.pos()
+    def set_pos(self, element: 'ComponentElement', new_pos: QPointF):
+        old_pos = element.pos
         if old_pos != new_pos:
-            element.setPos(new_pos)
-            if self.undo_manager:
-                self.undo_manager.push(MoveElementCommand(element, old_pos, new_pos))
+            # Create and push the command to the undo stack
+            command = MoveElementCommand(element, new_pos, "Move Element")
+            self.undo_stack.push(command)
+            # The command's redo() method will call element.setPos(new_pos)
+            # which correctly handles emitting element_changed and calling update().

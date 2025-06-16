@@ -102,11 +102,15 @@ class PropertyPanel(QWidget):
         element_layout = QFormLayout()
 
         self.name_edit = QLineEdit()
-        self.name_edit.editingFinished.connect(lambda: self.geometry_changed.emit(("name", self.name_edit.text())))
+        self.name_edit.editingFinished.connect(
+            lambda: self.emit_property_and_clear.emit(("name", self.name_edit.text())))
+
         element_layout.addRow("Name:", self.name_edit)
 
         self.content_edit = QLineEdit()
-        self.content_edit.editingFinished.connect(lambda: self.geometry_changed.emit(("content", self.content_edit.text())))
+        self.content_edit.editingFinished.connect(
+            lambda: self.emit_property_and_clear.emit(("content", self.content_edit.text())))
+
         element_layout.addRow("Content:", self.content_edit)
 
         element_group.setLayout(element_layout)
@@ -151,7 +155,8 @@ class PropertyPanel(QWidget):
         )
 
         self.border_width_field = UnitField(None, self.settings.unit)
-        self.border_width_field.editingFinished.connect(lambda: self.property_changed.emit(("border_width", self.border_width_field.text())))
+        self.border_width_field.editingFinished.connect(
+            lambda: self.emit_property_and_clear.emit(("border_width", self.border_width_field.text())))
 
         self.alignment_combo = QComboBox()
         self.alignment_map = {
@@ -168,9 +173,8 @@ class PropertyPanel(QWidget):
         self.reverse_alignment_map = {v: k for k, v in self.alignment_map.items()}
         self.alignment_combo.addItems(list(self.alignment_map.keys()))
         self.alignment_combo.currentTextChanged.connect(
-                        lambda text: self.property_changed.emit(
-                                    ("alignment", self.alignment_map.get(text)))
-        )
+            lambda text: self.property_changed.emit(("alignment", self.alignment_map.get(text, Qt.AlignLeft))))
+
         
         # Add a label and the color picker widget to the form layout
         appearance_layout.addRow("Text Color:", self.text_color_picker)
@@ -198,13 +202,21 @@ class PropertyPanel(QWidget):
         self._main_layout.addWidget(placeholder)
 
     def _on_geometry_changed(self):
+        field = self.sender()
+        if field:
+            field.clearFocus()
+
         values = [
-            self.element_x_field.text(),
-            self.element_y_field.text(),
-            self.element_width_field.text(),
-            self.element_height_field.text()
+            to_px(self.element_x_field.text(), dpi=self.settings.dpi),
+            to_px(self.element_y_field.text(), dpi=self.settings.dpi),
+            to_px(self.element_width_field.text(), dpi=self.settings.dpi),
+            to_px(self.element_height_field.text(), dpi=self.settings.dpi)
         ]
-        self.property_changed.emit(("geometry", values))
+        self.geometry_changed.emit(("geometry", values))
+
+    def emit_property_and_clear(self, prop_name, field):
+        self.property_changed.emit((prop_name, field.text()))
+        field.clearFocus()
 
     def update_panel_from_element(self):
         """Populate all property panel fields from the current element."""

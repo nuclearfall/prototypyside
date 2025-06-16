@@ -22,6 +22,7 @@ class ComponentElement(QGraphicsItem, QObject):
         self._name = name
         self._rect = QRectF(0, 0, rect.width(), rect.height())
         self.setPos(rect.topLeft())
+        self._pos = self.pos()
         # Move properties from _style to direct instance variables
         self._color = QColor(Qt.black)
         self._bg_color = QColor(255,255,255,0)
@@ -43,6 +44,9 @@ class ComponentElement(QGraphicsItem, QObject):
 
 
     # --- Property Getters and Setters --- #
+    @property
+    def scene_pos(self):
+        return self.pos()
 
     @property
     def template_pid(self):
@@ -50,7 +54,10 @@ class ComponentElement(QGraphicsItem, QObject):
 
     @template_pid.setter
     def template_pid(self, pid_val):
-        self._template_pid = pid_val
+        if self._template_pid != pid_val:
+            self._template_pid = pid_val
+            self.element_changed.emit()
+            self.update()
 
     @property
     def pid(self):
@@ -58,7 +65,10 @@ class ComponentElement(QGraphicsItem, QObject):
 
     @pid.setter 
     def pid(self, pid_str):
-        self._pid = pid_str
+        if self._pid != pid_str:
+            self._pid = pid_str
+            self.element_changed.emit()
+            self.update()
 
     @property
     def name(self):
@@ -66,7 +76,10 @@ class ComponentElement(QGraphicsItem, QObject):
 
     @name.setter 
     def name(self, value):
-        self._name = value
+        if self._name != value:
+            self._name = value
+            self.element_changed.emit()
+            self.update()
     
     @property
     def color(self) -> QColor:
@@ -136,6 +149,12 @@ class ComponentElement(QGraphicsItem, QObject):
     @property
     def rect(self):
         return self._rect
+
+    @rect.setter 
+    def rect(self, qrectf):
+        self.setRect(qrectf)
+        self.element_changed.emit()
+        self.update()
 
     # --- End Property Getters and Setters ---
 

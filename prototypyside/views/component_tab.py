@@ -11,7 +11,8 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QDockWidget,
                                QCheckBox, QGraphicsItem, QGraphicsView,
                                QGraphicsScene, QToolBar, QLineEdit) # Added QToolBar for font/measure
 from PySide6.QtCore import Qt, Signal, Slot, QPointF, QRectF, QSizeF, QObject, QSize, QTimer # Removed QCoreApplication, QEvent, QKeySequence, QShortcut
-from PySide6.QtGui import QPainter, QAction, QImage, QPixmap, QFont, QColor, QIcon, QKeySequence, QShortcut # Added QKeySequence, QShortcut here, removed from main_window
+from PySide6.QtGui import (QPainter, QAction, QImage, QPixmap, QFont, QColor, QIcon, 
+                                QKeySequence, QShortcut, QUndoStack, QUndoGroup, QUndoCommand)
 
 # Import views components
 from prototypyside.views.palettes import ComponentListWidget
@@ -26,14 +27,13 @@ from prototypyside.widgets.page_size_selector import PageSizeSelector # Potentia
 from prototypyside.widgets.pdf_export_dialog import PDFExportDialog
 from prototypyside.widgets.property_panel import PropertyPanel
 
-# Import models (no longer needed, using ProtoRegistry)
+# Import models (no longer needed, using ComponentRegistry)
 # from prototypyside.models.game_component_template import ComponentTemplate
 from prototypyside.models.component_elements import (ComponentElement, TextElement, ImageElement)
 from prototypyside.services.app_settings import AppSettings
 from prototypyside.services.export_manager import ExportManager
 from prototypyside.services.property_setter import PropertySetter
 from prototypyside.services.geometry_setter import GeometrySetter
-from prototypyside.services.undo_manager import UndoManager
 
 class ComponentTab(QWidget):
     # Signals for communication with MainDesignerWindow
@@ -42,11 +42,11 @@ class ComponentTab(QWidget):
 
     def __init__(self, parent, registry, template: Optional[Dict] = None):
         super().__init__(parent)
+        self.undo_stack = QUndoStack(self)
         self.registry = registry
         self.settings = AppSettings(unit='px', display_dpi=300, print_dpi=300)
         print(f"settings should be loaded here: {self.settings} with dpi: {self.settings.dpi}")
-        self.undo_manager = UndoManager(self.registry)
-        self.geometry_setter = GeometrySetter(self.undo_manager)
+        self.geometry_setter = GeometrySetter(self.undo_stack)
         self.current_template = template
         self.settings.dpi = template.dpi
         self.merged_templates: List[ComponentTemplate] = []
@@ -64,14 +64,19 @@ class ComponentTab(QWidget):
         self._current_drawing_color = QColor(0, 0, 0) # For drawing tools
 
         self.setup_ui()
-        self.setup_shortcuts()
+        #self.setup_shortcuts()
 
         self._refresh_scene()
 
         # self.scene.selectionChanged.connect(self.on_selection_changed)
         # self.scene.element_dropped.connect(self.add_element_from_drop)
         # self.scene.element_cloned.connect(self.element_cloned)
-
+    def focusInEvent(self, event):
+        super().focusInEvent(event)
+        # Assuming you have a way to get the main window, e.g., self.window()
+        main_window = self.window()
+        if hasattr(main_window, "undo_group"):
+            main_window.undo_group.setActiveStack(self.undo_stack)
 
 
     def setup_ui(self):
@@ -136,7 +141,7 @@ class ComponentTab(QWidget):
 
     def setup_shortcuts(self):
         delete_shortcut = QShortcut(QKeySequence.Delete, self)
-        delete_shortcut.activated.connect(self.remove_selected_element)
+        delete_shortcut.activated.connect(self.remove_element)
 
     @Slot()
     def update_game_component_scene(self):
@@ -146,7 +151,9 @@ class ComponentTab(QWidget):
 
         new_rect = QRectF(0, 0, self.current_template.width_px, self.current_template.height_px)
         self.scene.set_template_dimensions(self.current_template.width_px, self.current_template.height_px)
+
         self.view.setSceneRect(new_rect)
+
         self.scene.update()
         #QTimer.singleShot(0, lambda: self.view.fitInView(new_rect, Qt.KeepAspectRatio)) # Keep aspect ratio after update
 
@@ -343,8 +350,6 @@ class ComponentTab(QWidget):
         self.current_template.template_changed.emit()
         self.show_status_message(f"DPI updated to {new_dpi}.", "info")
 
-
-
     # @Slot(QFont)
     # def on_font_toolbar_font_changed(self, font: QFont):
     #     element = self.get_selected_element()
@@ -353,23 +358,26 @@ class ComponentTab(QWidget):
 
     @Slot(tuple)
     def on_geometry_changed(self, change):
-        element = self.get_selected_element()
-        if not element or not change:
-            return
+        prop, values = change
+        if prop == "geometry":
+            x, y, w, h = values
+            element = self._current_selected_element
+            current_pos = element.pos()
+            current_rect = element.rect
 
-        field, value = change
-        r = element.rect()
-        x, y, w, h = r.x(), r.y(), r.width(), r.height()
+            # Determine if position changed
+            pos_changed = (current_pos.x() != x) or (current_pos.y() != y)
+            # Determine if rect size changed (assuming origin is always 0,0)
+            rect_changed = (current_rect.width() != w) or (current_rect.height() != h)
 
-        match field.lower():
-            case "x": x = value
-            case "y": y = value
-            case "width": w = value
-            case "height": h = value
-            case _: return
+            if pos_changed:
+                self.geometry_setter.set_pos(element, QPointF(x, y))
+            if rect_changed:
+                self.geometry_setter.set_rect(element, QRectF(0, 0, w, h))
+        else:
+            # handle other cases or raise error
+            pass
 
-        new_rect = QRectF(x, y, w, h)
-        self.geometry_setter.set_rect(element, new_rect)
 
     @Slot()
     def on_property_changed(self, change):
@@ -630,7 +638,7 @@ class ComponentTab(QWidget):
 
         new_rect = QRectF(0, 0, default_width, default_height)
         new_element = self.registry.create(
-            pid=element_type,
+            element_type,
             name=None,
             rect=new_rect,
             parent_qobject=self.current_template
@@ -668,6 +676,11 @@ class ComponentTab(QWidget):
 
     @Slot()
     def remove_selected_element(self):
+        command = RemoveElement(element, registry)
+        self.undo_stack.push(command)
+
+
+    def remove_element(self):
         element = self.get_selected_element()
         if element:
             reply = QMessageBox.question(self, "Remove Element",
@@ -677,7 +690,7 @@ class ComponentTab(QWidget):
                 self.show_status_message("Element removal cancelled.", "info")
                 return
             self.scene.removeItem(element)
-            self.current_template.remove_element(element)
+            self.registry.deregister(element)
             self.on_selection_changed()
             self.show_status_message(f"Element '{element.name}' removed.", "info")
         else:
