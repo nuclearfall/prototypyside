@@ -9,6 +9,7 @@ from prototypyside.config import MEASURE_INCREMENT, LIGHTEST_GRAY, DARKEST_GRAY
 from prototypyside.utils.unit_converter import parse_dimension
 from prototypyside.utils.graphics_item_helpers import is_movable
 from prototypyside.views.graphics_items import ResizeHandle
+from prototypyside.services.undo_commands import MoveElementCommand, ResizeElementCommand
 
 from typing import Optional, TYPE_CHECKING
 import math
@@ -27,26 +28,21 @@ else:
 class ComponentGraphicsScene(QGraphicsScene):
     element_dropped = Signal(QPointF, str)
     element_cloned = Signal(ComponentElement, QPointF)
+    element_moved = Signal()
+    element_resized = Signal()
     selectionChanged = Signal()
 
-    def __init__(self, scene_rect: QRectF, parent=None, settings=None):
+    def __init__(self, scene_rect: QRectF, parent, tab):
         super().__init__(scene_rect, parent)
-        if settings:
-            self.settings = settings
-        else:
-            raise ValueError
-
+        self.tab = tab
         self._template_width_px = int(scene_rect.width())
         self._template_height_px = int(scene_rect.height())
         self.setBackgroundBrush(QColor(240, 240, 240))
 
-        self._alt_drag_duplicate = None
-        self._alt_drag_started = False
         self._resizing = False
         self._dragging_item = None
         self._drag_offset = None
-        self._was_dragging = False
-
+        self._dragging_start_pos = None
         self.resize_handle_type = None
         self.resizing_element = None
         self.resize_start_scene_pos = None
@@ -57,9 +53,6 @@ class ComponentGraphicsScene(QGraphicsScene):
         self.selected_item: Optional['ComponentElement'] = None
         self._max_z_value = 0
         self.connecting_line: Optional[QGraphicsRectItem] = None
-        self._dragging_item = None
-        self._drag_offset = None
-        self.is_duplicating = False
         self.duplicate_element = None
 
         self.setSceneRect(0, 0, self._template_width_px, self._template_height_px)
@@ -112,7 +105,7 @@ class ComponentGraphicsScene(QGraphicsScene):
         if not getattr(self.parent(), "show_grid", True):
             return
 
-        unit = self.settings.unit
+        unit = self.tab.settings.unit
         levels = sorted(MEASURE_INCREMENT[unit].keys(), reverse=True)
         num_levels = len(levels)
 
@@ -143,8 +136,8 @@ class ComponentGraphicsScene(QGraphicsScene):
 
 
     def get_grid_spacing(self, level: int) -> int:
-        unit = self.settings.unit
-        dpi = self.settings.dpi
+        unit = self.tab.settings.unit
+        dpi = self.tab.settings.dpi
         base = parse_dimension("1 " + unit, dpi)
         increment = MEASURE_INCREMENT[unit].get(level)
         if increment is None:
@@ -178,6 +171,8 @@ class ComponentGraphicsScene(QGraphicsScene):
         # Alt+click duplication
         if event.modifiers() & Qt.AltModifier and is_movable(item):
             # emit both the item to clone and the raw scene‐pos
+            self._alt_drag_started = True
+            self.tab
             self.element_cloned.emit(item, event.scenePos())
             event.accept()
             return
@@ -185,7 +180,8 @@ class ComponentGraphicsScene(QGraphicsScene):
         # normal click/drag
         if is_movable(item):
             self._dragging_item = item
-            self._drag_offset   = event.scenePos() - item.pos()
+            self._dragging_start_pos = item.pos()
+            self._drag_offset = event.scenePos() - item.pos()
 
         super().mousePressEvent(event)
 
@@ -208,19 +204,20 @@ class ComponentGraphicsScene(QGraphicsScene):
 
         super().mouseMoveEvent(event)
 
-        #     # Regular or post-duplicate dragging
-        #     new_pos = event.scenePos() - self._drag_offset
-        #     if self.is_snap_to_grid:
-        #         new_pos = self.snap_to_grid(new_pos)
-        #     self._dragging_item.setPos(new_pos)
-        #     self._was_dragging = True
-        #     return
-
-        # super().mouseMoveEvent(event)
-
 
 
     def mouseReleaseEvent(self, event: QGraphicsSceneMouseEvent):
+        if self._dragging_item and self._drag_offset and self._dragging_start_pos:
+            # use MoveElementCommand:
+            print("Triggering MoveElementCommand")
+            command = MoveElementCommand(element=self._dragging_item, new_pos=self._dragging_item.pos(), old_pos=self._dragging_start_pos)
+            self.tab.undo_stack.push(command)
+        elif all([self._resizing, self.resizing_element, self.resize_start_scene_rect]):
+            # use ResizeElementCommand:
+            command = ResizeElementCommand(element=self.resizing_element, new_rect=self.resizing_element.getRect(), 
+                        old_rect=self.resize_start_scene_rect)
+            self.tab.undo_stack.push(command)
+        self._dragging_start_pos = None
         self._dragging_item = None
         self._drag_offset = None
         self._resizing = False

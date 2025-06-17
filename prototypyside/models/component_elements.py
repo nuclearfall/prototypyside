@@ -79,7 +79,6 @@ class ComponentElement(QGraphicsItem, QObject):
         if self._name != value:
             self._name = value
             self.element_changed.emit()
-            self.update()
     
     @property
     def color(self) -> QColor:

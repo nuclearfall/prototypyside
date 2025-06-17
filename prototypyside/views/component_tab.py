@@ -34,7 +34,8 @@ from prototypyside.services.app_settings import AppSettings
 from prototypyside.services.export_manager import ExportManager
 from prototypyside.services.property_setter import PropertySetter
 from prototypyside.services.geometry_setter import GeometrySetter
-
+from prototypyside.services.undo_commands import AddElementCommand, RemoveElementCommand, CloneElementCommand
+from prototypyside.utils.proto_helpers import issue_pid
 class ComponentTab(QWidget):
     # Signals for communication with MainDesignerWindow
     status_message_signal = Signal(str, str, int) # message, type, timeout_ms
@@ -47,6 +48,7 @@ class ComponentTab(QWidget):
         self.settings = AppSettings(unit='px', display_dpi=300, print_dpi=300)
         print(f"settings should be loaded here: {self.settings} with dpi: {self.settings.dpi}")
         self.geometry_setter = GeometrySetter(self.undo_stack)
+        self.property_setter = PropertySetter(self.undo_stack)
         self.current_template = template
         self.settings.dpi = template.dpi
         self.merged_templates: List[ComponentTemplate] = []
@@ -103,7 +105,7 @@ class ComponentTab(QWidget):
 
         # Setup scene and view
         scene_rect = QRectF(0, 0, self.current_template.width_px, self.current_template.height_px)
-        self.scene = ComponentGraphicsScene(scene_rect, self, self.settings) # Parent is self (ComponentTab)
+        self.scene = ComponentGraphicsScene(scene_rect=scene_rect, parent=self, tab=self) # Parent is self (ComponentTab)
         self.view = DesignerGraphicsView(self.scene)
         self.view.setRenderHints(QPainter.Antialiasing | QPainter.TextAntialiasing | QPainter.SmoothPixmapTransform)
         self.view.setViewportUpdateMode(QGraphicsView.FullViewportUpdate)
@@ -350,12 +352,6 @@ class ComponentTab(QWidget):
         self.current_template.template_changed.emit()
         self.show_status_message(f"DPI updated to {new_dpi}.", "info")
 
-    # @Slot(QFont)
-    # def on_font_toolbar_font_changed(self, font: QFont):
-    #     element = self.get_selected_element()
-    #     if element and isinstance(element, TextElement):
-    #         element.set_style_property('font', font)
-
     @Slot(tuple)
     def on_geometry_changed(self, change):
         prop, values = change
@@ -378,22 +374,17 @@ class ComponentTab(QWidget):
             # handle other cases or raise error
             pass
 
-
     @Slot()
     def on_property_changed(self, change):
         element = self.get_selected_element()
         if not element or not change:
             return
             
-        setter = PropertySetter(element, self.settings, self.scene)
         
-        if isinstance(change, tuple) and len(change) == 2:
-            prop, value = change
-            setter_fn = getattr(setter, f"set_{prop}", None)
-            if callable(setter_fn):
-                setter_fn(value)
-            else:
-                print(f"No setter for: {prop}")
+        if isinstance(change, tuple) and len(change) == 2 and element is not None:
+            self.property_setter.set_prop(element, change)
+            #self.property_panel.update_panel_from_element()
+            # self.scene.update()
 
     def get_selected_element(self) -> Optional['ComponentElement']:
         items = self.scene.selectedItems()
@@ -514,60 +505,6 @@ class ComponentTab(QWidget):
         # Reuse existing logic
         self.adjust_z_order_of_selected(direction)
 
-    # def _handle_new_selection(self, new):
-    #     old = self._current_selected_element
-    #     if old is not new:
-    #         if old:
-    #             old.hideHandles()
-    #         if new:
-    #             new.showHandles()
-    #         self._current_selected_element = new
-
-    # @Slot()
-    # def on_selection_changed(self)
-
-    #     selected_element = self.get_selected_element()
-    #     if self._current_selected_element:
-    #         self._current_selected_element.hide_handles()
-
-    #     if self._current_selected_element and self._current_selected_element != selected_element:
-    #         try:
-    #             self._current_selected_element.element_changed.disconnect(self.on_element_data_changed)
-    #         except TypeError:
-    #             pass
-
-    #     self._current_selected_element = selected_element
-
-    #     if selected_element:
-    #         self.set_element_controls_enabled(True)
-    #         # self.font_toolbar_widget.setEnabled(isinstance(selected_element, TextElement))
-            
-    #         # Update property panel with selected element
-    #         self.property_panel.set_target(selected_element)
-    #         self.property_panel.refresh()
-            
-    #         selected_element.element_changed.connect(self.on_element_data_changed)
-
-    #         # Update layers list selection
-    #         self.layers_list.blockSignals(True)
-    #         self.layers_list.clearSelection()
-    #         for i in range(self.layers_list.count()):
-    #             item = self.layers_list.item(i)
-    #             if item.data(Qt.UserRole) == selected_element:
-    #                 item.setSelected(True)
-    #                 self.layers_list.scrollToItem(item)
-    #                 break
-    #         self.layers_list.blockSignals(False)
-    #         selected_element.show_handles()
-    #     else:
-    #         self.set_element_controls_enabled(False)
-    #         #  self.font_toolbar_widget.setEnabled(False)
-    #         self.property_panel.set_target(None)  # Clear the panel
-    #         self.layers_list.blockSignals(True)
-    #         self.layers_list.clearSelection()
-    #         self.layers_list.blockSignals(False)
-
-
     @Slot(QGraphicsItem)
     def select_element_from_layers_list(self, element: QGraphicsItem):
         if isinstance(element, ComponentElement):
@@ -576,47 +513,12 @@ class ComponentTab(QWidget):
             element.setSelected(True)
             self.scene.blockSignals(False)
 
-    # @Slot()
-    # def update_layers_panel(self):
-    #     self.layers_list.update_list(self.current_template.elements)
-
-    # @Slot(int)
-    # def adjust_z_order_of_selected(self, direction: int):
-    #     element = self.get_selected_element()
-    #     if element:
-    #         self.current_template.reorder_element_z(element, direction)
-
-    # @Slot()
-    # def bring_selected_to_front(self):
-    #     element = self.get_selected_element()
-    #     if element:
-    #         max_z = max([e.zValue() for e in self.current_template.elements] + [0])
-    #         if element.zValue() < max_z:
-    #             element.setZValue(max_z + 1)
-    #             self.current_template.elements.sort(key=lambda e: e.zValue())
-    #             self.current_template.element_z_order_changed.emit()
-
-    # @Slot()
-    # def send_selected_to_back(self):
-    #     element = self.get_selected_element()
-    #     if element:
-    #         min_z = min([e.zValue() for e in self.current_template.elements] + [0])
-    #         if element.zValue() > min_z:
-    #             element.setZValue(min_z - 1)
-    #             self.current_template.elements.sort(key=lambda e: e.zValue())
-    #             self.current_template.element_z_order_changed.emit()
-
-    # @Slot(object, int)
-    # def reorder_element_z_from_list_event(self, element: object, direction: int):
-    #     self.current_template.elements.sort(key=lambda e: e.zValue())
-    #     self.current_template.element_z_order_changed.emit()
-
 
     @Slot()
     def on_element_data_changed(self):
         element = self.get_selected_element()
         if element and element == self._current_selected_element:
-            self.property_panel.refresh()
+            #self.property_panel.refresh()
             element.update()
             self.scene.update()
         self.update_layers_panel()
@@ -629,42 +531,27 @@ class ComponentTab(QWidget):
     def add_element_from_drop(self, scene_pos: QPointF, element_type: str):
         self.scene.clearSelection()
 
-        if element_type == "te":
-            default_width, default_height = 180, 60
-        elif element_type == "ie":
-            default_width, default_height = 200, 150
-        else:
-            raise ValueError(f"Unknown element type: {element_type}")
+        command = AddElementCommand(element_type, scene_pos, self)
+        self.undo_stack.push(command)
+        new_element = self.registry.get_last()
 
-        new_rect = QRectF(0, 0, default_width, default_height)
-        new_element = self.registry.create(
-            element_type,
-            name=None,
-            rect=new_rect,
-            parent_qobject=self.current_template
-        )
-        
-        self.scene.addItem(new_element)
 
-        if self.snap_to_grid:
-            scene_pos = self.scene.snap_to_grid(scene_pos)
-
-        visual_offset = new_element.boundingRect().topLeft()
-        new_element.setPos(scene_pos - visual_offset)
-        new_element.setSelected(True)
 
     @Slot(ComponentElement, QPointF)
     def clone_element(self, original, press_scene_pos):
         """Clone via the registry and immediately begin dragging."""
         # 1) Do the registry‐based clone
         original.hide_handles()
-        new = self.registry.clone(original)
+        command = CloneElementCommand(original, self)
+        # new = self.registry.clone(original)
+        self.undo_stack.push(command)
+        new = self.registry.get_last()
         self.scene.addItem(new)
 
         # 2) Place it exactly on top of the original
         new.setPos(original.pos())
         new.setSelected(True)
-
+        
         # 3) Compute and stash the drag offset so mouseMoveEvent will pick it up
         drag_offset = press_scene_pos - new.pos()
         self.scene._dragging_item = new
@@ -710,205 +597,3 @@ class ComponentTab(QWidget):
                 self.show_status_message("Background Error: Could not set background image. File may be invalid.", "error")
         else:
             self.show_status_message("Background image selection cancelled.", "info")
-
-    @Slot()
-    def load_csv_and_merge(self):
-        path, _ = QFileDialog.getOpenFileName(
-            self, "Open CSV Data for Merge", "", "CSV Files (*.csv)")
-        if path:
-            self.perform_csv_merge(path)
-        else:
-            self.show_status_message("CSV import cancelled.", "info")
-
-    def load_csv_and_merge_from_cli(self, path: str):
-        self.perform_csv_merge(path, cli_mode=True)
-
-    def perform_csv_merge(self, filepath: str, cli_mode: bool = False):
-        try:
-            with open(filepath, newline='', encoding='utf-8') as csvfile:
-                header_line = csvfile.readline().strip()
-                raw_headers = [h.strip() for h in header_line.split(',')]
-                cleaned_headers = [h for h in raw_headers if h]
-
-                csvfile.seek(0)
-                if header_line:
-                    csvfile.readline()
-
-                reader = csv.reader(csvfile)
-                data_rows_raw = list(reader)
-
-                data_rows = []
-                for row_list in data_rows_raw:
-                    if not row_list or len(row_list) < len(cleaned_headers):
-                        print(f"Warning: Skipping empty or malformed row with too few columns: {row_list}")
-                        self.show_status_message(f"Warning: Skipping malformed row with too few columns.", "warning")
-                        continue
-                    if len(row_list) >= len(cleaned_headers):
-                        row_data = {cleaned_headers[j]: row_list[j].strip() for j in range(len(cleaned_headers))}
-                        data_rows.append(row_data)
-                    else:
-                        print(f"Warning: Skipping malformed row with too few columns: {row_list}")
-                        self.show_status_message(f"Warning: Skipping malformed row with too few columns in row {len(data_rows)+1}.", "warning")
-
-                if not data_rows:
-                    self.show_status_message("CSV Merge Error: The CSV file is empty or has no data rows after processing headers.", "error")
-                    return
-
-            self.merged_templates = []
-
-            for i, row_data in enumerate(data_rows):
-                merged_template = ComponentTemplate.from_dict(self.current_template.to_dict(), parent=None)
-                merged_template.background_image_path = self.current_template.background_image_path
-
-                for element in merged_template.elements:
-                    if element.name.startswith('@'):
-                        field_name_in_template = element.name # Remove '@' for lookup
-                        if field_name_in_template in row_data:
-                            content = row_data[field_name_in_template]
-                            if isinstance(element, ImageElement):
-                                if content and Path(content).is_file():
-                                    element.set_content(content)
-                                else:
-                                    print(f"Warning: Image file not found for {element.name} (row {i+1}): {content}")
-                                    self.show_status_message(f"Warning: Image not found for field '{element.name}' in row {i+1}.", "warning")
-                                    element.set_content("")
-                            else:
-                                element.set_content(content)
-                        else:
-                            print(f"Warning: Merge field '{element.name}' not found in CSV row {i+1}.")
-                            self.show_status_message(f"Warning: Field '{element.name}' not found in CSV row {i+1}.", "warning")
-                            element.set_content(f"<{element.name} Not Found>")
-                self.merged_templates.append(merged_template)
-
-            if not cli_mode:
-                self.show_status_message(f"Successfully created {len(self.merged_templates)} merged template instances. You can now export them as PNGs or PDF.", "success")
-            else:
-                print(f"Successfully created {len(self.merged_templates)} merged template instances.")
-
-        except FileNotFoundError:
-            if not cli_mode:
-                QMessageBox.critical(self, "CSV Merge Error", f"File not found: {filepath}")
-                self.show_status_message(f"CSV Merge Error: File not found: {filepath}", "error")
-            else:
-                print(f"Error: File not found: {filepath}")
-        except Exception as e:
-            if not cli_mode:
-                QMessageBox.critical(self, "CSV Merge Error", f"An error occurred during merge: {str(e)}")
-                self.show_status_message(f"An error occurred during merge: {str(e)}", "error")
-            else:
-                print(f"Error during CSV merge: {str(e)}")
-
-    @Slot()
-    def export_png_gui(self):
-        templates_to_export = self.merged_templates if self.merged_templates else [self.current_template]
-        if not templates_to_export:
-            self.show_status_message("PNG Export Failed: No templates to export.", "error")
-            return
-        output_dir_str = QFileDialog.getExistingDirectory(self, "Select Output Directory for PNGs")
-        if not output_dir_str:
-            self.show_status_message("PNG Export cancelled.", "info")
-            return
-        output_dir = Path(output_dir_str)
-        if self.export_manager.export_png(templates_to_export, output_dir=output_dir, is_cli_mode=False):
-            self.show_status_message(f"Successfully exported PNG(s) to {output_dir.resolve()}", "success")
-        else:
-            self.show_status_message("PNG Export Failed.", "error")
-
-    @Slot()
-    def export_pdf_gui(self):
-        templates_to_export = self.merged_templates if self.merged_templates else [self.current_template]
-        if not templates_to_export:
-            self.show_status_message("PDF Export Failed: No templates to export.", "error")
-            return
-        dialog = PDFExportDialog(self)
-        if not dialog.exec():
-            self.show_status_message("PDF Export cancelled.", "info")
-            return
-        filenames = dialog.selectedFiles()
-        if not filenames:
-            self.show_status_message("PDF Export cancelled.", "info")
-            return
-        output_file_path = Path(filenames[0])
-        page_size = dialog.get_page_size()
-        if self.export_manager.export_pdf(
-            templates_to_export,
-            output_file_path=output_file_path,
-            page_size=page_size,
-            is_cli_mode=False
-        ):
-            self.show_status_message(f"Successfully exported PDF to {output_file_path.resolve()}", "success")
-        else:
-            QMessageBox.critical(self, "PDF Export Error", "An error occurred during PDF export.")
-            self.show_status_message("PDF Export Failed.", "error")
-
-    def export_png_cli(self, output_dir: Path):
-        templates_to_export = self.merged_templates if self.merged_templates else [self.current_template]
-        self.export_manager.export_png(templates_to_export, output_dir=output_dir, is_cli_mode=True)
-
-    def export_pdf_cli(self, output_dir: Path):
-        templates_to_export = self.merged_templates if self.merged_templates else [self.current_template]
-        pdf_output_name = "merged_output.pdf" if self.merged_templates else "current_template.pdf"
-        self.export_manager.export_pdf(templates_to_export, output_file_path=output_dir / pdf_output_name, is_cli_mode=True)
-
-    # These were previously on main_window, but belong to the tab's element management
-    # since they manipulate the selected element's properties directly via PropertySetter.
-    def change_text_color(self):
-        element = self.get_selected_element()
-        if element:
-            color = QColorDialog.getColor(element._style['color'], self)
-            if color.isValid():
-                element.set_style_property('color', color)
-            else:
-                self.show_status_message("Text color selection cancelled.", "info")
-
-    def change_bg_color(self):
-        element = self.get_selected_element()
-        if element:
-            color = QColorDialog.getColor(element._style['bg_color'], self)
-            if color.isValid():
-                element.set_style_property('bg_color', color)
-            else:
-                self.show_status_message("Background color selection cancelled.", "info")
-
-    def change_border_color(self):
-        element = self.get_selected_element()
-        if element:
-            color = QColorDialog.getColor(element._style['border_color'], self)
-            if color.isValid():
-                element.set_style_property('border_color', color)
-            else:
-                self.show_status_message("Border color selection cancelled.", "info")
-
-    @Slot(int)
-    def update_element_border_width(self, px: int):
-        if not self._current_selected_element:
-            return
-        if px != 0:
-            self._current_selected_element.set_style_property('border_width', px)
-            # self._current_selected_element.element_changed.emit() # PropertySetter should handle this
-            self.scene.update()
-            self.view.update()
-
-    @Slot(int)
-    def update_alignment(self, index: int):
-        element = self.get_selected_element()
-        if element and isinstance(element, TextElement): # Assuming LabelElement is not used or derived from TextElement
-            alignment_map = {
-                0: Qt.AlignLeft | Qt.AlignTop, 1: Qt.AlignHCenter | Qt.AlignTop, 2: Qt.AlignRight | Qt.AlignTop,
-                3: Qt.AlignLeft | Qt.AlignVCenter, 4: Qt.AlignHCenter | Qt.AlignVCenter, 5: Qt.AlignRight | Qt.AlignVCenter,
-                6: Qt.AlignLeft | Qt.AlignBottom, 7: Qt.AlignHCenter | Qt.AlignBottom, 8: Qt.AlignRight | Qt.AlignBottom
-            }
-            alignment_flag = alignment_map.get(index, Qt.AlignCenter)
-            element.set_style_property('alignment', alignment_flag)
-
-    # Simplified geometry update since PropertyPanel handles it more generically
-    # @Slot(str, int)
-    # def update_element_geometry(self, prop: str, px: int):
-    #     if not self._current_selected_element:
-    #         return
-    #     setter = PropertySetter(self._current_selected_element, self.settings, self.scene)
-    #     setter_fn = getattr(setter, f"set_{prop}", None)
-    #     if callable(setter_fn):
-    #         setter_fn(px)
-    #     else:
-    #         print(f"No setter for geometry property: {prop}")

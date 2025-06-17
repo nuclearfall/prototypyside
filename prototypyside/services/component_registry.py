@@ -47,7 +47,7 @@ class ComponentRegistry(QObject):
             'ct': [1, 'Template'],
             'ci': [1, 'Component'] # Consistent with 'ci' prefix for ComponentInstance
         }
-        self.orphans: dict[str, object] = {}
+        self._orphans: dict[str, object] = {}
         self._unique_names: set[str] = set() # For faster name lookup and validation
 
     def _get_object_by_pid(self, pid: str) -> object:
@@ -56,7 +56,11 @@ class ComponentRegistry(QObject):
         if obj is None:
             raise KeyError(f"Object with PID '{pid}' not found in registry.")
         return obj
-
+        
+    def is_orphan(self, pid):
+        if pid in self._orphans:
+            return True
+        return False
     # --- Type-specific Getters ---
     def get_element(self, pid: str) -> Union[TextElement, ImageElement]:
         """Retrieves an Element object by its PID."""
@@ -79,6 +83,9 @@ class ComponentRegistry(QObject):
             raise TypeError(f"PID '{pid}' (prefix: '{prefix}') is not a ComponentInstance PID.")
         return self._get_object_by_pid(pid)
 
+    def get_last(self):
+        return list(self._objects.values())[-1]
+
     def get(self, pid: str) -> Optional[object]:
         """
         Generic getter for any registered object.
@@ -86,6 +93,9 @@ class ComponentRegistry(QObject):
         if you need type guarantees.
         """
         return self._objects.get(pid)
+
+    def has(self, pid:str) -> bool:
+        return True if self.get(pid) else False
 
     def has_unique_name(self, obj: object) -> bool:
         """Checks if an object's current name is unique within the registry."""
@@ -119,7 +129,7 @@ class ComponentRegistry(QObject):
 
     def register(self, obj: object):
         """Registers an object in the registry."""
-        pid = getattr(obj, "pid", None)
+        pid = obj.pid
         if not pid:
             raise ValueError("Object must have a pid to be registered.")
         if pid in self._objects:
@@ -133,7 +143,7 @@ class ComponentRegistry(QObject):
             self._unique_names.add(obj.name)
 
         self.object_added.emit(pid)
-
+        print(f"Object {pid} registered")
         # Connect known signals. Consider defining a method on ComponentBase
         # (if you have one) that connects its signals to the registry,
         # or a dedicated signal connector.
@@ -160,7 +170,7 @@ class ComponentRegistry(QObject):
         # Registry handles name generation and registration
         self.generate_name(obj)
         self.register(obj)
-
+        print(f"{self.get(obj.pid).name} has been registered with pid {obj.pid}")
         # Registry handles initial parenting/relationship wiring
         template_pid = getattr(obj, "template_pid", None)
         if template_pid:
@@ -169,12 +179,12 @@ class ComponentRegistry(QObject):
                 template.add_element(obj) # Template's add_element should manage its internal list and set obj.template_pid
             except (KeyError, TypeError) as e:
                 print(f"Warning: Object '{obj.pid}' created with invalid template_pid '{template_pid}': {e}. Object is now unparented (orphan).")
-                self.orphans[obj.pid] = obj
+                self._orphans[obj.pid] = obj
                 setattr(obj, "template_pid", None) # Clear invalid template reference
 
         return obj
 
-    def clone(self, obj: object) -> object:
+    def clone(self, obj: object = None) -> object:
         """Clones an existing object, generates a new PID, and registers the clone."""
         if not hasattr(obj, 'pid'):
             raise ValueError("Object to clone must have a 'pid' attribute.")
@@ -185,15 +195,16 @@ class ComponentRegistry(QObject):
         # Factory creates the raw clone object (assuming obj.clone() returns a new instance)
         if not hasattr(obj, 'clone') or not callable(obj.clone):
             raise TypeError(f"Object type {type(obj).__name__} does not have a callable 'clone' method.")
-        
+        print(f"Clone pid before serialization {new_pid}")
         clone_data = self._factory.to_dict(obj) # Serialize to dict
         clone_data["pid"] = new_pid # Override PID for the clone
         
         clone = self._factory.from_dict(clone_data) # Reconstruct using factory
-
+        print(f"Clone pid after serialization {clone.pid}")
+        # clone.pid = new_pid
         self.generate_name(clone) # Registry handles name generation
         self.register(clone) # Registry registers the clone
-
+        print(f"Element exists: {self.get(new_pid)} clone from {self.get(obj.pid)}")
         # If the original object had a parent, attempt to attach the clone to the same parent
         template_pid = getattr(obj, "template_pid", None)
         if template_pid:
@@ -204,7 +215,7 @@ class ComponentRegistry(QObject):
                 template.add_element(clone)
             except (KeyError, TypeError) as e:
                 print(f"Warning: Could not attach cloned object '{clone.pid}' to original template '{template_pid}': {e}. Clone is orphaned.")
-                self.orphans[clone.pid] = clone
+                self._orphans[clone.pid] = clone
                 setattr(clone, "template_pid", None) # Ensure clone is marked as unparented if parent fails
 
         return clone
@@ -252,34 +263,29 @@ class ComponentRegistry(QObject):
             return
 
         obj = self._objects[pid]
+        self._orphans[obj.pid] = obj # Store in orphans
+        print(f"Object {self._orphans[obj.pid]} is in _orphans")
         # Clean up name from _unique_names set
         if hasattr(obj, 'name') and obj.name and obj.name in self._unique_names:
             self._unique_names.discard(obj.name)
 
-        # Handle elements explicitly removing from their template
-        if get_prefix(pid) in ELEMENT_PID_PREFIXES:
-            element = obj
-            template_pid = getattr(element, "template_pid", None)
-            if template_pid:
-                try:
-                    template = self.get_template(template_pid)
-                    template.remove_element(element.pid) # Template handles its internal list
-                except (KeyError, TypeError) as e:
-                    print(f"Warning: Could not detach element '{pid}' from template '{template_pid}' during deregister: {e}")
-            self.orphans[element.pid] = element # Store in orphans
+        template = self.get_template(obj.template_pid)
+        print (f"Object template at: {obj.template_pid}")
+        template.remove_element(obj) # Template handles its internal list
+        print(f"{self.is_orphan(obj.pid)} is orphan?")
 
         del self._objects[pid]
         self.object_removed.emit(pid)
 
     def reinsert(self, pid: str):
         """Reinserts an orphaned object back into the registry and its template."""
-        if pid not in self.orphans:
+        if pid not in self._orphans:  # FIX: Changed to self._orphans
             raise KeyError(f"Object with PID '{pid}' is not in orphans.")
         if pid in self._objects:
             print(f"Warning: Object with PID '{pid}' is already registered. Not reinserting.")
             return
 
-        obj = self.orphans.pop(pid) # Remove from orphans
+        obj = self._orphans.pop(pid)
         self.register(obj) # Re-register
 
         template_pid = getattr(obj, "template_pid", None)
@@ -389,7 +395,7 @@ class ComponentRegistry(QObject):
     def clear(self):
         """Clears all objects from the registry."""
         self._objects.clear()
-        self.orphans.clear()
+        self._orphans.clear()
         self._unique_names.clear()
         # Reset name counters if desired, e.g., self._name_counters = initial_state_dict
 
@@ -419,6 +425,7 @@ class ComponentRegistry(QObject):
         2. Instantiate & register every object using the factory.
         3. Wire up relationships (parenting).
         """
+        
         self.clear() # Clear existing objects and internal states
 
         # Pass 1: Instantiate and register all objects
@@ -442,7 +449,7 @@ class ComponentRegistry(QObject):
                 except (KeyError, TypeError) as e:
                     print(f"Warning: During deserialization, object '{obj.pid}' referenced an invalid template '{tpl_pid}': {e}. Object marked as unparented.")
                     setattr(obj, "template_pid", None) # Clear invalid template reference
-                    self.orphans[obj.pid] = obj # Mark as orphan
+                    self._orphans[obj.pid] = obj # Mark as orphan
 
     # --- File-level save/load with root ---
     def save_to_file(self, root_pid: str, path: Union[str, Path]):

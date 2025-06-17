@@ -76,7 +76,6 @@ class ComponentTemplate(QObject): # NOW INHERITS QObject
     def remove_element(self, element: 'ComponentElement'):
         if element in self.elements:
             self.elements.remove(element)
-            element.template_pid = None  # Optional: sever reference
             self.template_changed.emit()
             self.element_z_order_changed.emit()
 
