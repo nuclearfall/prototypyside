@@ -63,16 +63,19 @@ class CloneElementCommand(QUndoCommand):
 
 class RemoveElementCommand(QUndoCommand):
     def __init__(self, element, tab, description="Remove Element"):
+        super().__init__(description)
         self.element = element
         self.tab = tab
 
     def redo(self):
-        self.tab.registry.deregister(self.element)
+        self.tab.registry.deregister(self.element.pid)
         self.tab.scene.removeItem(self.element)
+        self.tab.update_layers_panel()
 
     def undo(self):
         self.tab.registry.reinsert(self.element.pid)
         self.tab.scene.addItem(self.element)
+        self.tab.update_layers_panel()
 
 class MoveElementCommand(QUndoCommand):
     def __init__(self, element, new_pos: QPointF, old_pos: QPointF = None, description="Move Element"):

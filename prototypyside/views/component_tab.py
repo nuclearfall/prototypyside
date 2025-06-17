@@ -143,7 +143,7 @@ class ComponentTab(QWidget):
 
     def setup_shortcuts(self):
         delete_shortcut = QShortcut(QKeySequence.Delete, self)
-        delete_shortcut.activated.connect(self.remove_element)
+        delete_shortcut.activated.connect(self.remove_selected_element)
 
     @Slot()
     def update_game_component_scene(self):
@@ -563,11 +563,6 @@ class ComponentTab(QWidget):
 
     @Slot()
     def remove_selected_element(self):
-        command = RemoveElement(element, registry)
-        self.undo_stack.push(command)
-
-
-    def remove_element(self):
         element = self.get_selected_element()
         if element:
             reply = QMessageBox.question(self, "Remove Element",
@@ -576,8 +571,8 @@ class ComponentTab(QWidget):
             if reply == QMessageBox.No:
                 self.show_status_message("Element removal cancelled.", "info")
                 return
-            self.scene.removeItem(element)
-            self.registry.deregister(element)
+            command = RemoveElementCommand(element, self)
+            self.undo_stack.push(command)
             self.on_selection_changed()
             self.show_status_message(f"Element '{element.name}' removed.", "info")
         else:
