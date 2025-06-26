@@ -9,8 +9,8 @@ class ComponentGraphicsManager:
 
     def synchronize_with_registry(self):
         """Pulls the latest state from the registry and updates the scene."""
-        current_template_elements = self.registry.get_all_elements() 
-        template_element_ids = {element.id for element in current_template_elements}
+        template_elements = self.registry.get_all_elements() 
+        template_element_ids = {element.id for element in template_elements}
 
         # 1. Identify and remove items from the scene that are no longer in the active elements
         items_to_remove = []
@@ -25,7 +25,7 @@ class ComponentGraphicsManager:
             # In Python, it will be GC'd when no more references.
 
         # 2. Iterate through active registry elements to add or update items in the scene
-        for element in current_template_elements:
+        for element in template_elements:
             item_id = element.id
             
             if item_id in self.scene_items_map:

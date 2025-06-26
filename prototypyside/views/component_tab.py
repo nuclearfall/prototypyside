@@ -28,7 +28,7 @@ from prototypyside.widgets.pdf_export_dialog import PDFExportDialog
 from prototypyside.widgets.property_panel import PropertyPanel
 
 # Import models (no longer needed, using ComponentRegistry)
-# from prototypyside.models.game_component_template import ComponentTemplate
+# from prototypyside.models.component_template import ComponentTemplate
 from prototypyside.models.component_elements import (ComponentElement, TextElement, ImageElement)
 from prototypyside.services.app_settings import AppSettings
 from prototypyside.services.export_manager import ExportManager
@@ -37,31 +37,38 @@ from prototypyside.services.geometry_setter import GeometrySetter
 from prototypyside.services.undo_commands import AddElementCommand, RemoveElementCommand, CloneElementCommand
 from prototypyside.utils.proto_helpers import issue_pid
 class ComponentTab(QWidget):
-    # Signals for communication with MainDesignerWindow
-    status_message_signal = Signal(str, str, int) # message, type, timeout_ms
-    tab_title_changed = Signal(str) # For updating the tab title if needed
+    status_message_signal = Signal(str, str, int)
+    tab_title_changed = Signal(str)
 
-    def __init__(self, parent, registry, template: Optional[Dict] = None):
+    def __init__(self, parent, registry, template):
         super().__init__(parent)
         self.undo_stack = QUndoStack(self)
         self.registry = registry
-        self.settings = AppSettings(unit='px', display_dpi=300, print_dpi=300)
+        self._template = template
+        print(f"Template set with pid {template.pid}")
+
+        unit = template.width.unit
+        print_dpi = template.dpi
+        display_dpi = parent.settings.dpi
+        print(f"Units set as {unit} with dpi of {display_dpi}")
+        self.settings = AppSettings(unit=unit, print_dpi=print_dpi, display_dpi=display_dpi)
+
         print(f"settings should be loaded here: {self.settings} with dpi: {self.settings.dpi}")
+
         self.geometry_setter = GeometrySetter(self.undo_stack)
         self.property_setter = PropertySetter(self.undo_stack)
-        self.current_template = template
-        self.settings.dpi = template.dpi
-        self.merged_templates: List[ComponentTemplate] = []
-        self._current_selected_element: Optional['ComponentElement'] = None
+
+        # Setup scene and view
+        scene_rect = QRectF(0, 0, template.width_px, template.height_px)
+        self.scene = ComponentGraphicsScene(scene_rect=scene_rect, parent=self, tab=self) # Parent is self (ComponentTab)
+        self.view = DesignerGraphicsView(self.scene)
+        self.view.setRenderHints(QPainter.Antialiasing | QPainter.TextAntialiasing | QPainter.SmoothPixmapTransform)
+        self.view.setViewportUpdateMode(QGraphicsView.FullViewportUpdate)
+        self.view.setOptimizationFlag(QGraphicsView.DontSavePainterState)
+        self.view.setOptimizationFlag(QGraphicsView.DontAdjustForAntialiasing)        
+        self.selected_element: Optional['ComponentElement'] = None
+
         self.export_manager = ExportManager()
-
-
-        self.scene: Optional[ComponentGraphicsScene] = None
-        self.view: Optional[DesignerGraphicsView] = None
-        self.property_panel: Optional[PropertyPanel] = None
-        self.layers_list: Optional[LayersListWidget] = None
-        # self.font_toolbar_widget: Optional[FontToolbar] = None
-        self.measure_toolbar: Optional[QToolBar] = None
 
         self._current_drawing_color = QColor(0, 0, 0) # For drawing tools
 
@@ -73,13 +80,24 @@ class ComponentTab(QWidget):
         # self.scene.selectionChanged.connect(self.on_selection_changed)
         # self.scene.element_dropped.connect(self.add_element_from_drop)
         # self.scene.element_cloned.connect(self.element_cloned)
+
+    @property
+    def template(self):
+        print(f"The template {self._template.pid} is assigned with name {self._template.name}")
+        return self._template
+
+    @property
+    def template_pid(self):
+        print(f"The template {self._template.pid} is assigned with name {self._template.name}")
+        return self._template.pid
+    
+    
     def focusInEvent(self, event):
         super().focusInEvent(event)
         # Assuming you have a way to get the main window, e.g., self.window()
         main_window = self.window()
         if hasattr(main_window, "undo_group"):
             main_window.undo_group.setActiveStack(self.undo_stack)
-
 
     def setup_ui(self):
         main_layout = QVBoxLayout(self)
@@ -102,34 +120,12 @@ class ComponentTab(QWidget):
 
         main_layout.addLayout(toolbar_container)
 
-
-        # Setup scene and view
-        scene_rect = QRectF(0, 0, self.current_template.width_px, self.current_template.height_px)
-        self.scene = ComponentGraphicsScene(scene_rect=scene_rect, parent=self, tab=self) # Parent is self (ComponentTab)
-        self.view = DesignerGraphicsView(self.scene)
-        self.view.setRenderHints(QPainter.Antialiasing | QPainter.TextAntialiasing | QPainter.SmoothPixmapTransform)
-        self.view.setViewportUpdateMode(QGraphicsView.FullViewportUpdate)
-        self.view.setOptimizationFlag(QGraphicsView.DontSavePainterState)
-        self.view.setOptimizationFlag(QGraphicsView.DontAdjustForAntialiasing)
-
-        # Central widget for scene and view should be the main area of the tab
-        # We need a way to integrate this with the dock widgets.
-        # For now, let's just make the view the primary content.
-        # Dock widgets will be added to the MainDesignerWindow, referencing this tab's content.
-
-        # The structure inside a ComponentTab will be:
-        # main_layout (QVBoxLayout)
-        #   -> toolbar_container (QHBoxLayout)
-        #   -> self.view (QGraphicsView) - This will be the central focus
-        #   -> (Implicitly, the dock widgets are created and added to the MainDesignerWindow,
-        #       but their content is managed by this tab)
-
         # The QGraphicsView will be the dominant part of the tab
         main_layout.addWidget(self.view)
 
         # Connect signals specific to this tab's template and scene
-        self.current_template.template_changed.connect(self.update_game_component_scene)
-        self.current_template.element_z_order_changed.connect(self.update_layers_panel)
+        self.template.template_changed.connect(self.update_component_scene)
+        self.template.element_z_order_changed.connect(self.update_layers_panel)
         self.scene.selectionChanged.connect(self.on_selection_changed)
         self.scene.element_dropped.connect(self.add_element_from_drop)
         self.scene.element_cloned.connect(self.clone_element)
@@ -146,24 +142,20 @@ class ComponentTab(QWidget):
         delete_shortcut.activated.connect(self.remove_selected_element)
 
     @Slot()
-    def update_game_component_scene(self):
+    def update_component_scene(self):
         """Updates the scene dimensions and view based on the current template."""
-        if not self.scene or not self.current_template:
+        if not self.scene or not self.template:
             return
 
-        new_rect = QRectF(0, 0, self.current_template.width_px, self.current_template.height_px)
-        self.scene.set_template_dimensions(self.current_template.width_px, self.current_template.height_px)
+        new_rect = QRectF(0, 0, self.template.width_px, self.template.height_px)
+        self.scene.scene_from_template_dimensions(self.template.width_px, self.template.height_px)
 
         self.view.setSceneRect(new_rect)
 
         self.scene.update()
-        #QTimer.singleShot(0, lambda: self.view.fitInView(new_rect, Qt.KeepAspectRatio)) # Keep aspect ratio after update
-
-    def get_template_data(self) -> Dict:
-        return self.current_template.to_dict()
 
     def get_template_name(self) -> str:
-        return self.current_template.name if self.current_template.name else "Unnamed Template"
+        return self.template.name if self.template.name else "Unnamed Template"
 
     def show_status_message(self, message: str, message_type: str = "info", timeout_ms: int = 5000):
         self.status_message_signal.emit(message, message_type, timeout_ms)
@@ -198,6 +190,7 @@ class ComponentTab(QWidget):
         self.layers_list.element_selected_in_list.connect(self.on_layers_list_item_clicked)
         self.layers_list.element_z_changed_requested.connect(self.reorder_element_z_from_list_event)
         self.layers_list.itemClicked.connect(self.on_layers_list_item_clicked)
+        
     # def create_font_toolbar(self):
     #     self.font_toolbar_widget = FontToolbar(self)
     #     font_toolbar = QToolBar("Font Tools")
@@ -212,7 +205,7 @@ class ComponentTab(QWidget):
 
         # Unit Selector
         self.unit_selector = QComboBox()
-        self.unit_selector.addItems(["in", "cm", "px"])
+        self.unit_selector.addItems(["in", "cm", "mm", "pt", "px"])
         self.unit_selector.setCurrentText(self.settings.unit)
         self.unit_selector.currentTextChanged.connect(self.on_unit_change)
 
@@ -232,31 +225,31 @@ class ComponentTab(QWidget):
 
 
         self.template_name_field = QLineEdit()
-        self.template_name_field.setPlaceholderText(self.current_template.name)
+        self.template_name_field.setPlaceholderText(self.template.name)
         self.template_name_field.editingFinished.connect(self.on_template_name_changed)
         self.template_name_field.setMaximumWidth(150)
 
         self.template_width_field = UnitField(
-            initial_px=self.current_template.width_px,
+            initial=self.template.width,
             unit=self.settings.unit,
-            dpi=self.current_template.dpi
+            dpi=self.template.dpi
         )
         self.template_width_field.setMaximumWidth(100)
         self.template_width_field.editingFinishedWithValue.connect(partial(self.on_template_dimension_changed, "width_px"))
 
         self.template_height_field = UnitField(
-            initial_px=self.current_template.height_px,
+            initial=self.template.height,
             unit=self.settings.unit,
-            dpi=self.current_template.dpi
+            dpi=self.template.dpi
         )
         self.template_height_field.editingFinishedWithValue.connect(partial(self.on_template_dimension_changed, "height_px"))
         self.template_height_field.setMaximumWidth(100)
 
         # DPI SpinBox
-        self.game_component_dpi_spin = QSpinBox()
-        self.game_component_dpi_spin.setRange(36, 1200)
-        self.game_component_dpi_spin.setValue(self.current_template.dpi)
-        self.game_component_dpi_spin.valueChanged.connect(self.on_template_dpi_changed)
+        self.component_dpi_spin = QSpinBox()
+        self.component_dpi_spin.setRange(36, 1200)
+        self.component_dpi_spin.setValue(self.template.dpi)
+        self.component_dpi_spin.valueChanged.connect(self.on_template_dpi_changed)
 
 
         self.measure_toolbar.addWidget(QLabel("Template:"))
@@ -268,7 +261,7 @@ class ComponentTab(QWidget):
         self.measure_toolbar.addWidget(QLabel("Height:"))
         self.measure_toolbar.addWidget(self.template_height_field)
         self.measure_toolbar.addWidget(QLabel("DPI:"))
-        self.measure_toolbar.addWidget(self.game_component_dpi_spin)
+        self.measure_toolbar.addWidget(self.component_dpi_spin)
         self.measure_toolbar.addSeparator()
         self.measure_toolbar.addWidget(QLabel("Unit:"))
         self.measure_toolbar.addWidget(self.unit_selector)
@@ -300,23 +293,23 @@ class ComponentTab(QWidget):
     def on_template_name_changed(self):
         new_name = self.template_name_field.text().strip()
         if new_name:
-            self.current_template.name = new_name
+            self.template.name = new_name
             self.tab_title_changed.emit(new_name)
 
     @Slot(str, int)
     def on_template_dimension_changed(self, dimension, value):
-        setattr(self.current_template, dimension, value)
+        setattr(self.template, dimension, value)
         self._refresh_scene()
 
     def update_template_scene_rect(self):
-        self.scene.set_template_dimensions(
-            self.current_template.width_px,
-            self.current_template.height_px
+        self.scene.scene_from_template_dimensions(
+            self.template.width_px,
+            self.template.height_px
         )
         self.scene.update()
         self.view.update()
-        self.current_template.template_changed.emit()
-        self.tab_title_changed.emit(self.current_template.name if self.current_template.name else "Unnamed Template")
+        self.template.template_changed.emit()
+        self.tab_title_changed.emit(self.template.name if self.template.name else "Unnamed Template")
 
     def _refresh_scene(self):
         # Clear old items (grid/background is drawn in drawBackground, not as items)
@@ -324,32 +317,33 @@ class ComponentTab(QWidget):
 
         # Make sure scene rect matches template (in case width/height changed)
         self.scene.setSceneRect(0, 0,
-                                self.current_template.width_px,
-                                self.current_template.height_px)
+                                self.template.width_px,
+                                self.template.height_px)
 
         # Add every element back into the QGraphicsScene
-        for element in self.current_template.elements:
+        for element in self.template.elements:
             self.scene.addItem(element)
             element.hide_handles()
 
+
     @Slot()
     def on_template_dpi_changed(self):
-        new_dpi = self.game_component_dpi_spin.value()
+        new_dpi = self.component_dpi_spin.value()
         self.settings.dpi = new_dpi
-        self.current_template.dpi = new_dpi
+        self.template.dpi = new_dpi
 
         self.template_width_field.set_dpi(new_dpi)
         self.template_height_field.set_dpi(new_dpi)
-
-        if self._current_selected_element:
-            self.property_panel.set_target(self._current_selected_element)
+        self.template_c
+        if self.selected_element:
+            self.property_panel.set_target(self.selected_element)
             self.property_panel.refresh()
 
         self.view.viewport().update()
         self.view.update()
         self.scene.update()
 
-        self.current_template.template_changed.emit()
+        self.template.template_changed.emit()
         self.show_status_message(f"DPI updated to {new_dpi}.", "info")
 
     @Slot(tuple)
@@ -357,7 +351,7 @@ class ComponentTab(QWidget):
         prop, values = change
         if prop == "geometry":
             x, y, w, h = values
-            element = self._current_selected_element
+            element = self.selected_element
             current_pos = element.pos()
             current_rect = element.rect
 
@@ -393,7 +387,7 @@ class ComponentTab(QWidget):
         return None
 
     def _handle_new_selection(self, new):
-        old = self._current_selected_element
+        old = self.selected_element
         if old is new:
             return
         
@@ -406,7 +400,7 @@ class ComponentTab(QWidget):
                 pass
         
         # Setup new selection
-        self._current_selected_element = new
+        self.selected_element = new
         if new:
             new.show_handles()
             new.element_changed.connect(self.on_element_data_changed)
@@ -462,20 +456,20 @@ class ComponentTab(QWidget):
 
     @Slot()
     def update_layers_panel(self):
-        self.layers_list.update_list(self.current_template.elements)
+        self.layers_list.update_list(self.template.elements)
 
     def _adjust_z_value(self, element, new_z):
         """Helper for z-order operations"""
         element.setZValue(new_z)
-        self.current_template.elements.sort(key=lambda e: e.zValue())
-        self.current_template.element_z_order_changed.emit()
+        self.template.elements.sort(key=lambda e: e.zValue())
+        self.template.element_z_order_changed.emit()
 
     @Slot(int)
     def adjust_z_order_of_selected(self, direction: int):
         if not (element := self.get_selected_element()):
             return
         
-        elements = self.current_template.elements
+        elements = self.template.elements
         sorted_elements = sorted(elements, key=lambda e: e.zValue())
         idx = sorted_elements.index(element)
         
@@ -489,14 +483,14 @@ class ComponentTab(QWidget):
     @Slot()
     def bring_selected_to_front(self):
         if element := self.get_selected_element():
-            max_z = max(e.zValue() for e in self.current_template.elements)
+            max_z = max(e.zValue() for e in self.template.elements)
             if element.zValue() < max_z:
                 self._adjust_z_value(element, max_z + 1)
 
     @Slot()
     def send_selected_to_back(self):
         if element := self.get_selected_element():
-            min_z = min(e.zValue() for e in self.current_template.elements)
+            min_z = min(e.zValue() for e in self.template.elements)
             if element.zValue() > min_z:
                 self._adjust_z_value(element, min_z - 1)
 
@@ -517,7 +511,7 @@ class ComponentTab(QWidget):
     @Slot()
     def on_element_data_changed(self):
         element = self.get_selected_element()
-        if element and element == self._current_selected_element:
+        if element and element == self.selected_element:
             #self.property_panel.refresh()
             element.update()
             self.scene.update()
@@ -533,9 +527,7 @@ class ComponentTab(QWidget):
 
         command = AddElementCommand(element_type, scene_pos, self)
         self.undo_stack.push(command)
-        new_element = self.registry.get_last()
-
-
+        self.selected_element = self.registry.get_last()
 
     @Slot(ComponentElement, QPointF)
     def clone_element(self, original, press_scene_pos):
@@ -582,11 +574,11 @@ class ComponentTab(QWidget):
         self.current_color_display.setStyleSheet(f"background-color: {self._current_drawing_color.name()}; border: 1px solid black;")
 
     @Slot()
-    def set_game_component_background_image(self):
+    def set_component_background_image(self):
         path, _ = QFileDialog.getOpenFileName(
             self, "Select Background Image", "", "Image Files (*.png *.jpg *.jpeg *.bmp *.gif)")
         if path:
-            if self.current_template.set_background_image(path):
+            if self.template.set_background_image(path):
                 self.show_status_message("Game Component background image set successfully.", "success")
             else:
                 self.show_status_message("Background Error: Could not set background image. File may be invalid.", "error")

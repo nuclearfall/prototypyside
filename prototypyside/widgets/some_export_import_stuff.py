@@ -44,8 +44,8 @@
             self.merged_templates = []
 
             for i, row_data in enumerate(data_rows):
-                merged_template = ComponentTemplate.from_dict(self.current_template.to_dict(), parent=None)
-                merged_template.background_image_path = self.current_template.background_image_path
+                merged_template = ComponentTemplate.from_dict(self.template.to_dict(), parent=None)
+                merged_template.background_image_path = self.template.background_image_path
 
                 for element in merged_template.elements:
                     if element.name.startswith('@'):
@@ -87,7 +87,7 @@
 
     @Slot()
     def export_png_gui(self):
-        templates_to_export = self.merged_templates if self.merged_templates else [self.current_template]
+        templates_to_export = self.merged_templates if self.merged_templates else [self.template]
         if not templates_to_export:
             self.show_status_message("PNG Export Failed: No templates to export.", "error")
             return
@@ -103,7 +103,7 @@
 
     @Slot()
     def export_pdf_gui(self):
-        templates_to_export = self.merged_templates if self.merged_templates else [self.current_template]
+        templates_to_export = self.merged_templates if self.merged_templates else [self.template]
         if not templates_to_export:
             self.show_status_message("PDF Export Failed: No templates to export.", "error")
             return
@@ -129,10 +129,10 @@
             self.show_status_message("PDF Export Failed.", "error")
 
     def export_png_cli(self, output_dir: Path):
-        templates_to_export = self.merged_templates if self.merged_templates else [self.current_template]
+        templates_to_export = self.merged_templates if self.merged_templates else [self.template]
         self.export_manager.export_png(templates_to_export, output_dir=output_dir, is_cli_mode=True)
 
     def export_pdf_cli(self, output_dir: Path):
-        templates_to_export = self.merged_templates if self.merged_templates else [self.current_template]
-        pdf_output_name = "merged_output.pdf" if self.merged_templates else "current_template.pdf"
+        templates_to_export = self.merged_templates if self.merged_templates else [self.template]
+        pdf_output_name = "merged_output.pdf" if self.merged_templates else "template.pdf"
         self.export_manager.export_pdf(templates_to_export, output_file_path=output_dir / pdf_output_name, is_cli_mode=True)

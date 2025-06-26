@@ -1,35 +1,39 @@
 from PySide6.QtCore import Qt, QRectF, QPointF, Signal, QObject
 from PySide6.QtGui import QColor, QFont, QPen, QBrush, QPainter
-from PySide6.QtWidgets import QGraphicsItem, QGraphicsSceneDragDropEvent
+from PySide6.QtWidgets import QGraphicsItem, QGraphicsObject, QGraphicsSceneDragDropEvent
 from typing import Optional, Dict, Any
 from prototypyside.views.graphics_items import ResizeHandle
 from prototypyside.utils.qt_helpers import qrectf_to_list, list_to_qrectf
 from prototypyside.utils.unit_converter import parse_dimension, format_dimension
+from prototypyside.utils.unit_str import UnitStr
 from prototypyside.utils.style_serialization_helpers import save_style, load_style
 from prototypyside.config import HandleType
 
-
-class ComponentElement(QGraphicsItem, QObject):
+class ComponentElement(QGraphicsObject):
     element_changed = Signal()
 
-    def __init__(self, pid, rect: QRectF,
-                 parent_qobject: Optional[QObject] = None, name: str = "Element"):
-        QObject.__init__(self, parent_qobject)
-        QGraphicsItem.__init__(self)
-        self._pid = pid 
-        self._template_pid: Optional[str] = parent_qobject.pid if parent_qobject else None
-        self.element_type = None
+    def __init__(self, pid, rect: QRectF, pos:QPointF, template_pid = None,
+                 parent: Optional[QGraphicsObject] = None, name: str = None):
+        super().__init__(parent)
+        self._pid = pid
+        self._template_pid = template_pid
+
+        self._dpi = parent.dpi if parent and hasattr(parent, "dpi") else 300
+
+        self._x = UnitStr(pos.x(), unit="in")
+        self._y = UnitStr(pos.y(), unit="in")
+        self._width = UnitStr(rect.width(), unit="in")
+        self._height = UnitStr(rect.height(), unit="in")
+
         self._name = name
-        self._rect = QRectF(0, 0, rect.width(), rect.height())
-        self.setPos(rect.topLeft())
-        self._pos = self.pos()
-        # Move properties from _style to direct instance variables
+
+        # Set the QGraphicsItem position (scene expects px)
+        self.setPos(self._x.to("px", self._dpi), self._y.to("px", self._dpi))
         self._color = QColor(Qt.black)
         self._bg_color = QColor(255,255,255,0)
         self._border_color = QColor(Qt.black)
-        self._border_width = "1 px" # Stored as string, parsed for painting
-        self._alignment = Qt.AlignLeft # Default alignment for generic elements
-
+        self._border_width = UnitStr("0.05 pt", dpi=self._dpi)
+        self._alignment = Qt.AlignLeft
         self._content: Optional[str] = ""
 
         self.setFlags(
@@ -42,11 +46,7 @@ class ComponentElement(QGraphicsItem, QObject):
         self.create_handles()
 
 
-
     # --- Property Getters and Setters --- #
-    @property
-    def scene_pos(self):
-        return self.pos()
 
     @property
     def template_pid(self):
@@ -114,13 +114,24 @@ class ComponentElement(QGraphicsItem, QObject):
             self.update()
 
     @property
-    def border_width(self) -> str:
+    def border_width(self) -> "UnitStr":
         return self._border_width
 
     @border_width.setter
-    def border_width(self, value: str):
-        if self._border_width != value:
-            self._border_width = value
+    def border_width(self, value):
+        # Accept a UnitStr, string, or number (as current unit)
+        if isinstance(value, UnitStr):
+            bw = value
+        elif isinstance(value, (int, float)):
+            # Assume in current canonical unit (e.g., "pt")
+            bw = UnitStr(value, unit="pt", dpi=self._dpi)
+        elif isinstance(value, str):
+            bw = UnitStr(value, dpi=self._dpi)
+        else:
+            raise ValueError("Unsupported type for border_width")
+        
+        if getattr(self, "_border_width", None) != bw:
+            self._border_width = bw
             self.element_changed.emit()
             self.update()
 
@@ -146,33 +157,158 @@ class ComponentElement(QGraphicsItem, QObject):
         self.update()
 
     @property
-    def rect(self):
-        return self._rect
+    def unit(self):
+        return self._unit
 
-    @rect.setter 
-    def rect(self, qrectf):
-        self.setRect(qrectf)
+
+    @property
+    def rect(self):
+        dpi = self._dpi
+        return QRectF(
+            0,
+            0,
+            self._width.to("px", dpi),
+            self._height.to("px", dpi)
+        )
+
+    @rect.setter
+    def rect(self, qrectf: QRectF):
+        """Accepts a QRectF in px, converts to logical units for storage."""
+        dpi = self._dpi
+        # Convert px to logical units (e.g. inches)
+        self._width = UnitStr(qrectf.width() / dpi, unit="in", dpi=dpi)
+        self._height = UnitStr(qrectf.height() / dpi, unit="in", dpi=dpi)
+        # For position, if you also want to set:
+        self._x = UnitStr(0, unit="in", dpi=dpi)
+        self._y = UnitStr(0, unit="in", dpi=dpi)
         self.element_changed.emit()
         self.update()
 
+    def boundingRect(self) -> QRectF:
+        return QRectF(0, 0, self._width.to("px", self._dpi), self._height.to("px", self._dpi))
+
+
     # --- End Property Getters and Setters ---
 
-    def setPos(self, *args):
-        print(f"[setPos] Called with: {args}")
-        super().setPos(*args)
-        self.element_changed.emit() # Emit when rectangle changes
 
-    def setRect(self, rect):
-        _, _, w, h = rect.getRect()
-        self._rect = QRectF(0, 0, w, h)
-        self.element_changed.emit() # Emit when rectangle changes
+    def setPos(self, *args):
+        """
+        Accepts a QPointF (in px), stores internally as UnitStr (physical units),
+        and updates the QGraphicsObject position.
+        """
+        if len(args) == 1 and isinstance(args[0], QPointF):
+            pt_px = args[0]
+        elif len(args) == 2:
+            pt_px = QPointF(args[0], args[1])
+        else:
+            raise ValueError("setPos expects QPointF or x, y")
+
+        dpi = self._dpi
+        # Convert px to physical units for internal storage (e.g., in)
+        self._x = UnitStr(pt_px.x() / dpi, unit="in", dpi=dpi)
+        self._y = UnitStr(pt_px.y() / dpi, unit="in", dpi=dpi)
+        super().setPos(pt_px)  # Update graphics position
+        self.element_changed.emit()
 
     def itemChange(self, change, value):
         print(f"[itemChange] Change: {change}, Value: {value}")
         return super().itemChange(change, value)
 
-    def boundingRect(self) -> QRectF:
-        return self._rect
+
+    def paint(self, painter: QPainter, option, widget=None):
+        # Fill background
+        bg_color = self.bg_color
+        if not isinstance(bg_color, QColor):
+            bg_color = QColor(bg_color)  # fallback
+        painter.setBrush(QBrush(bg_color))
+        painter.setPen(Qt.NoPen)
+        painter.drawRect(self.rect)
+
+        # Draw border if specified
+        raw_border_width = self.border_width
+        try:
+            border_width = parse_dimension(self.border_width)
+        except (ValueError, TypeError):
+            border_width = 1
+
+        if border_width > 0:
+            border_color = self.border_color
+            if not isinstance(border_color, QColor):
+                border_color = QColor(border_color)
+            pen = QPen(border_color)
+            pen.setWidthF(border_width)
+            painter.setPen(pen)
+            painter.setBrush(Qt.NoBrush)
+            painter.drawRect(self.rect)
+
+        # Optional: draw resize handles
+        if self.handles_visible:
+            self.draw_handles()
+
+    def to_dict(self):
+        """Serialize the element to a dictionary with logical units."""
+        return {
+            "pid": self._pid,
+            "template_pid": self._template_pid,
+            "name": self._name,
+            "x": self._x.raw if self._x else "0 in",
+            "y": self._y.raw if self._y else "0 in",
+            "width": self._width.raw if self._width else "0.5 in",
+            "height": self._height.raw if self._height else "0.5 in",
+            "color": self._color.name() if self._color else None,
+            "bg_color": self._bg_color.name() if self._bg_color else None,
+            "border_color": self._border_color.name() if self._border_color else None,
+            "border_width": self._border_width.raw if self._border_width else "0.05 pt",
+            "alignment": int(self._alignment) if self._alignment is not None else None,
+            "content": self._content if self._content is not None else "",
+            # Add subclass/extra fields as needed.
+        }
+
+    @classmethod
+    def from_dict(cls, data, parent=None, dpi=300):
+        pid = data.get("pid")
+        # Defensive: always provide default valid unit strings
+        pos_x = data.get("x", "0 in") or "0 in"
+        pos_y = data.get("y", "0 in") or "0 in"
+        rect_width = data.get("width", "1 in") or "1 in"
+        rect_height = data.get("height", "1 in") or "1 in"
+
+        # Convert to floats in logical units (inches) for rect and pos
+        rect = QRectF(
+            0, 0,
+            UnitStr(rect_width, dpi=dpi).to("in", dpi),
+            UnitStr(rect_height, dpi=dpi).to("in", dpi)
+        )
+        pos = QPointF(
+            UnitStr(pos_x, dpi=dpi).to("in", dpi),
+            UnitStr(pos_y, dpi=dpi).to("in", dpi)
+        )
+        template_pid = data.get("template_pid")
+        name = data.get("name", None)
+
+        obj = cls(
+            pid=pid,
+            rect=rect,
+            pos=pos,
+            template_pid=template_pid,
+            parent=parent,
+            name=name
+        )
+        # Restore style and other fields
+        if "color" in data and data["color"]:
+            obj._color = QColor(data["color"])
+        if "bg_color" in data and data["bg_color"]:
+            obj._bg_color = QColor(data["bg_color"])
+        if "border_color" in data and data["border_color"]:
+            obj._border_color = QColor(data["border_color"])
+        if "border_width" in data and data["border_width"]:
+            obj._border_width = UnitStr(data["border_width"], dpi=dpi)
+        if "alignment" in data and data["alignment"] is not None:
+            obj._alignment = int(data["alignment"])
+        if "content" in data and data["content"] is not None:
+            obj._content = data["content"]
+        # Handle subclass-specific fields (see below)
+        return obj
 
     @property
     def handles_visible(self) -> bool:
@@ -200,7 +336,9 @@ class ComponentElement(QGraphicsItem, QObject):
             handle.hide()
 
     def update_handles(self):
-        w, h = self._rect.width(), self._rect.height()
+        # Always get handle positions from current UnitStr and DPI
+        w = self._width.to("px", self._dpi)
+        h = self._height.to("px", self._dpi)
         positions = {
             HandleType.TOP_LEFT: QPointF(0, 0),
             HandleType.TOP_CENTER: QPointF(w / 2, 0),
@@ -215,76 +353,6 @@ class ComponentElement(QGraphicsItem, QObject):
             handle = self._handles.get(handle_type)
             if handle:
                 handle.setPos(pos)
-
-    def paint(self, painter: QPainter, option, widget=None):
-        # Fill background
-        bg_color = self.bg_color
-        if not isinstance(bg_color, QColor):
-            bg_color = QColor(bg_color)  # fallback
-        painter.setBrush(QBrush(bg_color))
-        painter.setPen(Qt.NoPen)
-        painter.drawRect(self._rect)
-
-        # Draw border if specified
-        raw_border_width = self.border_width
-        try:
-            border_width = parse_dimension(self.border_width)
-        except (ValueError, TypeError):
-            border_width = 1
-
-        if border_width > 0:
-            border_color = self.border_color
-            if not isinstance(border_color, QColor):
-                border_color = QColor(border_color)
-            pen = QPen(border_color)
-            pen.setWidthF(border_width)
-            painter.setPen(pen)
-            painter.setBrush(Qt.NoBrush)
-            painter.drawRect(self._rect)
-
-        # Optional: draw resize handles
-        if self.handles_visible:
-            self.draw_handles()
-
-    def to_dict(self) -> Dict[str, Any]:
-        # Serialize properties directly
-        return {
-            'pid': self._pid,
-            'template_pid': self.template_pid,
-            'name': self.name,
-            'rect': [self._rect.x(), self._rect.y(), self._rect.width(), self._rect.height()],
-            'content': self._content,
-            'pos_x': self.pos().x(),
-            'pos_y': self.pos().y(),
-            'z_value': self.zValue(),
-            'color': self.color.name(), # Serialize QColor to hex string
-            'bg_color': self.bg_color.name(QColor.HexArgb), # Serialize QColor to hex string
-            'border_color': self.border_color.name(), # Serialize QColor to hex string
-            'border_width': self.border_width, # Store as string
-            'alignment': int(self.alignment), # Store Qt.AlignmentFlag as int
-        }
-    def set_template(self, pid):
-        self._template_pid = pid
-
-    @classmethod
-    def from_dict(cls, data: Dict[str, Any]):
-        pid = data.get("pid")
-        name = data.get("name", "Element")
-        rect = list_to_qrectf(data.get("rect", [0, 0, 100, 40]))
-        element = cls(pid=pid, rect=rect, parent_qobject=None, name=name)
-        element.template_pid = data.get("template_pid")
-
-        # Shared properties
-        element.content      = data.get("content", "")
-        element.color        = QColor(data.get("color", "#000000"))
-        element.bg_color     = QColor(data.get("bg_color"))
-        element.border_color = QColor(data.get("border_color", "#000000"))
-        element.border_width = data.get("border_width", element.border_width)
-        element.alignment    = Qt.AlignmentFlag(data.get("alignment", int(Qt.AlignLeft)))
-        element.setPos(QPointF(data.get("pos_x", 0), data.get("pos_y", 0)))
-        element.setZValue(data.get("z_value", 0))
-
-        return element
 
     def resize_from_handle(self, handle: ResizeHandle, delta: QPointF, start_scene_rect: QRectF):
         self.prepareGeometryChange()
@@ -331,10 +399,20 @@ class ComponentElement(QGraphicsItem, QObject):
             new_rect = self.mapRectFromScene(QRectF(top_left, bottom_right))
 
         # Calculate how much the top-left moved
-        top_left_offset = new_rect.topLeft() - self._rect.topLeft()
+        top_left_offset = new_rect.topLeft() - self.rect.topLeft()
 
-        # Resize the internal rect
-        self._rect = QRectF(0, 0, new_rect.width(), new_rect.height())
+        # --- UNITSTR ADJUSTMENT: update logical model from new px values ---
+        dpi = getattr(self, "_dpi", 300)
+        self._width = UnitStr(new_rect.width() / dpi, unit="in", dpi=dpi)
+        self._height = UnitStr(new_rect.height() / dpi, unit="in", dpi=dpi)
+        # You may also want to update _x and _y if origin moves:
+        # If your model stores _x, _y in physical units:
+        if hasattr(self, "_x") and hasattr(self, "_y"):
+            self._x = UnitStr(self.pos().x() / dpi, unit="in", dpi=dpi)
+            self._y = UnitStr(self.pos().y() / dpi, unit="in", dpi=dpi)
+
+        # Resize the internal rect (scene/display)
+        self.rect = QRectF(0, 0, new_rect.width(), new_rect.height())
 
         # Move the item only if top-left changed
         if top_left_offset != QPointF(0, 0):
@@ -343,6 +421,7 @@ class ComponentElement(QGraphicsItem, QObject):
         self.update()
         self.update_handles()
         self.element_changed.emit()
+
 
     def clone(self):
         """Clone the element via its serialized dictionary structure."""
@@ -353,12 +432,11 @@ class ComponentElement(QGraphicsItem, QObject):
 
 
 class TextElement(ComponentElement):
-    def __init__(self, pid, rect: QRectF,
-                 parent_qobject: Optional[QObject] = None, name: str = "Image Element"):
+    def __init__(self, pid, rect: QRectF, pos:QPointF, template_pid = None,
+                 parent: Optional[QGraphicsObject] = None, name: str = None):
 
-        super().__init__(pid, rect, parent_qobject, name)
+        super().__init__(pid, rect, pos, template_pid, parent, name)
 
-        self.element_type = "TextElement"
         self._font = QFont("Arial", 12)
         self._content = "Sample Text"
         self.text = True
@@ -382,30 +460,27 @@ class TextElement(ComponentElement):
         painter.setFont(self.font) # Use direct font property
         painter.setPen(self.color) # Use direct color property
         if self._content:
-            painter.drawText(self._rect, self.alignment, self._content) # Use direct alignment property
+            painter.drawText(self.rect, self.alignment, self._content) # Use direct alignment property
 
-    def to_dict(self) -> Dict[str, Any]:
+    def to_dict(self):
         data = super().to_dict()
         data['font'] = self.font.toString()  # Serialize QFont to string
         return data
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]):
-        element = super().from_dict(data)
+    def from_dict(cls, data, parent=None, dpi=300):
+        element = super().from_dict(data, parent=parent, dpi=dpi)
         font_string = data.get("font", "Arial,12")
         font = QFont()
-        if not font.fromString(font_string):
-            print("Warning: Failed to parse font string:", font_string)
+        font.fromString(font_string)
         element.font = font
         return element
 
-
 class ImageElement(ComponentElement):
-    def __init__(self, pid, rect: QRectF,
-                 parent_qobject: Optional[QObject] = None, name: str = "Image Element"):
-        super().__init__(pid, rect, parent_qobject, name)
+    def __init__(self, pid, rect: QRectF, pos:QPointF, template_pid = None,
+                 parent: Optional[QGraphicsObject] = None, name: str = None):
+        super().__init__(pid, rect, pos, template_pid, parent, name)
 
-        self.element_type = "ImageElement"
         self._pixmap: Optional[QPixmap] = None
         # _content is handled by ComponentElement
         self.alignment = Qt.AlignCenter
@@ -453,8 +528,8 @@ class ImageElement(ComponentElement):
         return data
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]):
-        element = super().from_dict(data)
+    def from_dict(cls, data, parent=None, dpi=300):
+        element = super().from_dict(data, parent=parent, dpi=dpi)
         element.keep_aspect = data.get("keep_aspect", True)
         return element
 
@@ -464,16 +539,16 @@ class ImageElement(ComponentElement):
         if self._pixmap:
             if self.keep_aspect: # Use direct keep_aspect property
                 scaled = self._pixmap.scaled(
-                    self._rect.size().toSize(),
+                    self.rect.size().toSize(),
                     Qt.KeepAspectRatio,
                     Qt.SmoothTransformation
                 )
-                x = self._rect.x() + (self._rect.width() - scaled.width()) / 2
-                y = self._rect.y() + (self._rect.height() - scaled.height()) / 2
+                x = self.rect.x() + (self.rect.width() - scaled.width()) / 2
+                y = self.rect.y() + (self.rect.height() - scaled.height()) / 2
                 painter.drawPixmap(QPointF(x, y), scaled)
             else:
-                painter.drawPixmap(self._rect.topLeft(), self._pixmap.scaled(
-                    self._rect.size().toSize(),
+                painter.drawPixmap(self.rect.topLeft(), self._pixmap.scaled(
+                    self.rect.size().toSize(),
                     Qt.IgnoreAspectRatio,
                     Qt.SmoothTransformation
                 ))
@@ -481,7 +556,7 @@ class ImageElement(ComponentElement):
             # Draw placeholder box and prompt
             painter.setPen(QPen(Qt.gray, 1, Qt.DashLine))
             painter.setBrush(Qt.NoBrush)
-            painter.drawRect(self._rect)
+            painter.drawRect(self.rect)
 
             painter.setPen(QPen(Qt.darkGray))
             font = painter.font()
@@ -490,7 +565,7 @@ class ImageElement(ComponentElement):
             painter.setFont(font)
 
             placeholder_text = "Drop Image\nor Double Click to Set"
-            painter.drawText(self._rect, Qt.AlignCenter, placeholder_text)
+            painter.drawText(self.rect, Qt.AlignCenter, placeholder_text)
 
     def dragEnterEvent(self, event: QGraphicsSceneDragDropEvent):
         if event.mimeData().hasUrls():

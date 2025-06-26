@@ -196,10 +196,10 @@ class ComponentRegistry(QObject):
         if not hasattr(obj, 'clone') or not callable(obj.clone):
             raise TypeError(f"Object type {type(obj).__name__} does not have a callable 'clone' method.")
         print(f"Clone pid before serialization {new_pid}")
-        clone_data = self._factory.to_dict(obj) # Serialize to dict
+        clone_data = obj.to_dict() # Serialize to dict
         clone_data["pid"] = new_pid # Override PID for the clone
         
-        clone = self._factory.from_dict(clone_data) # Reconstruct using factory
+        clone = obj.from_dict(clone_data) # Reconstruct using factory
         print(f"Clone pid after serialization {clone.pid}")
         # clone.pid = new_pid
         self.generate_name(clone) # Registry handles name generation
@@ -209,7 +209,7 @@ class ComponentRegistry(QObject):
         template_pid = getattr(obj, "template_pid", None)
         if template_pid:
             try:
-                template = self.get_template(template_pid)
+                template = self.get(template_pid)
                 # `set_template` should handle updating clone's template_pid (if your elements have it)
                 # and template.add_element should ensure its internal list is updated.
                 template.add_element(clone)
@@ -262,20 +262,37 @@ class ComponentRegistry(QObject):
             print(f"Warning: Attempted to deregister non-existent object with PID '{pid}'.")
             return
 
-        obj = self._objects[pid]
-        self._orphans[obj.pid] = obj # Store in orphans
+        obj = self.get(pid)
+        template = None
+
+        # Try to get template (if available)
+        if getattr(obj, "template_pid", None):
+            try:
+                template = self.get(obj.template_pid)
+            except KeyError:
+                print(f"Warning: No template found for template_pid '{obj.template_pid}'")
+
+        # Remove element from template if possible
+        if template:
+            try:
+                template.remove_element(obj)
+            except (AttributeError, ValueError):
+                print(f"Warning: Could not remove element '{obj.pid}' from template '{obj.template_pid}'")
+
+        # Move to orphans
+        self._orphans[obj.pid] = obj
         print(f"Object {self._orphans[obj.pid]} is in _orphans")
+
         # Clean up name from _unique_names set
         if hasattr(obj, 'name') and obj.name and obj.name in self._unique_names:
             self._unique_names.discard(obj.name)
 
-        template = self.get_template(obj.template_pid)
-        print (f"Object template at: {obj.template_pid}")
-        template.remove_element(obj) # Template handles its internal list
+        print(f"Object template at: {getattr(obj, 'template_pid', None)}")
         print(f"{self.is_orphan(obj.pid)} is orphan?")
 
         del self._objects[pid]
         self.object_removed.emit(pid)
+
 
     def reinsert(self, pid: str):
         """Reinserts an orphaned object back into the registry and its template."""
@@ -287,11 +304,11 @@ class ComponentRegistry(QObject):
 
         obj = self._orphans.pop(pid)
         self.register(obj) # Re-register
-
+        print(f"Waiting to reinsert {obj.pid} into {obj.template_pid}")
         template_pid = getattr(obj, "template_pid", None)
         if template_pid:
             try:
-                template = self.get_template(template_pid)
+                template = self.get(template_pid)
                 template.add_element(obj) # Template should manage its element_pids and set child's template_pid
             except (KeyError, TypeError) as e:
                 print(f"Warning: Could not re-attach object '{pid}' to template '{template_pid}' after reinsert: {e}. Object remains in registry but unparented.")

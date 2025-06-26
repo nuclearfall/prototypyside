@@ -1,61 +1,70 @@
 import re
+from typing import List
 from PySide6.QtCore import QRectF, QPointF
 
+from prototypyside.utils.unit_str import UnitStr
 
-CM_PER_INCH = 2.54
+UNITS_TO_INCHES = {
+    "in": 1.0,
+    "cm": 1 / 2.54,
+    "mm": 1 / 25.4,
+    "pt": 1 / 72.0,
+    "px": None  # special case
+}
+INCHES_TO_UNITS = {
+    "in": 1.0,
+    "cm": 2.54,
+    "mm": 25.4,
+    "pt": 72.0,
+}
 
-def parse_dimension(value, dpi: int = 72, to_unit: str = "px") -> float:
+def parse_dimension(value, dpi: int = 300, to_unit: str = "px") -> float:
     """
-    Parses a dimension string (e.g., '5in', '10cm', '32px') or number into pixels or another unit.
-    If value is a number, it's assumed to be in pixels when converting to other units.
-    
-    Args:
-        value: Either a string with unit or a number (assumed to be pixels)
-        dpi: Dots per inch for conversion
-        to_unit: Target unit ("px", "in", "cm")
-    
-    Returns:
-        float: Converted value in the target unit
+    Parses a dimension string or number into the target unit.
+    Supported units: "in", "cm", "mm", "pt", "px"
+    If value is numeric, it's assumed to be px unless to_unit is px (in which case just returns value).
     """
-    # Handle numeric input (assumed to be pixels)
-    if isinstance(value, (float, int)):
-        pixels = float(value)
-    else:
-        # Handle string input
-        value = str(value).strip().lower()
-        match = re.match(r"([0-9.]+)\s*(px|in|cm|\"?)?", value)
-        if not match:
-            raise ValueError(f"Invalid dimension format: '{value}'")
-
-        num, unit = match.groups()
-        num = float(num)
-        unit = unit or "in"
-
-        # Aliases
-        if unit == "\"":
-            unit = "in"
-
-        if unit == "in":
-            pixels = inches_to_pixels(num, dpi)
-        elif unit == "cm":
-            pixels = cm_to_pixels(num, dpi)
-        elif unit == "px":
-            pixels = num  # already in pixels
-        else:
-            raise ValueError(f"Unsupported unit: {unit}")
-    
-    # Convert to target unit if needed
-    if to_unit == "px":
-        return pixels
-    elif to_unit == "in":
-        return pixels_to_inches(pixels, dpi)
-    elif to_unit == "cm":
-        return pixels_to_cm(pixels, dpi)
-    else:
+    # Normalize unit (for output)
+    to_unit = to_unit.lower().replace('"', "in").strip()
+    if to_unit not in UNITS_TO_INCHES:
         raise ValueError(f"Unsupported target unit: {to_unit}")
 
+    # Parse input value
+    if isinstance(value, (int, float)):
+        # Numeric input is always px
+        px_val = float(value)
+    else:
+        value = str(value).strip().lower().replace('"', "in")
+        # Regex: capture value and optional unit
+        match = re.match(r"([0-9.]+)\s*([a-z]+)?", value)
+        if not match:
+            raise ValueError(f"Invalid dimension format: '{value}'")
+        num, unit = match.groups()
+        num = float(num)
+        unit = (unit or "in").strip()
+        if unit not in UNITS_TO_INCHES:
+            raise ValueError(f"Unsupported input unit: {unit}")
+        if unit == "px":
+            px_val = num
+        else:
+            # Convert input to inches
+            inches = num * UNITS_TO_INCHES[unit]
+            px_val = inches * dpi
 
-def format_dimension(pixels: int, unit: str = "in", dpi: int = 72) -> str:
+    # Now px_val holds the dimension in px
+    if to_unit == "px":
+        return px_val
+    elif to_unit == "in":
+        return px_val / dpi
+    else:
+        # Convert px to inches, then inches to to_unit
+        inches = px_val / dpi
+        return inches * INCHES_TO_UNITS[to_unit]
+
+def from_px_unit(px_unit, unit, dpi):
+    return parse_dimension(px_unit, unit=unit, dpi=dpi)
+
+def format_dimension(pixels: float, unit: str = "in", dpi: int = 300) -> str:
     if unit == "in":
         return f"{pixels_to_inches(pixels, dpi):.2f} in"
     elif unit == "cm":
@@ -78,7 +87,7 @@ def inches_to_pixels(inches: float, dpi: int) -> int:
     """
     if dpi <= 0:
         raise ValueError("DPI must be a positive value.")
-    return int(round(inches * dpi))
+    return inches * dpi
 
 def pixels_to_inches(pixels: int, dpi: int) -> float:
     """
@@ -149,7 +158,7 @@ def convert_to_pixels(value: float, unit: str, dpi: int) -> int:
     else:
         raise ValueError("Unsupported unit. Use 'in' for inches or 'cm' for centimeters.")
 
-def convert_from_pixels(pixels: int, unit: str, dpi: int) -> float:
+def from_px_value(pixels: int, unit: str, dpi: int) -> float:
     """
     Converts a value from pixels to a specified unit ('in' or 'cm').
     Args:
@@ -188,3 +197,71 @@ def to_px_qrectf(x, y, w, h, dpi=300):
         parse_dimension(w, dpi=dpi, to_unit="px"),
         parse_dimension(h, dpi=dpi, to_unit="px")
     )
+
+def convert_px_dpi(px_value, old_dpi, new_dpi):
+    return px_value * (new_dpi / old_dpi)
+
+def pos_to_unit_str(scene_pos: QPointF, unit: str = None, dpi: int = None):
+    """
+    Convert a scene position (px) to (x, y) UnitStrs in the desired unit and dpi.
+    If unit or dpi is not provided, uses self.tab.settings.
+    """
+    unit = unit
+    dpi = dpi
+
+    x_px = scene_pos.x()
+    y_px = scene_pos.y()
+
+    if unit == "in":
+        logical_x = x_px / dpi
+        logical_y = y_px / dpi
+    elif unit == "mm":
+        logical_x = (x_px / dpi) * 25.4
+        logical_y = (y_px / dpi) * 25.4
+    elif unit == "cm":
+        logical_x = (x_px / dpi) * 2.54
+        logical_y = (y_px / dpi) * 2.54
+    elif unit == "pt":
+        logical_x = (x_px / dpi) * 72.0
+        logical_y = (y_px / dpi) * 72.0
+    else:
+        logical_x = x_px / dpi
+        logical_y = y_px / dpi
+
+    return (
+        UnitStr(logical_x, unit=unit, dpi=dpi),
+        UnitStr(logical_y, unit=unit, dpi=dpi)
+    )
+
+def px_to_physical(px_value, target_unit, dpi):
+    """
+    Converts a pixel value to a physical value in the given unit at the specified DPI.
+    Supported units: 'in', 'mm', 'cm', 'pt'
+    """
+    if target_unit == "in":
+        return px_value / dpi
+    elif target_unit == "mm":
+        return (px_value / dpi) * 25.4
+    elif target_unit == "cm":
+        return (px_value / dpi) * 2.54
+    elif target_unit == "pt":
+        return (px_value / dpi) * 72.0
+    else:
+        raise ValueError(f"Unsupported target unit: {target_unit}")
+
+
+def qrectf_to_list(rect: QRectF) -> List[float]:
+    return [rect.x(), rect.y(), rect.width(), rect.height()]
+
+def list_to_qrectf(data: List[float]) -> QRectF:
+    if len(data) == 4:
+        return QRectF(data[0], data[1], data[2], data[3])
+    raise ValueError("Invalid QRectF data: must be a list of 4 floats.")
+
+def qpointf_to_list(point: QPointF) -> List[float]:
+    return [point.x(), point.y()]
+
+def list_to_qpointf(data: List[float]) -> QPointF:
+    if len(data) == 2:
+        return QPointF(data[0], data[1])
+    raise ValueError("Invalid QRectF data: must be a list of 4 floats.")

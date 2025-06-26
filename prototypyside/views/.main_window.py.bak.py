@@ -40,7 +40,7 @@ from prototypyside.config import MIN_ELEMENT_SIZE, MEASURE_INCREMENT
 class MainDesignerWindow(QMainWindow):
     def __init__(self):
         super().__init__()
-        self.current_template = GameComponentTemplate(parent=self)
+        self.template = GameComponentTemplate(parent=self)
         self.merged_templates: List[GameComponentTemplate] = []
         self.setWindowTitle("Professional Game Component Designer")
         self.resize(1400, 900)
@@ -77,12 +77,12 @@ class MainDesignerWindow(QMainWindow):
         delete_shortcut.activated.connect(self.remove_selected_element)
 
     def setup_ui(self):
-        self.current_template.template_changed.connect(self.update_game_component_scene)
-        self.current_template.element_z_order_changed.connect(self.update_layers_panel)
+        self.template.template_changed.connect(self.update_game_component_scene)
+        self.template.element_z_order_changed.connect(self.update_layers_panel)
 
         self.scene = GameComponentGraphicsScene(
-            self.current_template.width_px,
-            self.current_template.height_px,
+            self.template.width_px,
+            self.template.height_px,
             self
         )
 
@@ -93,8 +93,8 @@ class MainDesignerWindow(QMainWindow):
 
         self.setCentralWidget(self.view)
         self.view.setSceneRect(0, 0,
-        self.current_template.width_px,
-        self.current_template.height_px
+        self.template.width_px,
+        self.template.height_px
 )
 
         self.view.setViewportUpdateMode(QGraphicsView.FullViewportUpdate)
@@ -209,10 +209,10 @@ class MainDesignerWindow(QMainWindow):
         geometry_layout = QFormLayout()
 
         # Replace x, y, width, height with UnitFields
-        self.element_x_field = UnitField(initial_px=element.x_px, unit=self.current_unit, dpi=self.current_template.dpi)
-        self.element_y_field = UnitField(initial_px=element.y_px, unit=self.current_unit, dpi=self.current_template.dpi)
-        self.element_width_field = UnitField(initial_px=element.width_px, unit=self.current_unit, dpi=self.current_template.dpi)
-        self.element_height_field = UnitField(initial_px=element.height_px, unit=self.current_unit, dpi=self.current_template.dpi)
+        self.element_x_field = UnitField(initial_px=element.x_px, unit=self.current_unit, dpi=self.template.dpi)
+        self.element_y_field = UnitField(initial_px=element.y_px, unit=self.current_unit, dpi=self.template.dpi)
+        self.element_width_field = UnitField(initial_px=element.width_px, unit=self.current_unit, dpi=self.template.dpi)
+        self.element_height_field = UnitField(initial_px=element.height_px, unit=self.current_unit, dpi=self.template.dpi)
 
         self.element_x_field.editingFinishedWithValue.connect(lambda px: self.update_element_property(element, "x_px", px))
         self.element_y_field.editingFinishedWithValue.connect(lambda px: self.update_element_property(element, "y_px", px))
@@ -271,7 +271,7 @@ class MainDesignerWindow(QMainWindow):
         self.game_component_width_spin = QDoubleSpinBox()
         self.game_component_width_spin.setRange(1.0, 200.0)
         self.game_component_width_spin.setSingleStep(0.1)
-        self.game_component_width_spin.setValue(self.current_template.width_in)
+        self.game_component_width_spin.setValue(self.template.width_in)
         self.game_component_width_spin.editingFinished.connect(self.update_game_component_dimensions)
         game_component_props_layout.addRow(f"Width ({self.current_unit}):", self.game_component_width_spin)
 
@@ -279,7 +279,7 @@ class MainDesignerWindow(QMainWindow):
         self.game_component_height_spin.setRange(1.0, 200.0)
         adjust = MEASURE_ADJUSTMENT[self.current_unit]
         self.game_component_height_spin.setSingleStep(adjust)
-        self.game_component_height_spin.setValue(self.current_template.height_in)
+        self.game_component_height_spin.setValue(self.template.height_in)
         self.game_component_height_spin.editingFinished.connect(self.update_game_component_dimensions)
         game_component_props_layout.addRow(f"Height ({self.current_unit})", self.game_component_height_spin)
 
@@ -287,7 +287,7 @@ class MainDesignerWindow(QMainWindow):
         self.game_component_dpi_spin.setRange(72, 1200)
         adjust = MEASURE_ADJUSTMENT[self.current_unit]
         self.game_component_dpi_spin.setSingleStep(adjust)
-        self.game_component_dpi_spin.setValue(self.current_template.dpi)
+        self.game_component_dpi_spin.setValue(self.template.dpi)
         self.game_component_dpi_spin.editingFinished.connect(self.update_game_component_dimensions)
         game_component_props_layout.addRow("DPI:", self.game_component_dpi_spin)
 
@@ -410,16 +410,16 @@ class MainDesignerWindow(QMainWindow):
         self.measure_toolbar.addWidget(QLabel("Template:"))
 
         self.template_width_field = UnitField(
-            initial_px=self.current_template.width_px,
+            initial_px=self.template.width_px,
             unit=self.current_unit,
-            dpi=self.current_template.dpi
+            dpi=self.template.dpi
         )
         self.template_width_field.editingFinishedWithValue.connect(self.on_template_width_changed)
 
         self.template_height_field = UnitField(
-            initial_px=self.current_template.height_px,
+            initial_px=self.template.height_px,
             unit=self.current_unit,
-            dpi=self.current_template.dpi
+            dpi=self.template.dpi
         )
         self.template_height_field.editingFinishedWithValue.connect(self.on_template_height_changed)
 
@@ -431,7 +431,7 @@ class MainDesignerWindow(QMainWindow):
         # DPI SpinBox (not a UnitField)
         self.game_component_dpi_spin = QSpinBox()
         self.game_component_dpi_spin.setRange(36, 1200)
-        self.game_component_dpi_spin.setValue(self.current_template.dpi)
+        self.game_component_dpi_spin.setValue(self.template.dpi)
         self.game_component_dpi_spin.valueChanged.connect(self.on_template_dpi_changed)
         self.measure_toolbar.addWidget(QLabel("DPI:"))
         self.measure_toolbar.addWidget(self.game_component_dpi_spin)
@@ -476,16 +476,16 @@ class MainDesignerWindow(QMainWindow):
         self.measure_toolbar.addWidget(QLabel("Template:"))
 
         self.template_width_field = UnitField(
-            initial_px=self.current_template.width_px,
+            initial_px=self.template.width_px,
             unit=self.current_unit,
-            dpi=self.current_template.dpi
+            dpi=self.template.dpi
         )
         self.template_width_field.editingFinishedWithValue.connect(self.on_template_width_changed)
 
         self.template_height_field = UnitField(
-            initial_px=self.current_template.height_px,
+            initial_px=self.template.height_px,
             unit=self.current_unit,
-            dpi=self.current_template.dpi
+            dpi=self.template.dpi
         )
         self.template_height_field.editingFinishedWithValue.connect(self.on_template_height_changed)
 
@@ -497,7 +497,7 @@ class MainDesignerWindow(QMainWindow):
         # DPI SpinBox
         self.game_component_dpi_spin = QSpinBox()
         self.game_component_dpi_spin.setRange(36, 1200)
-        self.game_component_dpi_spin.setValue(self.current_template.dpi)
+        self.game_component_dpi_spin.setValue(self.template.dpi)
         self.game_component_dpi_spin.valueChanged.connect(self.on_template_dpi_changed)
         self.measure_toolbar.addWidget(QLabel("DPI:"))
         self.measure_toolbar.addWidget(self.game_component_dpi_spin)
@@ -512,28 +512,28 @@ class MainDesignerWindow(QMainWindow):
 
     @Slot(int)
     def on_template_width_changed(self, new_px):
-        self.current_template.width_px = new_px
-        self.current_template.width_in = new_px / self.current_template.dpi
+        self.template.width_px = new_px
+        self.template.width_in = new_px / self.template.dpi
         self.update_template_scene_rect()
 
     @Slot(int)
     def on_template_height_changed(self, new_px):
-        self.current_template.height_px = new_px
-        self.current_template.height_in = new_px / self.current_template.dpi
+        self.template.height_px = new_px
+        self.template.height_in = new_px / self.template.dpi
         self.update_template_scene_rect()
 
     def update_template_scene_rect(self):
         self.scene.set_template_dimensions(
-            self.current_template.width_px,
-            self.current_template.height_px
+            self.template.width_px,
+            self.template.height_px
         )
-        rect = QRectF(0, 0, self.current_template.width_px, self.current_template.height_px)
+        rect = QRectF(0, 0, self.template.width_px, self.template.height_px)
         self.scene.setSceneRect(rect)
         self.view.setSceneRect(rect)
         self.view.fitInView(rect, Qt.KeepAspectRatio)
         self.scene.update()
         self.view.update()
-        self.current_template.template_changed.emit()
+        self.template.template_changed.emit()
 
     def create_menus(self):
         file_menu = self.menuBar().addMenu("&File")
@@ -568,8 +568,8 @@ class MainDesignerWindow(QMainWindow):
     @Slot()
     def new_template(self):
         try:
-            self.current_template.element_z_order_changed.disconnect(self.update_layers_panel)
-            self.current_template.template_changed.disconnect(self.update_game_component_scene)
+            self.template.element_z_order_changed.disconnect(self.update_layers_panel)
+            self.template.template_changed.disconnect(self.update_game_component_scene)
             self.scene.selectionChanged.disconnect(self.on_selection_changed)
             self.scene.element_dropped.disconnect(self.add_element_from_drop)
         except (TypeError, RuntimeError):
@@ -584,12 +584,12 @@ class MainDesignerWindow(QMainWindow):
             self.view.deleteLater()
             del self.view
 
-        self.current_template = GameComponentTemplate(parent=self)
+        self.template = GameComponentTemplate(parent=self)
         self.merged_templates = []
 
         self.scene = GameComponentGraphicsScene(
-            self.current_template.width_px,
-            self.current_template.height_px,
+            self.template.width_px,
+            self.template.height_px,
             self
         )
 
@@ -598,17 +598,17 @@ class MainDesignerWindow(QMainWindow):
         self.view.setDragMode(QGraphicsView.NoDrag)
         self.view.setAcceptDrops(True)
         self.view.viewport().setAcceptDrops(True)
-        self.view.setSceneRect(0, 0, self.current_template.width_px, self.current_template.height_px)
+        self.view.setSceneRect(0, 0, self.template.width_px, self.template.height_px)
         self.setCentralWidget(self.view)
 
-        self.current_template.template_changed.connect(self.update_game_component_scene)
-        self.current_template.element_z_order_changed.connect(self.update_layers_panel)
+        self.template.template_changed.connect(self.update_game_component_scene)
+        self.template.element_z_order_changed.connect(self.update_layers_panel)
         self.scene.selectionChanged.connect(self.on_selection_changed)
         self.scene.element_dropped.connect(self.add_element_from_drop)
 
-        self.game_component_width_spin.setValue(self.current_template.width_in)
-        self.game_component_height_spin.setValue(self.current_template.height_in)
-        self.game_component_dpi_spin.setValue(self.current_template.dpi)
+        self.game_component_width_spin.setValue(self.template.width_in)
+        self.game_component_height_spin.setValue(self.template.height_in)
+        self.game_component_dpi_spin.setValue(self.template.dpi)
 
         self.on_selection_changed()
         #self.view.fitInView(self.scene.sceneRect(), Qt.KeepAspectRatio)
@@ -624,7 +624,7 @@ class MainDesignerWindow(QMainWindow):
         if path:
             try:
                 with open(path, 'w', encoding='utf-8') as f:
-                    json.dump(self.current_template.to_dict(), f, indent=4)
+                    json.dump(self.template.to_dict(), f, indent=4)
                 self.show_status_message(f"Template saved to {path}", "success")
             except Exception as e:
                 QMessageBox.critical(self, "Save Error", f"An error occurred while saving: {e}")
@@ -656,8 +656,8 @@ class MainDesignerWindow(QMainWindow):
 
     def load_template_instance(self, new_template: GameComponentTemplate):
         try:
-            self.current_template.element_z_order_changed.disconnect(self.update_layers_panel)
-            self.current_template.template_changed.disconnect(self.update_game_component_scene)
+            self.template.element_z_order_changed.disconnect(self.update_layers_panel)
+            self.template.template_changed.disconnect(self.update_game_component_scene)
             self.scene.selectionChanged.disconnect(self.on_selection_changed)
             self.scene.element_dropped.disconnect(self.add_element_from_drop)
         except (TypeError, RuntimeError):
@@ -672,11 +672,11 @@ class MainDesignerWindow(QMainWindow):
             self.view.deleteLater()
             del self.view
 
-        self.current_template = new_template
+        self.template = new_template
 
         self.scene = GameComponentGraphicsScene(
-            self.current_template.width_px,
-            self.current_template.height_px,
+            self.template.width_px,
+            self.template.height_px,
             self
         )
 
@@ -688,21 +688,21 @@ class MainDesignerWindow(QMainWindow):
         self.view.viewport().setAcceptDrops(True)
         self.setCentralWidget(self.view)
 
-        self.current_template.template_changed.connect(self.update_game_component_scene)
-        self.current_template.element_z_order_changed.connect(self.update_layers_panel)
+        self.template.template_changed.connect(self.update_game_component_scene)
+        self.template.element_z_order_changed.connect(self.update_layers_panel)
         self.scene.selectionChanged.connect(self.on_selection_changed)
         self.scene.element_dropped.connect(self.add_element_from_drop)
 
-        for element in self.current_template.elements:
+        for element in self.template.elements:
             self.scene.addItem(element)
 
-        self.view.setSceneRect(0, 0, self.current_template.width_px, self.current_template.height_px)
+        self.view.setSceneRect(0, 0, self.template.width_px, self.template.height_px)
         self.setCentralWidget(self.view)
 
 
-        self.game_component_width_spin.setValue(self.current_template.width_in)
-        self.game_component_height_spin.setValue(self.current_template.height_in)
-        self.game_component_dpi_spin.setValue(self.current_template.dpi)
+        self.game_component_width_spin.setValue(self.template.width_in)
+        self.game_component_height_spin.setValue(self.template.height_in)
+        self.game_component_dpi_spin.setValue(self.template.dpi)
 
         self.on_selection_changed()
 
@@ -931,38 +931,38 @@ class MainDesignerWindow(QMainWindow):
 
     @Slot()
     def update_layers_panel(self):
-        self.layers_list.update_list(self.current_template.elements)
+        self.layers_list.update_list(self.template.elements)
 
     @Slot(int)
     def adjust_z_order_of_selected(self, direction: int):
         element = self.get_selected_element()
         if element:
-            self.current_template.reorder_element_z(element, direction)
+            self.template.reorder_element_z(element, direction)
 
     @Slot()
     def bring_selected_to_front(self):
         element = self.get_selected_element()
         if element:
-            max_z = max([e.zValue() for e in self.current_template.elements] + [0])
+            max_z = max([e.zValue() for e in self.template.elements] + [0])
             if element.zValue() < max_z:
                 element.setZValue(max_z + 1)
-                self.current_template.elements.sort(key=lambda e: e.zValue())
-                self.current_template.element_z_order_changed.emit()
+                self.template.elements.sort(key=lambda e: e.zValue())
+                self.template.element_z_order_changed.emit()
 
     @Slot()
     def send_selected_to_back(self):
         element = self.get_selected_element()
         if element:
-            min_z = min([e.zValue() for e in self.current_template.elements] + [0])
+            min_z = min([e.zValue() for e in self.template.elements] + [0])
             if element.zValue() > min_z:
                 element.setZValue(min_z - 1)
-                self.current_template.elements.sort(key=lambda e: e.zValue())
-                self.current_template.element_z_order_changed.emit()
+                self.template.elements.sort(key=lambda e: e.zValue())
+                self.template.element_z_order_changed.emit()
 
     @Slot(object, int)
     def reorder_element_z_from_list_event(self, element: object, direction: int):
-        self.current_template.elements.sort(key=lambda e: e.zValue())
-        self.current_template.element_z_order_changed.emit()
+        self.template.elements.sort(key=lambda e: e.zValue())
+        self.template.element_z_order_changed.emit()
 
     @Slot()
     def clear_scene_selection(self):
@@ -981,13 +981,13 @@ class MainDesignerWindow(QMainWindow):
 
     #     base_name = f"{element_type.replace('Element', '').lower()}_"
     #     counter = 1
-    #     existing_names = {el.name for el in self.current_template.elements}
+    #     existing_names = {el.name for el in self.template.elements}
     #     while f"{base_name}{counter}" in existing_names:
     #         counter += 1
     #     new_name = f"{base_name}{counter}"
 
     #     new_rect_local = QRectF(0, 0, default_width, default_height)
-    #     new_element = self.current_template.add_element(element_type, new_name, new_rect_local)
+    #     new_element = self.template.add_element(element_type, new_name, new_rect_local)
     #     self.scene.addItem(new_element)
 
     #     center_offset_x = new_rect_local.width() / 2
@@ -1008,7 +1008,7 @@ class MainDesignerWindow(QMainWindow):
         # Generate a unique name for the new element
         base_name = f"{element_type.replace('Element', '').lower()}_"
         counter = 1
-        existing_names = {el.get_name() for el in self.current_template.elements}
+        existing_names = {el.get_name() for el in self.template.elements}
         while f"{base_name}{counter}" in existing_names:
             counter += 1
         new_name = f"{base_name}{counter}"
@@ -1017,7 +1017,7 @@ class MainDesignerWindow(QMainWindow):
         new_rect_local = QRectF(0, 0, default_width, default_height)
 
         # Create the element using the GameComponentTemplate
-        new_element = self.current_template.add_element(
+        new_element = self.template.add_element(
             element_type, new_name, new_rect_local
         )
 
@@ -1038,19 +1038,19 @@ class MainDesignerWindow(QMainWindow):
         new_height_in = self.game_component_height_spin.value()
         new_dpi = self.game_component_dpi_spin.value()
 
-        self.current_template.width_in = new_width_in
-        self.current_template.height_in = new_height_in
-        self.current_template.dpi = new_dpi
+        self.template.width_in = new_width_in
+        self.template.height_in = new_height_in
+        self.template.dpi = new_dpi
 
-        self.scene.set_template_dimensions(self.current_template.width_px, self.current_template.height_px)
+        self.scene.set_template_dimensions(self.template.width_px, self.template.height_px)
 
-        new_scene_rect = QRectF(0, 0, self.current_template.width_px, self.current_template.height_px)
+        new_scene_rect = QRectF(0, 0, self.template.width_px, self.template.height_px)
         self.scene.setSceneRect(new_scene_rect)
         self.view.setSceneRect(new_scene_rect)
 
         self.view.fitInView(self.scene.sceneRect(), Qt.KeepAspectRatio)
 
-        self.current_template.template_changed.emit()
+        self.template.template_changed.emit()
 
         self.view.viewport().update()
         self.view.update()
@@ -1063,7 +1063,7 @@ class MainDesignerWindow(QMainWindow):
         path, _ = QFileDialog.getOpenFileName(
             self, "Select Background Image", "", "Image Files (*.png *.jpg *.jpeg *.bmp *.gif)")
         if path:
-            if self.current_template.set_background_image(path):
+            if self.template.set_background_image(path):
                 self.show_status_message("Game Component background image set successfully.", "success")
             else:
                 self.show_status_message("Background Error: Could not set background image. File may be invalid.", "error")
@@ -1124,8 +1124,8 @@ class MainDesignerWindow(QMainWindow):
             # output_dir = Path("./merged_templates") # No longer needed here as export methods handle dir selection
 
             for i, row_data in enumerate(data_rows):
-                merged_template = GameComponentTemplate.from_dict(self.current_template.to_dict(), parent=None)
-                merged_template.background_image_path = self.current_template.background_image_path
+                merged_template = GameComponentTemplate.from_dict(self.template.to_dict(), parent=None)
+                merged_template.background_image_path = self.template.background_image_path
 
                 for element in merged_template.elements:
                     if element.name.startswith('@'):
@@ -1199,7 +1199,7 @@ class MainDesignerWindow(QMainWindow):
 
     @Slot()
     def export_png_gui(self): # Renamed for clarity
-        templates_to_export = self.merged_templates if self.merged_templates else [self.current_template]
+        templates_to_export = self.merged_templates if self.merged_templates else [self.template]
 
         if not templates_to_export:
             self.show_status_message("PNG Export Failed: No templates to export.", "error")
@@ -1219,7 +1219,7 @@ class MainDesignerWindow(QMainWindow):
 
     @Slot()
     def export_pdf_gui(self):
-        templates_to_export = self.merged_templates if self.merged_templates else [self.current_template]
+        templates_to_export = self.merged_templates if self.merged_templates else [self.template]
 
         if not templates_to_export:
             self.show_status_message("PDF Export Failed: No templates to export.", "error")
@@ -1244,14 +1244,14 @@ class MainDesignerWindow(QMainWindow):
     # --- CLI Export Methods (public for main.py to call) ---
 
     def export_png_cli(self, output_dir: Path): # NEW: CLI-specific PNG export
-        templates_to_export = self.merged_templates if self.merged_templates else [self.current_template]
+        templates_to_export = self.merged_templates if self.merged_templates else [self.template]
         self.export_manager.export_png(templates_to_export, output_dir=output_dir, is_cli_mode=True)
 
     def export_pdf_cli(self, output_dir: Path): # NEW: CLI-specific PDF export
-        templates_to_export = self.merged_templates if self.merged_templates else [self.current_template]
+        templates_to_export = self.merged_templates if self.merged_templates else [self.template]
         # For PDF, the ExportManager expects a full file path, not just a directory.
-        # We'll default to 'merged_output.pdf' or 'current_template.pdf' within the output_dir.
-        pdf_output_name = "merged_output.pdf" if self.merged_templates else "current_template.pdf"
+        # We'll default to 'merged_output.pdf' or 'template.pdf' within the output_dir.
+        pdf_output_name = "merged_output.pdf" if self.merged_templates else "template.pdf"
         self.export_manager.export_pdf(templates_to_export, output_file_path=output_dir / pdf_output_name, is_cli_mode=True)
 
 
@@ -1289,7 +1289,7 @@ class MainDesignerWindow(QMainWindow):
                 self.show_status_message("Element removal cancelled.", "info")
                 return
             self.scene.removeItem(element)
-            self.current_template.remove_element(element)
+            self.template.remove_element(element)
             self.on_selection_changed()
             self.show_status_message(f"Element '{element.name}' removed.", "info")
         else:
@@ -1304,13 +1304,13 @@ class MainDesignerWindow(QMainWindow):
             new_width_px = parse_dimension(self.game_component_width_input.text(), dpi)
             new_height_px = parse_dimension(self.game_component_height_input.text(), dpi)
 
-            self.current_template.dpi = dpi
-            self.current_template.width_px = new_width_px
-            self.current_template.height_px = new_height_px
+            self.template.dpi = dpi
+            self.template.width_px = new_width_px
+            self.template.height_px = new_height_px
 
             # Update template internal in/inches too
-            self.current_template.width_in = new_width_px / dpi
-            self.current_template.height_in = new_height_px / dpi
+            self.template.width_in = new_width_px / dpi
+            self.template.height_in = new_height_px / dpi
 
             self.scene.set_template_dimensions(new_width_px, new_height_px)
 
@@ -1319,7 +1319,7 @@ class MainDesignerWindow(QMainWindow):
             self.view.setSceneRect(new_scene_rect)
             self.view.fitInView(new_scene_rect, Qt.KeepAspectRatio)
 
-            self.current_template.template_changed.emit()
+            self.template.template_changed.emit()
             self.view.viewport().update()
             self.view.update()
             self.scene.update()
@@ -1330,12 +1330,12 @@ class MainDesignerWindow(QMainWindow):
             self.show_status_message(f"Invalid input: {e}", "error")
 
     def refresh_properties_panel(self):
-        dpi = self.current_template.dpi
+        dpi = self.template.dpi
         self.game_component_width_input.setText(
-            format_dimension(self.current_template.width_px, self.current_unit, dpi)
+            format_dimension(self.template.width_px, self.current_unit, dpi)
         )
         self.game_component_height_input.setText(
-            format_dimension(self.current_template.height_px, self.current_unit, dpi)
+            format_dimension(self.template.height_px, self.current_unit, dpi)
         )
     #### Paint Toolbar ####
 

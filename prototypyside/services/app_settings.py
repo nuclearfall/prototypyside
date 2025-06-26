@@ -3,7 +3,7 @@ from PySide6.QtCore import QObject, Signal, Property
 class AppSettings(QObject):
     unit_changed = Signal(str)
     on_dpi_changed = Signal(int)
-
+    display_dpi_changed = Signal(int)
     def __init__(self, unit="px", display_dpi=300, print_dpi=300):
         super().__init__()
         self._unit = unit

@@ -7,6 +7,7 @@ from PySide6.QtGui import QColor, QPen, QPainter, QPixmap, QTransform
 
 from prototypyside.config import MEASURE_INCREMENT, LIGHTEST_GRAY, DARKEST_GRAY
 from prototypyside.utils.unit_converter import parse_dimension
+from prototypyside.utils.unit_str import UnitStr
 from prototypyside.utils.graphics_item_helpers import is_movable
 from prototypyside.views.graphics_items import ResizeHandle
 from prototypyside.services.undo_commands import MoveElementCommand, ResizeElementCommand
@@ -57,7 +58,7 @@ class ComponentGraphicsScene(QGraphicsScene):
 
         self.setSceneRect(0, 0, self._template_width_px, self._template_height_px)
 
-    def set_template_dimensions(self, width_px: int, height_px: int):
+    def scene_from_template_dimensions(self, width_px: int, height_px: int):
         self._template_width_px = width_px
         self._template_height_px = height_px
         new_rect = QRectF(0, 0, width_px, height_px)
@@ -70,8 +71,8 @@ class ComponentGraphicsScene(QGraphicsScene):
         template_rect = QRectF(0, 0, self._template_width_px, self._template_height_px)
 
         main_window: 'MainDesignerWindow' = self.parent()
-        if main_window and hasattr(main_window, 'current_template') and main_window.current_template:
-            template: 'ComponentTemplate' = main_window.current_template
+        if main_window and hasattr(main_window, 'template') and main_window.template:
+            template: 'ComponentTemplate' = main_window.template
             if template.background_image_path:
                 bg_pixmap = QPixmap(template.background_image_path)
                 if not bg_pixmap.isNull():
@@ -105,15 +106,16 @@ class ComponentGraphicsScene(QGraphicsScene):
         if not getattr(self.parent(), "show_grid", True):
             return
 
+        # Always use canonical unit string (not UnitStr instance)
         unit = self.tab.settings.unit
+        dpi = self.tab.settings.dpi
         levels = sorted(MEASURE_INCREMENT[unit].keys(), reverse=True)
         num_levels = len(levels)
 
-        # Gray from lightest (level 3) to darkest (level 1)
         gray_range = LIGHTEST_GRAY - DARKEST_GRAY
 
         for i, level in enumerate(levels):
-            spacing = self.get_grid_spacing(level)
+            spacing = self.get_grid_spacing(level, unit, dpi)
 
             gray_value = LIGHTEST_GRAY - int(i * (gray_range / max(1, num_levels - 1)))
             pen = QPen(QColor(gray_value, gray_value, gray_value))
@@ -133,23 +135,65 @@ class ComponentGraphicsScene(QGraphicsScene):
             while y < bottom:
                 painter.drawLine(left, y, right, y)
                 y += spacing
+    # def draw_grid(self, painter, rect):
+    #     if not getattr(self.parent(), "show_grid", True):
+    #         return
+
+    #     unit = self.tab.settings.unit
+    #     levels = sorted(MEASURE_INCREMENT[unit].keys(), reverse=True)
+    #     num_levels = len(levels)
+
+    #     # Gray from lightest (level 3) to darkest (level 1)
+    #     gray_range = LIGHTEST_GRAY - DARKEST_GRAY
+
+    #     for i, level in enumerate(levels):
+    #         spacing = self.get_grid_spacing(level)
+
+    #         gray_value = LIGHTEST_GRAY - int(i * (gray_range / max(1, num_levels - 1)))
+    #         pen = QPen(QColor(gray_value, gray_value, gray_value))
+    #         painter.setPen(pen)
+
+    #         left = int(rect.left())
+    #         right = int(rect.right())
+    #         top = int(rect.top())
+    #         bottom = int(rect.bottom())
+
+    #         x = left - (left % spacing)
+    #         while x < right:
+    #             painter.drawLine(x, top, x, bottom)
+    #             x += spacing
+
+    #         y = top - (top % spacing)
+    #         while y < bottom:
+    #             painter.drawLine(left, y, right, y)
+    #             y += spacing
 
 
-    def get_grid_spacing(self, level: int) -> int:
-        unit = self.tab.settings.unit
-        dpi = self.tab.settings.dpi
-        base = parse_dimension("1 " + unit, dpi)
+    # def get_grid_spacing(self, level: int) -> int:
+    #     unit = self.tab.settings.unit
+    #     dpi = self.tab.settings.dpi
+    #     base = parse_dimension("1 " + unit, dpi)
+    #     increment = MEASURE_INCREMENT[unit].get(level)
+    #     if increment is None:
+    #         raise ValueError(f"Invalid grid level {level} for unit '{unit}'")
+    #     return int(round(base * increment))
+
+    def get_grid_spacing(self, level: int, unit: str = None, dpi: int = None) -> float:
+        unit = unit or (self.tab.settings.unit.unit if hasattr(self.tab.settings.unit, "unit") else str(self.tab.settings.unit))
+        dpi = dpi or self.tab.settings.dpi
         increment = MEASURE_INCREMENT[unit].get(level)
         if increment is None:
             raise ValueError(f"Invalid grid level {level} for unit '{unit}'")
-        return int(round(base * increment))
+        # This is the physical size of the grid interval in unit, convert to px:
+        spacing_px = UnitStr(increment, unit=unit, dpi=dpi).to("px", dpi=dpi)
+        return spacing_px
 
     def snap_to_grid(self, pos: QPointF) -> QPointF:
         if not self.is_snap_to_grid:
             return pos
         spacing = self.get_grid_spacing(level=3)
-        x = math.floor(pos.x() / spacing) * spacing
-        y = math.floor(pos.y() / spacing) * spacing
+        x = round(pos.x() / spacing) * spacing
+        y = round(pos.y() / spacing) * spacing
         return QPointF(x, y)
 
 
@@ -214,7 +258,7 @@ class ComponentGraphicsScene(QGraphicsScene):
             self.tab.undo_stack.push(command)
         elif all([self._resizing, self.resizing_element, self.resize_start_scene_rect]):
             # use ResizeElementCommand:
-            command = ResizeElementCommand(element=self.resizing_element, new_rect=self.resizing_element.getRect(), 
+            command = ResizeElementCommand(element=self.resizing_element, new_rect=self.resizing_element.rect, 
                         old_rect=self.resize_start_scene_rect)
             self.tab.undo_stack.push(command)
         self._dragging_start_pos = None

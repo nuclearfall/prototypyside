@@ -6,7 +6,7 @@ from prototypyside.widgets.unit_field import UnitField
 from prototypyside.widgets.font_toolbar import FontToolbar
 from prototypyside.widgets.color_picker import ColorPickerWidget
 from prototypyside.utils.unit_converter import parse_dimension, to_px
-
+from prototypyside.utils.unit_str import UnitStr 
 
 class PropertyPanel(QWidget):
     property_changed = Signal(tuple)  # (property_name, value)
@@ -110,10 +110,10 @@ class PropertyPanel(QWidget):
         geometry_group = QGroupBox("Geometry")
         geometry_layout = QFormLayout()
 
-        self.element_x_field = UnitField(None, self.settings.unit)
-        self.element_y_field = UnitField(None, self.settings.unit)
-        self.element_width_field = UnitField(None, self.settings.unit)
-        self.element_height_field = UnitField(None, self.settings.unit)
+        self.element_x_field = UnitField(None, self.settings.unit, self.settings.dpi)
+        self.element_y_field = UnitField(None, self.settings.unit, self.settings.dpi)
+        self.element_width_field = UnitField(None, self.settings.unit, self.settings.dpi)
+        self.element_height_field = UnitField(None, self.settings.unit, self.settings.dpi)
 
         for field in [self.element_x_field, self.element_y_field, self.element_width_field, self.element_height_field]:
             field.editingFinished.connect(self._on_geometry_changed)
@@ -145,10 +145,10 @@ class PropertyPanel(QWidget):
         self.border_color_picker.color_changed.connect(
             lambda color: self.property_changed.emit(("border_color", color))
         )
-        self.border_width_field = UnitField(None, self.settings.unit)
+        self.border_width_field = UnitField(None, self.settings.unit, self.settings.dpi)
 
         self.border_width_field.editingFinished.connect(
-            lambda: self.emit_property_and_clear(self.border_width_field, "border_width", to_px(self.border_width_field.text())))
+            lambda: self.emit_property_and_clear(self.border_width_field, "border_width", self.border_width_field.text()))
 
         self.alignment_combo = QComboBox()
         self.alignment_map = {
@@ -198,19 +198,31 @@ class PropertyPanel(QWidget):
         field = self.sender()
         if field:
             field.clearFocus()
-
+        # All fields return a UnitStr or None
         values = [
-            to_px(self.element_x_field.text(), dpi=self.settings.dpi),
-            to_px(self.element_y_field.text(), dpi=self.settings.dpi),
-            to_px(self.element_width_field.text(), dpi=self.settings.dpi),
-            to_px(self.element_height_field.text(), dpi=self.settings.dpi)
+            self.element_x_field.getValue(),
+            self.element_y_field.getValue(),
+            self.element_width_field.getValue(),
+            self.element_height_field.getValue()
         ]
         self.geometry_changed.emit(("geometry", values))
+
+    # def _on_geometry_changed(self):
+    #     field = self.sender()
+    #     if field:
+    #         field.clearFocus()
+
+    #     values = [
+    #         self.element_x_field.text(),
+    #         self.element_y_field.text(),
+    #         self.element_width_field.text(),
+    #         self.element_height_field.text()
+    #     ]
+    #     self.geometry_changed.emit(("geometry", values))
 
     def emit_property_and_clear(self, field, prop_name, value):
         field.clearFocus()
         self.property_changed.emit((prop_name, value))
-
 
     def update_panel_from_element(self):
         element = self._element
@@ -226,7 +238,7 @@ class PropertyPanel(QWidget):
         self.name_edit.blockSignals(True)
         self.name_edit.setText(getattr(element, "name", ""))
         self.name_edit.blockSignals(False)
-        
+
         # Content
         self.content_edit.blockSignals(True)
         if hasattr(element, "text"):
@@ -237,16 +249,22 @@ class PropertyPanel(QWidget):
         self.content_edit.blockSignals(False)
 
         # --- GEOMETRY ---
+        # Assume element has _x, _y, _width, _height as UnitStr
         self.element_x_field.blockSignals(True)
         self.element_y_field.blockSignals(True)
         self.element_width_field.blockSignals(True)
         self.element_height_field.blockSignals(True)
-        pos = element.pos()
-        rect = getattr(element, "_rect", QRectF())
-        self.element_x_field.setValue(pos.x())
-        self.element_y_field.setValue(pos.y())
-        self.element_width_field.setValue(rect.width())
-        self.element_height_field.setValue(rect.height())
+
+        # Always pass UnitStr to the field
+        if hasattr(element, "_x"):
+            self.element_x_field.setValue(element._x)
+        if hasattr(element, "_y"):
+            self.element_y_field.setValue(element._y)
+        if hasattr(element, "_width"):
+            self.element_width_field.setValue(element._width)
+        if hasattr(element, "_height"):
+            self.element_height_field.setValue(element._height)
+
         self.element_x_field.blockSignals(False)
         self.element_y_field.blockSignals(False)
         self.element_width_field.blockSignals(False)
@@ -274,9 +292,15 @@ class PropertyPanel(QWidget):
             self.border_color_picker.set_color(QColor(0,0,0,0))
         self.border_color_picker.blockSignals(False)
 
-        # Border width
+        # Border width (store as UnitStr, e.g. "1 pt", "0.5 mm")
         self.border_width_field.blockSignals(True)
-        self.border_width_field.setValue(to_px(getattr(element, "border_width", "1 px")))
+        if hasattr(element, "border_width"):
+            bw = getattr(element, "border_width", "1 pt")
+            # If already UnitStr, use as-is. If string, convert.
+            if isinstance(bw, UnitStr):
+                self.border_width_field.setValue(bw)
+            else:
+                self.border_width_field.setValue(UnitStr(str(bw), unit=self.settings.unit, dpi=self.settings.dpi))
         self.border_width_field.blockSignals(False)
 
         # --- ALIGNMENT ---
@@ -306,4 +330,98 @@ class PropertyPanel(QWidget):
         else:
             self.aspect_checkbox.setChecked(False)
         self.aspect_checkbox.blockSignals(False)
+    # def update_panel_from_element(self):
+    #     element = self._element
+    #     if element is None:
+    #         self.clear()
+    #         return
+
+    #     # Enable all controls
+    #     for widget in self.findChildren(QWidget):
+    #         widget.setEnabled(True)
+
+    #     # --- BASIC FIELDS ---
+    #     self.name_edit.blockSignals(True)
+    #     self.name_edit.setText(getattr(element, "name", ""))
+    #     self.name_edit.blockSignals(False)
+        
+    #     # Content
+    #     self.content_edit.blockSignals(True)
+    #     if hasattr(element, "text"):
+    #         self.content_edit.setText(element.content)
+    #     else:
+    #         self.content_edit.setText("")
+    #         self.content_edit.setEnabled(False)
+    #     self.content_edit.blockSignals(False)
+
+    #     # --- GEOMETRY ---
+    #     self.element_x_field.blockSignals(True)
+    #     self.element_y_field.blockSignals(True)
+    #     self.element_width_field.blockSignals(True)
+    #     self.element_height_field.blockSignals(True)
+    #     pos = element.pos()
+    #     rect = getattr(element, "_rect", QRectF())
+    #     self.element_x_field.setValue(pos.x())
+    #     self.element_y_field.setValue(pos.y())
+    #     self.element_width_field.setValue(rect.width())
+    #     self.element_height_field.setValue(rect.height())
+    #     self.element_x_field.blockSignals(False)
+    #     self.element_y_field.blockSignals(False)
+    #     self.element_width_field.blockSignals(False)
+    #     self.element_height_field.blockSignals(False)
+
+    #     # --- APPEARANCE ---
+    #     self.text_color_picker.blockSignals(True)
+    #     if hasattr(element, "color") and element.color is not None:
+    #         self.text_color_picker.set_color(QColor(element.color))
+    #     else:
+    #         self.text_color_picker.set_color(QColor(0,0,0,0))
+    #     self.text_color_picker.blockSignals(False)
+
+    #     self.bg_color_picker.blockSignals(True)
+    #     if hasattr(element, "bg_color") and element.bg_color is not None:
+    #         self.bg_color_picker.set_color(QColor(element.bg_color))
+    #     else:
+    #         self.bg_color_picker.set_color(QColor(0,0,0,0))
+    #     self.bg_color_picker.blockSignals(False)
+
+    #     self.border_color_picker.blockSignals(True)
+    #     if hasattr(element, "border_color") and element.border_color is not None:
+    #         self.border_color_picker.set_color(QColor(element.border_color))
+    #     else:
+    #         self.border_color_picker.set_color(QColor(0,0,0,0))
+    #     self.border_color_picker.blockSignals(False)
+
+    #     # Border width
+    #     self.border_width_field.blockSignals(True)
+    #     self.border_width_field.setValue(to_px(getattr(element, "border_width", "1 px")))
+    #     self.border_width_field.blockSignals(False)
+
+    #     # --- ALIGNMENT ---
+    #     self.alignment_combo.blockSignals(True)
+    #     alignment = getattr(element, "alignment", None)
+    #     if alignment is not None and alignment in self.reverse_alignment_map:
+    #         index = self.alignment_combo.findText(self.reverse_alignment_map[alignment])
+    #         self.alignment_combo.setCurrentIndex(index)
+    #     else:
+    #         index = self.alignment_combo.findText("Center")
+    #         self.alignment_combo.setCurrentIndex(index)
+    #     self.alignment_combo.blockSignals(False)
+
+    #     # --- FONT ---
+    #     self.font_toolbar.blockSignals(True)
+    #     if hasattr(element, "font"):
+    #         self.font_toolbar.setEnabled(True)
+    #         self.font_toolbar.set_font(element.font)
+    #     else:
+    #         self.font_toolbar.setEnabled(False)
+    #     self.font_toolbar.blockSignals(False)
+
+    #     # --- ASPECT RATIO ---
+    #     self.aspect_checkbox.blockSignals(True)
+    #     if hasattr(element, "aspect_ratio"):
+    #         self.aspect_checkbox.setChecked(bool(element.aspect_ratio))
+    #     else:
+    #         self.aspect_checkbox.setChecked(False)
+    #     self.aspect_checkbox.blockSignals(False)
 

@@ -158,7 +158,6 @@ class MainDesignerWindow(QMainWindow):
     @Slot()
     def add_new_component_tab(self):
         new_template = self.registry.create("ct")
-        print(new_template.to_dict())
         new_tab = ComponentTab(parent=self, registry=self.registry, template=new_template)
         self.undo_group.addStack(new_tab.undo_stack)
         # Connect the tab's status message signal to the main window's slot
@@ -263,8 +262,8 @@ class MainDesignerWindow(QMainWindow):
     @Slot()
     def save_current_tab_template(self):
         current_tab = self.get_current_tab()
-        current_template = current_tab.current_template
-        print(f"Preparing to Save. Current template PID is {current_template.pid}")
+        template = current_tab.template
+        print(f"Preparing to Save. Current template PID is {template.pid}")
         if not current_tab:
             self.show_status_message("No active tab to save.", "warning")
             return
@@ -275,7 +274,7 @@ class MainDesignerWindow(QMainWindow):
 
         if path:
             try:
-                root_pid = current_template.pid
+                root_pid = template.pid
                 print(f"Saving template with root pid: {root_pid}")
                 
                 self.registry.save_to_file(root_pid, path)

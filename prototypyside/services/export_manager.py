@@ -81,7 +81,7 @@ class ExportManager:
                 if len(templates) > 1:
                     filename = f"merged_output_{i+1}.png"
                 else:
-                    filename = "current_template.png" # Default name for a single template export
+                    filename = "template.png" # Default name for a single template export
                 
                 current_output_file = output_dir / filename
                 

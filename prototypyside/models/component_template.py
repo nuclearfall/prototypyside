@@ -2,7 +2,7 @@
 
 from PySide6.QtCore import Qt, QObject, QRectF, QPointF, Signal # Import QObject and Signal
 from PySide6.QtGui import QPainter, QPixmap, QColor, QImage
-from PySide6.QtWidgets import QGraphicsItem
+from PySide6.QtWidgets import QGraphicsItem, QGraphicsObject
 from typing import List, Dict, Any, Optional, TYPE_CHECKING
 import csv
 import json
@@ -12,23 +12,23 @@ from PySide6.QtWidgets import QMessageBox
 #from prototypyside.models.game_component_elements import create_element
 from prototypyside.utils.qt_helpers import list_to_qrectf
 from prototypyside.utils.unit_converter import to_px, format_dimension
+from prototypyside.utils.unit_str import UnitStr
 # Use TYPE_CHECKING for type hinting
 if TYPE_CHECKING:
     from prototypyside.models.component_elements import ComponentElement
 
-class ComponentTemplate(QObject): # NOW INHERITS QObject
-    template_changed = Signal() # Re-add signal
-    element_z_order_changed = Signal() # Re-add signal
+class ComponentTemplate(QGraphicsObject):
+    template_changed = Signal()
+    element_z_order_changed = Signal()
 
-    def __init__(self, pid, width="2.5 in", height="3.5 in", dpi=300, parent: QObject = None, name="Component Template"): # Add parent arg
-        super().__init__(parent) # Call QObject's init with parent
+    def __init__(self, pid, dpi=300, width="2.5 in", height="3.5 in", parent: QObject = None, name="Component Template"):
+        super().__init__(parent)
         self._pid = pid
         self.name = name
-        self.width = width
-        self.height = height
-        self._width_px = to_px(width, dpi=dpi)
-        self._height_px = to_px(height, dpi=dpi)
-        self.dpi = dpi
+        self._width = UnitStr(width, dpi=dpi)
+        self._height = UnitStr(height, dpi=dpi)
+        self._unit = self._width.unit
+        self._dpi = dpi
         self.is_template = True
         self.element_pids = []
         self.elements: List['ComponentElement'] = []
@@ -42,26 +42,46 @@ class ComponentTemplate(QObject): # NOW INHERITS QObject
     def pid(self, value):
         self._pid = value
         self.template_changed.emit()
+
+    @property
+    def width_px(self) -> float:
+        return self.width.to("px", dpi=self._dpi)
+
+    @property
+    def height_px(self) -> float:
+        return self.height.to("px", dpi=self._dpi)
+
+    @property
+    def width(self) -> UnitStr:
+        return self._width
+
+    @width.setter
+    def width(self, value):
+        if isinstance(value, UnitStr):
+            self._width = value
+        else:
+            self._width = UnitStr(value, dpi=self._dpi)
+        self.template_changed.emit()
+
+    @property
+    def height(self) -> UnitStr:
+        return self._height
+
+    @height.setter
+    def height(self, value):
+        if isinstance(value, UnitStr):
+            self._height = value
+        else:
+            self._height = UnitStr(value, dpi=self._dpi)
+        self.template_changed.emit()
+
+    @property
+    def unit(self):
+        return self._unit
         
-    @property
-    def width_px(self) -> int:
-        return self._width_px
-
-    @width_px.setter
-    def width_px(self, px: int):
-        self._width_px = px
-        self.width = format_dimension(px, dpi=self.dpi)
-        self.template_changed.emit()
-
-    @property
-    def height_px(self) -> int:
-        return self._height_px
-
-    @height_px.setter
-    def height_px(self, px: int):
-        self._height_px = px
-        self.height = format_dimension(px, dpi=self.dpi)
-        self.template_changed.emit()
+    @property 
+    def dpi(self):
+        return self._dpi
 
     def add_element(self, element) -> 'ComponentElement':
         # Use consistent z-value increments
@@ -186,10 +206,9 @@ class ComponentTemplate(QObject): # NOW INHERITS QObject
         return {
             'pid': self.pid,
             'name': self.name,
-            'width': self.width,
-            'height': self.height,
-            'dpi': self.dpi,
-            'is_template': self.is_template,
+            'width': self._width.format(),
+            'height': self._height.format(),
+            'dpi': self._dpi,
             'background_image_path': self.background_image_path,
             'element_pids': [e.pid for e in self.elements]  # 🔄 save only references
         }
@@ -198,45 +217,13 @@ class ComponentTemplate(QObject): # NOW INHERITS QObject
     def from_dict(cls, data: Dict[str, Any], parent: QObject = None) -> 'ComponentTemplate':
         template = cls(
             pid=data['pid'],
-            width=data.get('width', 2.5),
-            height=data.get('height', 3.5),
+            width=data.get('width', "2.5 in"),
+            height=data.get('height', "3.5 in"),
             dpi=data.get('dpi', 300),
+            unit = 300,
             parent=parent,
             name=data.get('name', "Component Template")
         )
 
         template.background_image_path = data.get('background_image_path')
-        template.element_pids = data.get('element_pids')
-        template._pending_element_pids = []
         return template
-
-    def reorder_element_z(self, element: 'ComponentElement', direction: int):
-        if element not in self.elements:
-            return
-
-        elements_by_z = sorted(self.elements, key=lambda e: e.zValue())
-
-        element_idx = -1
-        for i, el in enumerate(elements_by_z):
-            if el == element:
-                element_idx = i
-                break
-
-        if element_idx == -1:
-            return
-
-        if direction > 0: # Bring forward
-            if element_idx + 1 < len(elements_by_z):
-                next_element = elements_by_z[element_idx + 1]
-                temp_z = element.zValue()
-                element.setZValue(next_element.zValue())
-                next_element.setZValue(temp_z)
-        elif direction < 0: # Send backward
-            if element_idx - 1 >= 0:
-                prev_element = elements_by_z[element_idx - 1]
-                temp_z = element.zValue()
-                element.setZValue(prev_element.zValue())
-                prev_element.setZValue(temp_z)
-
-        self.elements.sort(key=lambda e: e.zValue())
-        self.element_z_order_changed.emit() # Re-add signal emission

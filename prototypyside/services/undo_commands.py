@@ -1,6 +1,9 @@
 from PySide6.QtGui import QUndoCommand
 from PySide6.QtCore import QPointF, QRectF
 
+from prototypyside.utils.unit_converter import pos_to_unit_str
+from prototypyside.utils.unit_str import UnitStr
+
 
 class AddElementCommand(QUndoCommand):
     def __init__(self, prefix, scene_pos, tab, description="Add Element"):
@@ -8,28 +11,60 @@ class AddElementCommand(QUndoCommand):
         self.prefix = prefix
         self.tab = tab
         self.scene_pos = scene_pos
+
         self.element = None
 
     def redo(self):
-
         if self.element is None:
+            unit = self.tab.settings.unit or "in"
+            dpi = self.tab.settings.dpi or 300
+            logical_x, logical_y = pos_to_unit_str(self.scene_pos, unit, dpi)
+            
 
-            new_rect = QRectF(0, 0, 150, 120)
+            # Convert default width/height (in inches) to the current logical unit
+            default_w_in = 0.5
+            default_h_in = 0.5
+
+            if unit == "in":
+                w_physical = default_w_in
+                h_physical = default_h_in
+            elif unit == "mm":
+                w_physical = default_w_in * 25.4
+                h_physical = default_h_in * 25.4
+            elif unit == "cm":
+                w_physical = default_w_in * 2.54
+                h_physical = default_h_in * 2.54
+            elif unit == "pt":
+                w_physical = default_w_in * 72.0
+                h_physical = default_h_in * 72.0
+            else:
+                w_physical = default_w_in
+                h_physical = default_h_in
+
+            print(f"Prior to adding to the Element, the template pid is {self.tab.template_pid}")
+            # Build the QRectF in logical units
+            new_rect = QRectF(0, 0, w_physical, h_physical)
             self.element = self.tab.registry.create(
                 self.prefix,
-                name=None,
                 rect=new_rect,
-                parent_qobject=self.tab.current_template
+                pos = self.scene_pos,
+                template_pid = self.tab.template_pid,
+                parent=self.tab.template,
+                name=None
             )
-            
+            print(f"Adding element {self.element.pid}, scene_pos is set to {self.scene_pos} to template {self.element.template_pid}")
+
         elif self.element is not None and self.tab.registry.is_orphan(self.element.pid):
             self.tab.registry.reinsert(self.element.pid)
 
         if self.element.scene() is None:
             self.tab.scene.addItem(self.element)
+
+        # Snap to grid if enabled (in px, so reconvert)
         if self.tab.snap_to_grid:
             self.scene_pos = self.tab.scene.snap_to_grid(self.scene_pos)
 
+        # For QGraphicsItem, setPos always uses px
         visual_offset = self.element.boundingRect().topLeft()
         self.element.setPos(self.scene_pos - visual_offset)
         self.element.setSelected(True)
@@ -102,10 +137,10 @@ class ResizeElementCommand(QUndoCommand):
         self.new_rect = new_rect
 
     def undo(self):
-        self.element.setRect(self.old_rect)
+        self.element.rect = self.old_rect
 
     def redo(self):
-        self.element.setRect(self.new_rect)
+        self.element.rect = self.new_rect
 
 class ChangeElementPropertyCommand(QUndoCommand):
     def __init__(self, element, change, description="Change Element Property"):

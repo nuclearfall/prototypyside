@@ -117,7 +117,7 @@ if __name__ == "__main__":
             sys.exit(1)
 
         # Determine templates to export (merged if available, else current)
-        templates_to_export = designer.merged_templates if designer.merged_templates else [designer.current_template]
+        templates_to_export = designer.merged_templates if designer.merged_templates else [designer.template]
 
         if not export_dir:
             export_dir = Path("./cli_exports") # Default output directory for CLI exports
@@ -139,8 +139,8 @@ if __name__ == "__main__":
             
         if export_pdf_flag:
             # Call ExportManager's export_pdf method
-            # For PDF, we'll name the single output file "merged_output.pdf" or "current_template.pdf"
-            pdf_output_name = "merged_output.pdf" if designer.merged_templates else "current_template.pdf"
+            # For PDF, we'll name the single output file "merged_output.pdf" or "template.pdf"
+            pdf_output_name = "merged_output.pdf" if designer.merged_templates else "template.pdf"
             if not export_manager.export_pdf(templates_to_export, output_file_path=export_dir / pdf_output_name, is_cli_mode=True):
                 export_successful = False
 
