@@ -49,7 +49,6 @@ class ComponentGraphicsScene(QGraphicsScene):
         self._drag_offset = None
         self._dragging_start_pos = None
         self.resize_handle_type = None
-        self.measure_by = "in"
         self.is_snap_to_grid = True
 
         self.selected_item: Optional['ComponentElement'] = None
@@ -116,7 +115,7 @@ class ComponentGraphicsScene(QGraphicsScene):
         gray_range = LIGHTEST_GRAY - DARKEST_GRAY
 
         for i, level in enumerate(levels):
-            spacing = self.get_grid_spacing(level, unit, dpi)
+            spacing = self.get_grid_spacing(level)
 
             gray_value = LIGHTEST_GRAY - int(i * (gray_range / max(1, num_levels - 1)))
             pen = QPen(QColor(gray_value, gray_value, gray_value))
@@ -136,52 +135,10 @@ class ComponentGraphicsScene(QGraphicsScene):
             while y < bottom:
                 painter.drawLine(left, y, right, y)
                 y += spacing
-    # def draw_grid(self, painter, rect):
-    #     if not getattr(self.parent(), "show_grid", True):
-    #         return
 
-    #     unit = self.tab.settings.unit
-    #     levels = sorted(MEASURE_INCREMENT[unit].keys(), reverse=True)
-    #     num_levels = len(levels)
-
-    #     # Gray from lightest (level 3) to darkest (level 1)
-    #     gray_range = LIGHTEST_GRAY - DARKEST_GRAY
-
-    #     for i, level in enumerate(levels):
-    #         spacing = self.get_grid_spacing(level)
-
-    #         gray_value = LIGHTEST_GRAY - int(i * (gray_range / max(1, num_levels - 1)))
-    #         pen = QPen(QColor(gray_value, gray_value, gray_value))
-    #         painter.setPen(pen)
-
-    #         left = int(rect.left())
-    #         right = int(rect.right())
-    #         top = int(rect.top())
-    #         bottom = int(rect.bottom())
-
-    #         x = left - (left % spacing)
-    #         while x < right:
-    #             painter.drawLine(x, top, x, bottom)
-    #             x += spacing
-
-    #         y = top - (top % spacing)
-    #         while y < bottom:
-    #             painter.drawLine(left, y, right, y)
-    #             y += spacing
-
-
-    # def get_grid_spacing(self, level: int) -> int:
-    #     unit = self.tab.settings.unit
-    #     dpi = self.tab.settings.dpi
-    #     base = parse_dimension("1 " + unit, dpi)
-    #     increment = MEASURE_INCREMENT[unit].get(level)
-    #     if increment is None:
-    #         raise ValueError(f"Invalid grid level {level} for unit '{unit}'")
-    #     return int(round(base * increment))
-
-    def get_grid_spacing(self, level: int, unit: str = None, dpi: int = None) -> float:
-        unit = unit or (self.tab.settings.unit.unit if hasattr(self.tab.settings.unit, "unit") else str(self.tab.settings.unit))
-        dpi = dpi or self.tab.settings.dpi
+    def get_grid_spacing(self, level: int) -> float:
+        unit = self.tab.settings.unit
+        dpi = self.tab.settings.dpi
         increment = MEASURE_INCREMENT[unit].get(level)
         if increment is None:
             raise ValueError(f"Invalid grid level {level} for unit '{unit}'")
@@ -190,13 +147,12 @@ class ComponentGraphicsScene(QGraphicsScene):
         return spacing_px
 
     def snap_to_grid(self, pos: QPointF) -> QPointF:
-        if not self.is_snap_to_grid:
-            return pos
-        spacing = self.get_grid_spacing(level=3)
-        x = round(pos.x() / spacing) * spacing
-        y = round(pos.y() / spacing) * spacing
-        return QPointF(x, y)
-
+        if self.is_snap_to_grid:
+            spacing = self.get_grid_spacing(level=3)
+            x = round(pos.x() / spacing) * spacing
+            y = round(pos.y() / spacing) * spacing
+            return QPointF(x, y)
+        return pos
 
     def apply_snap(self, pos: QPointF, grid_size: float = 10.0) -> QPointF:
         return self.snap_to_grid(pos, grid_size)
@@ -224,9 +180,16 @@ class ComponentGraphicsScene(QGraphicsScene):
             event.accept()
             return
 
-        if hasattr(item, 'is_movable') and item.is_movable:  # For your item type
+        if is_movable(item):  # For your item type, using the helper function
             self._dragging_item = item
-            self._drag_offset = event.scenePos() - item.pos()
+            # Calculate the offset from the snapped *item's top-left corner* to the snapped *mouse press position*.
+            # The item's position (pos()) is relative to its parent, which for top-level items is the scene's origin (0,0).
+            # So, item.pos() is already in scene coordinates for top-level items.
+            snapped_item_pos_at_press = self.snap_to_grid(item.pos())
+            snapped_mouse_press_pos = self.snap_to_grid(event.scenePos())
+            self._drag_offset = snapped_mouse_press_pos - snapped_item_pos_at_press
+            self._dragging_start_pos = QPointF(item.x(), item.y()) # Store the item's position before drag
+            item.setPos(snapped_item_pos_at_press) # Snap item to grid immediately
             event.accept()
             return
 
@@ -234,14 +197,13 @@ class ComponentGraphicsScene(QGraphicsScene):
 
     def mouseMoveEvent(self, event: QGraphicsSceneMouseEvent):
         if self._resizing and self.resizing_element:
-            # Calculate delta from starting mouse position (absolute is fine with the fixed resize_from_handle)
-            current_scene_pos = event.scenePos()
+            # Snap the current mouse position to the grid!
+            snapped_scene_pos = self.snap_to_grid(event.scenePos())
             starting_scene_pos = self.resizing_element.mapToScene(self.resize_handle.pos())
-            delta_scene = current_scene_pos - starting_scene_pos
-            
-            # Get the element's current scene rect
+            delta_scene = snapped_scene_pos - starting_scene_pos
+
             scene_rect = self.resizing_element.mapRectToScene(self.resizing_element.rect)
-            
+
             self.resizing_element.resize_from_handle(
                 self.resize_handle.handle_type,
                 delta_scene,
@@ -251,24 +213,26 @@ class ComponentGraphicsScene(QGraphicsScene):
             return
 
         if self._dragging_item:
-            new_pos = event.scenePos() - self._drag_offset
-            self._dragging_item.setPos(new_pos)
+            # Calculate the new snapped position for the item based on the snapped mouse position
+            # and the stored snapped offset.
+            snapped_current_mouse_pos = self.snap_to_grid(event.scenePos())
+            new_snapped_pos = snapped_current_mouse_pos - self._drag_offset
+            self._dragging_item.setPos(new_snapped_pos)
             event.accept()
             return
 
         super().mouseMoveEvent(event)
     def mouseReleaseEvent(self, event: QGraphicsSceneMouseEvent):
         # Commit move to undo stack (if needed)
-        if self._dragging_item and self._drag_offset is not None:
-            old_pos = self._dragging_item._x, self._dragging_item._y  # Logical units
-            new_pos = self._dragging_item._x, self._dragging_item._y
-            # Push a MoveElementCommand here if using undo/redo
-            self.tab.undo_stack.push(MoveElementCommand(self._draggin_item, new_pos, old_pos))
+        if self._dragging_item and self._dragging_start_pos is not None:
+            # Use the stored start position (already snapped by mousePressEvent)
+            old_pos = self._dragging_start_pos
+            new_pos = self._dragging_item.pos() # This should already be snapped due to mouseMoveEvent logic
         elif self._resizing and self.resizing_element and self.resize_start_item_rect is not None:
             old_values = (self.resize_start_item_pos, self.resize_start_item_rect)
             new_values = (self.resizing_element.pos(), self.resizing_element.rect)
             self.tab.undo_stack.push(ResizeAndMoveElementCommand(
-                self.resizing_element, new_values, old_values))
+                 self.resizing_element, new_values, old_values))
             pass  # Implement your undo/redo integration
 
         # Reset state
@@ -298,7 +262,7 @@ class ComponentGraphicsScene(QGraphicsScene):
     def dropEvent(self, event: QGraphicsSceneDragDropEvent):
         if event.mimeData().hasFormat('text/plain'):
             element_type = event.mimeData().text()
-            scene_pos = event.scenePos()
+            scene_pos = self.snap_to_grid(event.scenePos())
             self.element_dropped.emit(scene_pos, element_type)
             event.acceptProposedAction()
         elif event.mimeData().hasUrls():

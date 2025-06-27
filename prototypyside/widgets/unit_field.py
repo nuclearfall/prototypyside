@@ -17,17 +17,16 @@ class UnitField(QLineEdit):
         self._unit = unit
         self._dpi = dpi
         self.editingFinished.connect(self._on_editing_finished)
-        self._sync_display()
+        self.sync_display()
 
-    def _sync_display(self):
-        """Update the display to reflect the current value, using settings unit/dpi."""
+    def sync_display(self):
+        """Update the display to reflect the current value, using self._unit and self._dpi."""
         if not self._active or self._value is None:
             self.setText("")
             self.setDisabled(True)
         else:
             self.setEnabled(True)
-            display_unit = self._unit.unit if hasattr(self._unit, "unit") else str(self._unit)
-            display_dpi = int(self._dpi)
+            # Show value in the selected unit, e.g. "25.4 mm" even if underlying is inches
             self.setText(self._value.format(".4g", unit=self._unit))
 
     def _on_editing_finished(self):
@@ -52,10 +51,10 @@ class UnitField(QLineEdit):
                 new_value = UnitStr(val, unit=display_unit, dpi=display_dpi)
 
             self._value = new_value
-            self._sync_display()
+            self.sync_display()
             self.editingFinishedWithValue.emit(self._value)
         except Exception:
-            self._sync_display()
+            self.sync_display()
         self.clearFocus()
 
     def setValue(self, value: 'UnitStr'):
@@ -65,13 +64,18 @@ class UnitField(QLineEdit):
         else:
             self._value = value
             self._active = True
-        self._sync_display()
+        self.sync_display()
 
     def getValue(self):
         return self._value if self._active else None
 
-    def _on_unit_or_dpi_changed(self, *args):
-        self._sync_display()
+    def on_unit_changed(self, unit: str):
+        """
+        Called when the measurement unit has changed (e.g. from inches to mm).
+        Updates the display unit but leaves the internal value unchanged.
+        """
+        self._unit = unit
+        self.sync_display()
 
 # from typing import Optional
 # from PySide6.QtWidgets import QLineEdit
@@ -91,7 +95,7 @@ class UnitField(QLineEdit):
 #         self._physical_unit = "in"
 
 #         self.editingFinished.connect(self._on_editing_finished)
-#         self._sync_display()
+#         self.sync_display()
 
 #     def _sync_display(self):
 #         if not self._active:
@@ -108,15 +112,15 @@ class UnitField(QLineEdit):
 #             self._physical = parse_dimension(self.text(), dpi=self._dpi)
 #             new_px = parse_dimension(self.text(), dpi=self._dpi)
 #             self._px_value = new_px
-#             self._sync_display()
+#             self.sync_display()
 #             self.editingFinishedWithValue.emit(new_px)
 #         except Exception:
-#             self._sync_display()
+#             self.sync_display()
 
 #     def set_px_value(self, px: Optional[int]):
 #         self._px_value = px
 #         self._active = px is not None
-#         self._sync_display()
+#         self.sync_display()
 
 #     def setValue(self, px: Optional[int]):
 #         self.set_px_value(px)
@@ -126,9 +130,9 @@ class UnitField(QLineEdit):
 
 #     def set_unit(self, unit: str):
 #         self._unit = unit
-#         self._sync_display()
+#         self.sync_display()
 
 #     def set_dpi(self, dpi: int):
 #         self._dpi = dpi
-#         self._sync_display()
+#         self.sync_display()
 

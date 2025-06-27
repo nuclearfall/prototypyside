@@ -20,6 +20,7 @@ class PropertyPanel(QWidget):
         self.setLayout(self._main_layout)
         self._element = None
         self._build_component_ui()
+        self.settings.unit_changed.connect(self.on_unit_changed)
 
     def _clear_layout(self):
         while self._main_layout.count():
@@ -57,7 +58,6 @@ class PropertyPanel(QWidget):
                 widget.setValue(0)
 
             widget.setEnabled(False)
-
 
     def set_target(self, element):
         """Bind the panel to the selected element, or clear if None."""
@@ -330,6 +330,14 @@ class PropertyPanel(QWidget):
         else:
             self.aspect_checkbox.setChecked(False)
         self.aspect_checkbox.blockSignals(False)
+
+    def on_unit_changed(self):
+        unit_fields = [self.element_x_field, self.element_y_field, 
+                self.element_width_field, self.element_height_field, 
+                self.border_width_field]
+        for field in unit_fields:
+            field.on_unit_changed(self.settings.unit)
+
     # def update_panel_from_element(self):
     #     element = self._element
     #     if element is None:

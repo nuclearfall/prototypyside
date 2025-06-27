@@ -30,7 +30,7 @@ from prototypyside.services.export_manager import ExportManager
 from prototypyside.services.property_setter import PropertySetter
 from prototypyside.services.geometry_setter import GeometrySetter
 from prototypyside.services.undo_commands import (AddElementCommand, RemoveElementCommand, 
-            CloneElementCommand, ResizeTemplateCommand)
+            CloneElementCommand, ResizeTemplateCommand, ResizeAndMoveElementCommand)
 
 class ComponentTab(QWidget):
     status_message_signal = Signal(str, str, int)
@@ -249,8 +249,8 @@ class ComponentTab(QWidget):
     @Slot(str)
     def on_unit_change(self, unit: str):
         self.settings.unit = unit
-        self.template_width_field.set_unit(unit)
-        self.template_height_field.set_unit(unit)
+        self.template_width_field.on_unit_changed(unit)
+        self.template_height_field.on_unit_changed(unit)
         self.measure_toolbar.update()
         self.property_panel.refresh() # Refresh property panel to update unit fields
         self.scene.update()  # force grid redraw
@@ -328,9 +328,10 @@ class ComponentTab(QWidget):
         self.template.template_changed.emit()
         self.show_status_message(f"DPI updated to {new_dpi}.", "info")
 
-    @Slot(object, tuple, tuple)
-    def on_geometry_changed(self, element, old_values, new_values):
-        command = ResizeAndMoveElementCommand(element, old_values, new_values)
+    @Slot(tuple, tuple)
+    def on_geometry_changed(self, new_values, old_values):
+        element = self.selected_element
+        command = ResizeAndMoveElementCommand(element, new_values, old_values)
         self.undo_stack.push(command)
       
 
