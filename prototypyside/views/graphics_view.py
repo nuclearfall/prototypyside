@@ -62,10 +62,8 @@ class DesignerGraphicsView(QGraphicsView):
         # self.update_min_scale()
 
     def gestureEvent(self, event: QGestureEvent) -> bool:
-        print(f"gestureEvent triggered {self._pinch_direction}")
         pinch = event.gesture(Qt.PinchGesture)
         if pinch:
-            print(f"gestureEvent triggered {self._pinch_direction}")
             self.handlePinchGesture(pinch)
             return True
         return False

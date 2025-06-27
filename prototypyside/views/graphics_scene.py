@@ -253,7 +253,6 @@ class ComponentGraphicsScene(QGraphicsScene):
     def mouseReleaseEvent(self, event: QGraphicsSceneMouseEvent):
         if self._dragging_item and self._drag_offset and self._dragging_start_pos:
             # use MoveElementCommand:
-            print("Triggering MoveElementCommand")
             command = MoveElementCommand(element=self._dragging_item, new_pos=self._dragging_item.pos(), old_pos=self._dragging_start_pos)
             self.tab.undo_stack.push(command)
         elif all([self._resizing, self.resizing_element, self.resize_start_scene_rect]):

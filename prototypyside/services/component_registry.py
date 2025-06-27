@@ -143,7 +143,6 @@ class ComponentRegistry(QObject):
             self._unique_names.add(obj.name)
 
         self.object_added.emit(pid)
-        print(f"Object {pid} registered")
         # Connect known signals. Consider defining a method on ComponentBase
         # (if you have one) that connects its signals to the registry,
         # or a dedicated signal connector.
@@ -170,7 +169,6 @@ class ComponentRegistry(QObject):
         # Registry handles name generation and registration
         self.generate_name(obj)
         self.register(obj)
-        print(f"{self.get(obj.pid).name} has been registered with pid {obj.pid}")
         # Registry handles initial parenting/relationship wiring
         template_pid = getattr(obj, "template_pid", None)
         if template_pid:
@@ -195,16 +193,13 @@ class ComponentRegistry(QObject):
         # Factory creates the raw clone object (assuming obj.clone() returns a new instance)
         if not hasattr(obj, 'clone') or not callable(obj.clone):
             raise TypeError(f"Object type {type(obj).__name__} does not have a callable 'clone' method.")
-        print(f"Clone pid before serialization {new_pid}")
         clone_data = obj.to_dict() # Serialize to dict
         clone_data["pid"] = new_pid # Override PID for the clone
         
         clone = obj.from_dict(clone_data) # Reconstruct using factory
-        print(f"Clone pid after serialization {clone.pid}")
         # clone.pid = new_pid
         self.generate_name(clone) # Registry handles name generation
         self.register(clone) # Registry registers the clone
-        print(f"Element exists: {self.get(new_pid)} clone from {self.get(obj.pid)}")
         # If the original object had a parent, attempt to attach the clone to the same parent
         template_pid = getattr(obj, "template_pid", None)
         if template_pid:
@@ -281,14 +276,10 @@ class ComponentRegistry(QObject):
 
         # Move to orphans
         self._orphans[obj.pid] = obj
-        print(f"Object {self._orphans[obj.pid]} is in _orphans")
 
         # Clean up name from _unique_names set
         if hasattr(obj, 'name') and obj.name and obj.name in self._unique_names:
             self._unique_names.discard(obj.name)
-
-        print(f"Object template at: {getattr(obj, 'template_pid', None)}")
-        print(f"{self.is_orphan(obj.pid)} is orphan?")
 
         del self._objects[pid]
         self.object_removed.emit(pid)
@@ -304,7 +295,6 @@ class ComponentRegistry(QObject):
 
         obj = self._orphans.pop(pid)
         self.register(obj) # Re-register
-        print(f"Waiting to reinsert {obj.pid} into {obj.template_pid}")
         template_pid = getattr(obj, "template_pid", None)
         if template_pid:
             try:

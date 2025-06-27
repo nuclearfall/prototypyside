@@ -211,9 +211,7 @@ class ComponentElement(QGraphicsObject):
         self.element_changed.emit()
 
     def itemChange(self, change, value):
-        print(f"[itemChange] Change: {change}, Value: {value}")
         return super().itemChange(change, value)
-
 
     def paint(self, painter: QPainter, option, widget=None):
         # Fill background

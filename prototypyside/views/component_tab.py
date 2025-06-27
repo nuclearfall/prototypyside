@@ -1,18 +1,16 @@
 # prototypyside/views/component_tab.py
 from functools import partial
-import json
-import csv
 from pathlib import Path
 from typing import Optional, List, Dict, Any, Union
 
 from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QDockWidget,
                                QListWidgetItem, QLabel, QPushButton, QComboBox,
-                               QSpinBox, QColorDialog, QFontDialog, QFileDialog, QMessageBox,
+                               QSpinBox, QFileDialog, QMessageBox,
                                QCheckBox, QGraphicsItem, QGraphicsView,
-                               QGraphicsScene, QToolBar, QLineEdit) # Added QToolBar for font/measure
-from PySide6.QtCore import Qt, Signal, Slot, QPointF, QRectF, QSizeF, QObject, QSize, QTimer # Removed QCoreApplication, QEvent, QKeySequence, QShortcut
-from PySide6.QtGui import (QPainter, QAction, QImage, QPixmap, QFont, QColor, QIcon, 
-                                QKeySequence, QShortcut, QUndoStack, QUndoGroup, QUndoCommand)
+                               QGraphicsScene, QToolBar, QLineEdit)
+from PySide6.QtCore import Qt, Signal, Slot, QPointF, QRectF, QSizeF, QObject, QSize, QTimer
+from PySide6.QtGui import (QPainter, QColor, QIcon, 
+                                QKeySequence, QShortcut, QUndoStack)
 
 # Import views components
 from prototypyside.views.palettes import ComponentListWidget
@@ -23,19 +21,17 @@ from prototypyside.views.graphics_view import DesignerGraphicsView
 # Import widgets
 from prototypyside.widgets.unit_field import UnitField
 # from prototypyside.widgets.font_toolbar import FontToolbar
-from prototypyside.widgets.page_size_selector import PageSizeSelector # Potentially remove if PageSizeDialog is used
 from prototypyside.widgets.pdf_export_dialog import PDFExportDialog
 from prototypyside.widgets.property_panel import PropertyPanel
 
-# Import models (no longer needed, using ComponentRegistry)
-# from prototypyside.models.component_template import ComponentTemplate
 from prototypyside.models.component_elements import (ComponentElement, TextElement, ImageElement)
 from prototypyside.services.app_settings import AppSettings
 from prototypyside.services.export_manager import ExportManager
 from prototypyside.services.property_setter import PropertySetter
 from prototypyside.services.geometry_setter import GeometrySetter
-from prototypyside.services.undo_commands import AddElementCommand, RemoveElementCommand, CloneElementCommand
-from prototypyside.utils.proto_helpers import issue_pid
+from prototypyside.services.undo_commands import (AddElementCommand, RemoveElementCommand, 
+            CloneElementCommand, ResizeTemplateCommand)
+
 class ComponentTab(QWidget):
     status_message_signal = Signal(str, str, int)
     tab_title_changed = Signal(str)
@@ -45,15 +41,11 @@ class ComponentTab(QWidget):
         self.undo_stack = QUndoStack(self)
         self.registry = registry
         self._template = template
-        print(f"Template set with pid {template.pid}")
 
         unit = template.width.unit
         print_dpi = template.dpi
         display_dpi = parent.settings.dpi
-        print(f"Units set as {unit} with dpi of {display_dpi}")
         self.settings = AppSettings(unit=unit, print_dpi=print_dpi, display_dpi=display_dpi)
-
-        print(f"settings should be loaded here: {self.settings} with dpi: {self.settings.dpi}")
 
         self.geometry_setter = GeometrySetter(self.undo_stack)
         self.property_setter = PropertySetter(self.undo_stack)
@@ -77,18 +69,12 @@ class ComponentTab(QWidget):
 
         self._refresh_scene()
 
-        # self.scene.selectionChanged.connect(self.on_selection_changed)
-        # self.scene.element_dropped.connect(self.add_element_from_drop)
-        # self.scene.element_cloned.connect(self.element_cloned)
-
     @property
     def template(self):
-        print(f"The template {self._template.pid} is assigned with name {self._template.name}")
         return self._template
 
     @property
     def template_pid(self):
-        print(f"The template {self._template.pid} is assigned with name {self._template.name}")
         return self._template.pid
     
     
@@ -113,10 +99,7 @@ class ComponentTab(QWidget):
         # Add toolbars to the container (adjust as per desired layout)
         # toolbar_container.addWidget(self.font_toolbar_widget)
         toolbar_container.addWidget(self.measure_toolbar)
-        # Assuming drawing_toolbar is also a QToolBar, it would be added similarly.
-        # For simplicity in this example, drawing_toolbar is implicitly handled if it's a QToolBar instance.
-        # If create_drawing_toolbar returns a QToolBar, add it here. Otherwise, it might be a floating one.
-        # Let's assume it's created as a floating toolbar for now, as in original.
+  
 
         main_layout.addLayout(toolbar_container)
 
@@ -209,20 +192,17 @@ class ComponentTab(QWidget):
         self.unit_selector.setCurrentText(self.settings.unit)
         self.unit_selector.currentTextChanged.connect(self.on_unit_change)
 
-
         # Snap to Grid
         self.snap_checkbox = QCheckBox("Snap to Grid")
         self.snap_checkbox.setChecked(True)
         self.snap_checkbox.stateChanged.connect(self.on_snap_toggle)
         self.snap_to_grid = True
 
-
         # Show Grid
         self.grid_checkbox = QCheckBox("Show Grid")
         self.grid_checkbox.setChecked(True)
         self.grid_checkbox.stateChanged.connect(self.on_grid_toggle)
         self.show_grid = True
-
 
         self.template_name_field = QLineEdit()
         self.template_name_field.setPlaceholderText(self.template.name)
@@ -251,10 +231,7 @@ class ComponentTab(QWidget):
         self.component_dpi_spin.setValue(self.template.dpi)
         self.component_dpi_spin.valueChanged.connect(self.on_template_dpi_changed)
 
-
         self.measure_toolbar.addWidget(QLabel("Template:"))
-
-
         self.measure_toolbar.addWidget(self.template_name_field)
         self.measure_toolbar.addWidget(QLabel("Width:"))
         self.measure_toolbar.addWidget(self.template_width_field)
@@ -296,9 +273,14 @@ class ComponentTab(QWidget):
             self.template.name = new_name
             self.tab_title_changed.emit(new_name)
 
-    @Slot(str, int)
+    @Slot(str, object)  # The value is a UnitStr
     def on_template_dimension_changed(self, dimension, value):
-        setattr(self.template, dimension, value)
+        old_width = self.template.width
+        old_height = self.template.height
+        new_width = value if dimension == "width_px" else old_width
+        new_height = value if dimension == "height_px" else old_height
+        command = ResizeTemplateCommand(self.template, new_width, new_height)
+        self.undo_stack.push(command)
         self._refresh_scene()
 
     def update_template_scene_rect(self):
@@ -346,27 +328,11 @@ class ComponentTab(QWidget):
         self.template.template_changed.emit()
         self.show_status_message(f"DPI updated to {new_dpi}.", "info")
 
-    @Slot(tuple)
-    def on_geometry_changed(self, change):
-        prop, values = change
-        if prop == "geometry":
-            x, y, w, h = values
-            element = self.selected_element
-            current_pos = element.pos()
-            current_rect = element.rect
-
-            # Determine if position changed
-            pos_changed = (current_pos.x() != x) or (current_pos.y() != y)
-            # Determine if rect size changed (assuming origin is always 0,0)
-            rect_changed = (current_rect.width() != w) or (current_rect.height() != h)
-
-            if pos_changed:
-                self.geometry_setter.set_pos(element, QPointF(x, y))
-            if rect_changed:
-                self.geometry_setter.set_rect(element, QRectF(0, 0, w, h))
-        else:
-            # handle other cases or raise error
-            pass
+    @Slot(object, tuple, tuple)
+    def on_geometry_changed(self, element, old_values, new_values):
+        command = ResizeAndMoveElementCommand(element, old_values, new_values)
+        self.undo_stack.push(command)
+      
 
     @Slot()
     def on_property_changed(self, change):

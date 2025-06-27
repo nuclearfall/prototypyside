@@ -41,7 +41,6 @@ class AddElementCommand(QUndoCommand):
                 w_physical = default_w_in
                 h_physical = default_h_in
 
-            print(f"Prior to adding to the Element, the template pid is {self.tab.template_pid}")
             # Build the QRectF in logical units
             new_rect = QRectF(0, 0, w_physical, h_physical)
             self.element = self.tab.registry.create(
@@ -52,7 +51,6 @@ class AddElementCommand(QUndoCommand):
                 parent=self.tab.template,
                 name=None
             )
-            print(f"Adding element {self.element.pid}, scene_pos is set to {self.scene_pos} to template {self.element.template_pid}")
 
         elif self.element is not None and self.tab.registry.is_orphan(self.element.pid):
             self.tab.registry.reinsert(self.element.pid)
@@ -142,6 +140,22 @@ class ResizeElementCommand(QUndoCommand):
     def redo(self):
         self.element.rect = self.new_rect
 
+class ResizeAndMoveElementCommand(QUndoCommand):
+    def __init__(self, element, new_values, old_values, description="Resize/Move Element"):
+        super().__init__(description)
+        self.element = element
+        self.new_pos, self.new_rect = new_values
+        self.old_pos, self.old_rect = old_values
+
+    def undo(self):
+        self.element.rect = self.old_rect
+        self.element.setPos(self.old_pos)
+
+    def redo(self):
+        print(f"Placing rect in undo stack with dimensions {self.new_rect} at position {self.new_pos}")
+        self.element.rect = self.new_rect
+        self.element.setPos(self.new_pos)
+
 class ChangeElementPropertyCommand(QUndoCommand):
     def __init__(self, element, change, description="Change Element Property"):
         super().__init__(description)
@@ -155,9 +169,22 @@ class ChangeElementPropertyCommand(QUndoCommand):
             setattr(self.element, self.prop, self.old_value)
 
     def redo(self):
-        print(f"{self.prop} has been changed to {self.new_value} from {self.old_value}")
         setattr(self.element, self.prop, self.new_value)
 
 class ResizeTemplateCommand(QUndoCommand):
-    def __init__(self, element, new_pos: QPointF, description="Move Element"):
+    def __init__(self, template, new_width: 'UnitStr', new_height: 'UnitStr', description="Resize Template"):
         super().__init__(description)
+        self.template = template
+        # Defensive copy of the old values
+        self.old_width = template.width
+        self.old_height = template.height
+        self.new_width = new_width
+        self.new_height = new_height
+
+    def redo(self):
+        self.template.width = self.new_width
+        self.template.height = self.new_height
+
+    def undo(self):
+        self.template.width = self.old_width
+        self.template.height = self.old_height

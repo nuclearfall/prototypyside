@@ -85,7 +85,6 @@ class ComponentTemplate(QGraphicsObject):
 
     def add_element(self, element) -> 'ComponentElement':
         # Use consistent z-value increments
-        print(f"Element added... {element.pid}:{element.name}")
         max_z = max([e.zValue() for e in self.elements], default=0)
         element.setZValue(max_z + 100)
         self.elements.append(element)
