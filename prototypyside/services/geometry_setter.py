@@ -33,7 +33,7 @@ class GeometrySetter:
         old_rect = element.rect
         old_values = [old_pos, old_rect]
         new_values = [new_pos, new_rect]
-        command = ResizeAndMoveElementCommand(element, old_values, new_values)
+        command = ResizeAndMoveElementCommand(element, new_values, old_values)
         self.undo_stack.push(command)
             # The command's redo() method will call element.setPos(new_pos)
             # which correctly handles emitting element_changed and calling update().

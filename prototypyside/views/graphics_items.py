@@ -32,12 +32,24 @@ class ResizeHandle(QGraphicsRectItem):
         self.setFlag(QGraphicsItem.ItemIgnoresParentOpacity, True)
         self.setAcceptedMouseButtons(Qt.LeftButton)  # ⬅️ Be explicit
         self.drag_started = False  # debounce flag
-        self.handle_type = handle_type
+        self._handle_type = handle_type
         self.parent_element = parent_item
         self.start_pos = QPointF()
         self.start_scene_rect = QRectF()
-
+        self.is_handle = True
+        self._handle_type = handle_type
         self.setCursor(self._get_cursor_for_handle_type(handle_type))
+
+    @property
+    def handle_type(self) -> HandleType:
+        """Return this handle's type (corner/side)."""
+        return self._handle_type
+
+    @handle_type.setter
+    def handle_type(self, value: HandleType):
+        self._handle_type = value
+        # Optionally update cursor or other state if changed
+        self.setCursor(self._get_cursor_for_handle_type(value))
 
     def _get_cursor_for_handle_type(self, handle_type: HandleType) -> QCursor:
         if handle_type in [HandleType.TOP_LEFT, HandleType.BOTTOM_RIGHT]:

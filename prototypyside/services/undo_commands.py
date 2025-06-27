@@ -114,7 +114,7 @@ class MoveElementCommand(QUndoCommand):
     def __init__(self, element, new_pos: QPointF, old_pos: QPointF = None, description="Move Element"):
         super().__init__(description)
         self.element = element
-        self.old_pos = element.pos()
+        self.old_pos = old_pos
         if old_pos is not None:
             self.old_pos = old_pos
         self.new_pos = new_pos

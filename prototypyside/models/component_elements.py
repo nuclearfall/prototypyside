@@ -160,55 +160,172 @@ class ComponentElement(QGraphicsObject):
     def unit(self):
         return self._unit
 
-
     @property
     def rect(self):
-        dpi = self._dpi
+        # Always returns rect in px, local coordinates (0,0)
         return QRectF(
-            0,
-            0,
-            self._width.to("px", dpi),
-            self._height.to("px", dpi)
+            0, 0,
+            self._width.to("px", self._dpi),
+            self._height.to("px", self._dpi)
         )
 
     @rect.setter
     def rect(self, qrectf: QRectF):
-        """Accepts a QRectF in px, converts to logical units for storage."""
-        dpi = self._dpi
-        # Convert px to logical units (e.g. inches)
-        self._width = UnitStr(qrectf.width() / dpi, unit="in", dpi=dpi)
-        self._height = UnitStr(qrectf.height() / dpi, unit="in", dpi=dpi)
-        # For position, if you also want to set:
-        self._x = UnitStr(0, unit="in", dpi=dpi)
-        self._y = UnitStr(0, unit="in", dpi=dpi)
+        # Accepts a QRectF in px; updates logical size, but never position!
+        self.prepareGeometryChange()
+        self._width = UnitStr(qrectf.width() / self._dpi, unit="in", dpi=self._dpi)
+        self._height = UnitStr(qrectf.height() / self._dpi, unit="in", dpi=self._dpi)
         self.element_changed.emit()
         self.update()
 
-    def boundingRect(self) -> QRectF:
-        return QRectF(0, 0, self._width.to("px", self._dpi), self._height.to("px", self._dpi))
-
-
-    # --- End Property Getters and Setters ---
-
-
     def setPos(self, *args):
-        """
-        Accepts a QPointF (in px), stores internally as UnitStr (physical units),
-        and updates the QGraphicsObject position.
-        """
+        # Store both logical and px position
         if len(args) == 1 and isinstance(args[0], QPointF):
             pt_px = args[0]
         elif len(args) == 2:
             pt_px = QPointF(args[0], args[1])
         else:
             raise ValueError("setPos expects QPointF or x, y")
-
-        dpi = self._dpi
-        # Convert px to physical units for internal storage (e.g., in)
-        self._x = UnitStr(pt_px.x() / dpi, unit="in", dpi=dpi)
-        self._y = UnitStr(pt_px.y() / dpi, unit="in", dpi=dpi)
-        super().setPos(pt_px)  # Update graphics position
+        self._x = UnitStr(pt_px.x() / self._dpi, unit="in", dpi=self._dpi)
+        self._y = UnitStr(pt_px.y() / self._dpi, unit="in", dpi=self._dpi)
+        super().setPos(pt_px)
         self.element_changed.emit()
+        self.update()
+
+    def resize_from_handle(self, handle_type: HandleType, delta: QPointF, start_scene_rect: QRectF):
+        """Resize by handle: supports all 8 directions with proper boundary constraints."""
+        self.prepareGeometryChange()
+        dpi = getattr(self, "_dpi", 300)
+        scene = self.scene()
+        scene_rect = scene.sceneRect() if scene else QRectF()
+
+        # 1. Convert starting rect and delta to local coordinates
+        local_start_rect = self.mapRectFromScene(start_scene_rect)
+        new_rect = QRectF(local_start_rect)
+        delta_local = self.mapFromScene(delta) - self.mapFromScene(QPointF(0, 0))
+
+        # 2. Update rect based on handle type
+        if handle_type == HandleType.TOP_LEFT:
+            new_rect.setTopLeft(new_rect.topLeft() + delta_local)
+        elif handle_type == HandleType.TOP_CENTER:
+            new_rect.setTop(new_rect.top() + delta_local.y())
+        elif handle_type == HandleType.TOP_RIGHT:
+            new_rect.setTopRight(new_rect.topRight() + delta_local)
+        elif handle_type == HandleType.RIGHT_CENTER:
+            new_rect.setRight(new_rect.right() + delta_local.x())
+        elif handle_type == HandleType.BOTTOM_RIGHT:
+            new_rect.setBottomRight(new_rect.bottomRight() + delta_local)
+        elif handle_type == HandleType.BOTTOM_CENTER:
+            new_rect.setBottom(new_rect.bottom() + delta_local.y())
+        elif handle_type == HandleType.BOTTOM_LEFT:
+            new_rect.setBottomLeft(new_rect.bottomLeft() + delta_local)
+        elif handle_type == HandleType.LEFT_CENTER:
+            new_rect.setLeft(new_rect.left() + delta_local.x())
+
+        # 3. Enforce minimum size (10x10 pixels)
+        min_size = 10
+        if new_rect.width() < min_size:
+            if handle_type in (HandleType.LEFT_CENTER, HandleType.TOP_LEFT, HandleType.BOTTOM_LEFT):
+                new_rect.setLeft(new_rect.right() - min_size)
+            else:
+                new_rect.setRight(new_rect.left() + min_size)
+        if new_rect.height() < min_size:
+            if handle_type in (HandleType.TOP_CENTER, HandleType.TOP_LEFT, HandleType.TOP_RIGHT):
+                new_rect.setTop(new_rect.bottom() - min_size)
+            else:
+                new_rect.setBottom(new_rect.top() + min_size)
+
+        # 4. Constrain to scene boundaries
+        new_scene_rect = self.mapRectToScene(new_rect)
+        
+        # Left boundary
+        if new_scene_rect.left() < scene_rect.left():
+            offset = scene_rect.left() - new_scene_rect.left()
+            if handle_type in (HandleType.LEFT_CENTER, HandleType.TOP_LEFT, HandleType.BOTTOM_LEFT):
+                new_rect.setLeft(new_rect.left() + offset)
+            else:
+                new_rect.setRight(new_rect.right() - offset)
+        
+        # Top boundary
+        if new_scene_rect.top() < scene_rect.top():
+            offset = scene_rect.top() - new_scene_rect.top()
+            if handle_type in (HandleType.TOP_CENTER, HandleType.TOP_LEFT, HandleType.TOP_RIGHT):
+                new_rect.setTop(new_rect.top() + offset)
+            else:
+                new_rect.setBottom(new_rect.bottom() - offset)
+        
+        # Right boundary
+        if new_scene_rect.right() > scene_rect.right():
+            offset = new_scene_rect.right() - scene_rect.right()
+            new_rect.setRight(new_rect.right() - offset)
+        
+        # Bottom boundary
+        if new_scene_rect.bottom() > scene_rect.bottom():
+            offset = new_scene_rect.bottom() - scene_rect.bottom()
+            new_rect.setBottom(new_rect.bottom() - offset)
+
+        # 5. Snap to grid if enabled
+        if hasattr(scene, "is_snap_to_grid") and scene.is_snap_to_grid:
+            snapped_tl = scene.snap_to_grid(self.mapToScene(new_rect.topLeft()))
+            snapped_br = scene.snap_to_grid(self.mapToScene(new_rect.bottomRight()))
+            new_rect = self.mapRectFromScene(QRectF(snapped_tl, snapped_br))
+
+        # 6. Update position and dimensions
+        new_scene_pos = self.mapToScene(new_rect.topLeft())
+        self.setPos(new_scene_pos)
+        
+        # Update logical units (convert from pixels to inches)
+        self._x = UnitStr(new_scene_pos.x() / dpi, unit="in", dpi=dpi)
+        self._y = UnitStr(new_scene_pos.y() / dpi, unit="in", dpi=dpi)
+        self._width = UnitStr(new_rect.width() / dpi, unit="in", dpi=dpi)
+        self._height = UnitStr(new_rect.height() / dpi, unit="in", dpi=dpi)
+        
+        # Update the local rect
+        self._rect = QRectF(0, 0, new_rect.width(), new_rect.height())
+        
+        # Final updates
+        self.update_handles()
+        self.element_changed.emit()
+        self.update()
+
+
+    # --- Rotation/Flip support ---
+    @property
+    def rotation(self):
+        return self._rotation
+
+    @rotation.setter
+    def rotation(self, angle_deg):
+        self._rotation = angle_deg % 360
+        self.setTransform(self._build_transform())
+        self.element_changed.emit()
+
+    def flip_x(self):
+        self._flipped_x = not self._flipped_x
+        self.setTransform(self._build_transform())
+        self.element_changed.emit()
+
+    def flip_y(self):
+        self._flipped_y = not self._flipped_y
+        self.setTransform(self._build_transform())
+        self.element_changed.emit()
+
+    def _build_transform(self):
+        t = QTransform()
+        cx = self._width.to("px", self._dpi) / 2
+        cy = self._height.to("px", self._dpi) / 2
+        t.translate(cx, cy)
+        if self._flipped_x:
+            t.scale(-1, 1)
+        if self._flipped_y:
+            t.scale(1, -1)
+        t.rotate(self._rotation)
+        t.translate(-cx, -cy)
+        return t
+
+    def boundingRect(self):
+        return QRectF(0, 0, self._width.to("px", self._dpi), self._height.to("px", self._dpi))
+
 
     def itemChange(self, change, value):
         return super().itemChange(change, value)
@@ -352,73 +469,73 @@ class ComponentElement(QGraphicsObject):
             if handle:
                 handle.setPos(pos)
 
-    def resize_from_handle(self, handle: ResizeHandle, delta: QPointF, start_scene_rect: QRectF):
-        self.prepareGeometryChange()
+    # def resize_from_handle(self, handle: ResizeHandle, delta: QPointF, start_scene_rect: QRectF):
+    #     self.prepareGeometryChange()
 
-        handle_type = handle.handle_type
+    #     handle_type = handle.handle_type
 
-        # Convert the scene-based starting rect into local item coordinates
-        local_start_rect = self.mapRectFromScene(start_scene_rect)
-        new_rect = QRectF(local_start_rect)
+    #     # Convert the scene-based starting rect into local item coordinates
+    #     local_start_rect = self.mapRectFromScene(start_scene_rect)
+    #     new_rect = QRectF(local_start_rect)
 
-        # Convert delta to local coordinates
-        delta_local = self.mapFromScene(self.mapToScene(QPointF(0, 0)) + delta) - QPointF(0, 0)
+    #     # Convert delta to local coordinates
+    #     delta_local = self.mapFromScene(self.mapToScene(QPointF(0, 0)) + delta) - QPointF(0, 0)
 
-        # Adjust dimensions based on which handle is used
-        if handle_type == HandleType.TOP_LEFT:
-            new_rect.setTopLeft(new_rect.topLeft() + delta_local)
-        elif handle_type == HandleType.TOP_RIGHT:
-            new_rect.setTopRight(new_rect.topRight() + delta_local)
-        elif handle_type == HandleType.BOTTOM_LEFT:
-            new_rect.setBottomLeft(new_rect.bottomLeft() + delta_local)
-        elif handle_type == HandleType.BOTTOM_RIGHT:
-            new_rect.setBottomRight(new_rect.bottomRight() + delta_local)
-        elif handle_type == HandleType.TOP_CENTER:
-            new_rect.setTop(new_rect.top() + delta_local.y())
-        elif handle_type == HandleType.BOTTOM_CENTER:
-            new_rect.setBottom(new_rect.bottom() + delta_local.y())
-        elif handle_type == HandleType.LEFT_CENTER:
-            new_rect.setLeft(new_rect.left() + delta_local.x())
-        elif handle_type == HandleType.RIGHT_CENTER:
-            new_rect.setRight(new_rect.right() + delta_local.x())
+    #     # Adjust dimensions based on which handle is used
+    #     if handle_type == HandleType.TOP_LEFT:
+    #         new_rect.setTopLeft(new_rect.topLeft() + delta_local)
+    #     elif handle_type == HandleType.TOP_RIGHT:
+    #         new_rect.setTopRight(new_rect.topRight() + delta_local)
+    #     elif handle_type == HandleType.BOTTOM_LEFT:
+    #         new_rect.setBottomLeft(new_rect.bottomLeft() + delta_local)
+    #     elif handle_type == HandleType.BOTTOM_RIGHT:
+    #         new_rect.setBottomRight(new_rect.bottomRight() + delta_local)
+    #     elif handle_type == HandleType.TOP_CENTER:
+    #         new_rect.setTop(new_rect.top() + delta_local.y())
+    #     elif handle_type == HandleType.BOTTOM_CENTER:
+    #         new_rect.setBottom(new_rect.bottom() + delta_local.y())
+    #     elif handle_type == HandleType.LEFT_CENTER:
+    #         new_rect.setLeft(new_rect.left() + delta_local.x())
+    #     elif handle_type == HandleType.RIGHT_CENTER:
+    #         new_rect.setRight(new_rect.right() + delta_local.x())
 
-        # Enforce minimum size
-        min_w, min_h = 10, 10
-        if new_rect.width() < min_w:
-            new_rect.setWidth(min_w)
-        if new_rect.height() < min_h:
-            new_rect.setHeight(min_h)
+    #     # Enforce minimum size
+    #     min_w, min_h = 10, 10
+    #     if new_rect.width() < min_w:
+    #         new_rect.setWidth(min_w)
+    #     if new_rect.height() < min_h:
+    #         new_rect.setHeight(min_h)
 
-        # ✅ Snap to grid if enabled in the scene
-        scene = self.scene()
-        if hasattr(scene, "is_snap_to_grid") and scene.is_snap_to_grid:
-            top_left = scene.snap_to_grid(self.mapToScene(new_rect.topLeft()))
-            bottom_right = scene.snap_to_grid(self.mapToScene(new_rect.bottomRight()))
-            new_rect = self.mapRectFromScene(QRectF(top_left, bottom_right))
+    #     # ✅ Snap to grid if enabled in the scene
+    #     scene = self.scene()
+    #     if hasattr(scene, "is_snap_to_grid") and scene.is_snap_to_grid:
+    #         top_left = scene.snap_to_grid(self.mapToScene(new_rect.topLeft()))
+    #         bottom_right = scene.snap_to_grid(self.mapToScene(new_rect.bottomRight()))
+    #         new_rect = self.mapRectFromScene(QRectF(top_left, bottom_right))
 
-        # Calculate how much the top-left moved
-        top_left_offset = new_rect.topLeft() - self.rect.topLeft()
+    #     # Calculate how much the top-left moved
+    #     top_left_offset = new_rect.topLeft() - self.rect.topLeft()
 
-        # --- UNITSTR ADJUSTMENT: update logical model from new px values ---
-        dpi = getattr(self, "_dpi", 300)
-        self._width = UnitStr(new_rect.width() / dpi, unit="in", dpi=dpi)
-        self._height = UnitStr(new_rect.height() / dpi, unit="in", dpi=dpi)
-        # You may also want to update _x and _y if origin moves:
-        # If your model stores _x, _y in physical units:
-        if hasattr(self, "_x") and hasattr(self, "_y"):
-            self._x = UnitStr(self.pos().x() / dpi, unit="in", dpi=dpi)
-            self._y = UnitStr(self.pos().y() / dpi, unit="in", dpi=dpi)
+    #     # --- UNITSTR ADJUSTMENT: update logical model from new px values ---
+    #     dpi = getattr(self, "_dpi", 300)
+    #     self._width = UnitStr(new_rect.width() / dpi, unit="in", dpi=dpi)
+    #     self._height = UnitStr(new_rect.height() / dpi, unit="in", dpi=dpi)
+    #     # You may also want to update _x and _y if origin moves:
+    #     # If your model stores _x, _y in physical units:
+    #     if hasattr(self, "_x") and hasattr(self, "_y"):
+    #         self._x = UnitStr(self.pos().x() / dpi, unit="in", dpi=dpi)
+    #         self._y = UnitStr(self.pos().y() / dpi, unit="in", dpi=dpi)
 
-        # Resize the internal rect (scene/display)
-        self.rect = QRectF(0, 0, new_rect.width(), new_rect.height())
+    #     # Resize the internal rect (scene/display)
+    #     self.rect = QRectF(0, 0, new_rect.width(), new_rect.height())
 
-        # Move the item only if top-left changed
-        if top_left_offset != QPointF(0, 0):
-            self.setPos(self.pos() + top_left_offset)
+    #     # Move the item only if top-left changed
+    #     if top_left_offset != QPointF(0, 0):
+    #         self.setPos(self.pos() + top_left_offset)
 
-        self.update()
-        self.update_handles()
-        self.element_changed.emit()
+    #     self.update()
+    #     self.update_handles()
+    #     self.element_changed.emit()
 
 
     def clone(self):

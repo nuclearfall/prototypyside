@@ -10,7 +10,7 @@ from prototypyside.utils.unit_converter import parse_dimension
 from prototypyside.utils.unit_str import UnitStr
 from prototypyside.utils.graphics_item_helpers import is_movable
 from prototypyside.views.graphics_items import ResizeHandle
-from prototypyside.services.undo_commands import MoveElementCommand, ResizeElementCommand
+from prototypyside.services.undo_commands import MoveElementCommand, ResizeElementCommand, ResizeAndMoveElementCommand
 
 from typing import Optional, TYPE_CHECKING
 import math
@@ -42,12 +42,13 @@ class ComponentGraphicsScene(QGraphicsScene):
 
         self._resizing = False
         self._dragging_item = None
+        self.resize_handle = None
+        self.resizing_element = None
+        self.resize_start_item_pos = None
+        self.resize_start_item_rect = None
         self._drag_offset = None
         self._dragging_start_pos = None
         self.resize_handle_type = None
-        self.resizing_element = None
-        self.resize_start_scene_pos = None
-        self.resize_start_scene_rect = None
         self.measure_by = "in"
         self.is_snap_to_grid = True
 
@@ -203,13 +204,15 @@ class ComponentGraphicsScene(QGraphicsScene):
     def mousePressEvent(self, event: QGraphicsSceneMouseEvent):
         item = self.itemAt(event.scenePos(), self.views()[0].transform())
 
-        # Handle resize logic (unchanged)
-        if isinstance(item, ResizeHandle):
+        if hasattr(item, 'is_handle') and item.is_handle:  # Your ResizeHandle flag
+            print("Entering resize event")
             self._resizing = True
             self.resize_handle = item
             self.resizing_element = item.parentItem()
-            self.resize_start_scene_pos = event.scenePos()
-            self.resize_start_scene_rect = self.resizing_element.sceneBoundingRect()
+            # Save local position and rect at drag start (not sceneBoundingRect)
+            self.resize_start_item_pos = self.resizing_element.pos()
+            self.resize_start_item_rect = self.resizing_element.rect
+            event.accept()
             return
 
         # Alt+click duplication
@@ -221,55 +224,61 @@ class ComponentGraphicsScene(QGraphicsScene):
             event.accept()
             return
 
-        # normal click/drag
-        if is_movable(item):
+        if hasattr(item, 'is_movable') and item.is_movable:  # For your item type
             self._dragging_item = item
-            self._dragging_start_pos = item.pos()
             self._drag_offset = event.scenePos() - item.pos()
+            event.accept()
+            return
 
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event: QGraphicsSceneMouseEvent):
         if self._resizing and self.resizing_element:
-            delta = event.scenePos() - self.resize_start_scene_pos
+            # Calculate delta from starting mouse position (absolute is fine with the fixed resize_from_handle)
+            current_scene_pos = event.scenePos()
+            starting_scene_pos = self.resizing_element.mapToScene(self.resize_handle.pos())
+            delta_scene = current_scene_pos - starting_scene_pos
+            
+            # Get the element's current scene rect
+            scene_rect = self.resizing_element.mapRectToScene(self.resizing_element.rect)
+            
             self.resizing_element.resize_from_handle(
-                self.resize_handle,
-                delta,
-                self.resize_start_scene_rect
+                self.resize_handle.handle_type,
+                delta_scene,
+                scene_rect
             )
+            event.accept()
             return
 
         if self._dragging_item:
             new_pos = event.scenePos() - self._drag_offset
-            if self.is_snap_to_grid:
-                new_pos = self.snap_to_grid(new_pos)
             self._dragging_item.setPos(new_pos)
+            event.accept()
             return
 
         super().mouseMoveEvent(event)
-
-
-
     def mouseReleaseEvent(self, event: QGraphicsSceneMouseEvent):
-        if self._dragging_item and self._drag_offset and self._dragging_start_pos:
-            # use MoveElementCommand:
-            command = MoveElementCommand(element=self._dragging_item, new_pos=self._dragging_item.pos(), old_pos=self._dragging_start_pos)
-            self.tab.undo_stack.push(command)
-        elif all([self._resizing, self.resizing_element, self.resize_start_scene_rect]):
-            # use ResizeElementCommand:
-            command = ResizeElementCommand(element=self.resizing_element, new_rect=self.resizing_element.rect, 
-                        old_rect=self.resize_start_scene_rect)
-            self.tab.undo_stack.push(command)
-        self._dragging_start_pos = None
-        self._dragging_item = None
-        self._drag_offset = None
+        # Commit move to undo stack (if needed)
+        if self._dragging_item and self._drag_offset is not None:
+            old_pos = self._dragging_item._x, self._dragging_item._y  # Logical units
+            new_pos = self._dragging_item._x, self._dragging_item._y
+            # Push a MoveElementCommand here if using undo/redo
+            self.tab.undo_stack.push(MoveElementCommand(self._draggin_item, new_pos, old_pos))
+        elif self._resizing and self.resizing_element and self.resize_start_item_rect is not None:
+            old_values = (self.resize_start_item_pos, self.resize_start_item_rect)
+            new_values = (self.resizing_element.pos(), self.resizing_element.rect)
+            self.tab.undo_stack.push(ResizeAndMoveElementCommand(
+                self.resizing_element, new_values, old_values))
+            pass  # Implement your undo/redo integration
+
+        # Reset state
         self._resizing = False
         self.resize_handle = None
         self.resizing_element = None
-        self.resize_start_scene_rect = None
-        self.resize_start_scene_pos = None
-        self._alt_drag_duplicate = None
-        self._alt_drag_started = False
+        self.resize_start_item_pos = None
+        self.resize_start_item_rect = None
+        self._dragging_item = None
+        self._drag_offset = None
 
         super().mouseReleaseEvent(event)
 
