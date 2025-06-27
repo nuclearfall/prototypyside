@@ -7,19 +7,40 @@ from typing import Optional, List, Dict, Any
 
 from PySide6.QtWidgets import (QMainWindow, QDockWidget, QTabWidget, QWidget,
                                QVBoxLayout, QLabel, QFileDialog, QMessageBox,
-                               QToolBar, QPushButton, QHBoxLayout) # Added QPushButton, QHBoxLayout for temporary property panel layout
-from PySide6.QtCore import Qt, Signal, Slot, QTimer
+                               QToolBar, QPushButton, QHBoxLayout, QSizePolicy) # Added QPushButton, QHBoxLayout for temporary property panel layout
+from PySide6.QtCore import Qt, Signal, Slot, QTimer, QStandardPaths
 from PySide6.QtGui import QIcon, QAction, QKeySequence, QShortcut, QUndoStack, QUndoGroup, QUndoCommand
 
 # Import the new ComponentTab
 from prototypyside.views.component_tab import ComponentTab
+from prototypyside.views.layout_tab import LayoutTab
 
 # Other imports that are still needed for MainDesignerWindow's global concerns
 # (e.g., AppSettings if it's truly global, not per-tab)
 from prototypyside.services.app_settings import AppSettings
 from prototypyside.widgets.page_size_dialog import PageSizeDialog # Used in New Template dialog
-from prototypyside.services.component_registry import ComponentRegistry
+from prototypyside.services.proto_registry import RootRegistry, ProtoRegistry
 
+def MetaKeySequence(key: str) -> QKeySequence:
+    """
+    Returns a QKeySequence using ⌘ on macOS and Ctrl elsewhere.
+
+    :param key: a non‐empty string representing the key (e.g. "S", "Shift+P")
+    :raises ValueError: if key is empty or the resulting sequence is invalid
+    """
+    if not isinstance(key, str) or not key.strip():
+        raise ValueError("MetaKeySequence: `key` must be a non-empty string")
+
+    is_mac = sys.platform.startswith("darwin")
+    prefix = "Meta" if is_mac else "Ctrl"
+    seq_str = f"{prefix}+{key}"
+
+    # 3. Try to construct it, then verify it parsed to something non-empty
+    seq = QKeySequence(seq_str)
+    if seq.isEmpty():
+        raise ValueError(f"MetaKeySequence: invalid shortcut '{seq_str}'")
+
+    return seq
 
 class MainDesignerWindow(QMainWindow):
     def __init__(self):
@@ -30,8 +51,8 @@ class MainDesignerWindow(QMainWindow):
         self.setMinimumSize(800, 600)
 
         # Main application settings, might be shared or passed to tabs
-        self.settings = AppSettings(unit='px', display_dpi=300, print_dpi=300)
-        self.registry = ComponentRegistry()
+        self.settings = AppSettings(unit='px', display_dpi=96, print_dpi=300)
+        self.registry = RootRegistry(settings=self.settings)
         self.tab_widget: Optional[QTabWidget] = None
         self.palette_dock: Optional[QDockWidget] = None
         self.layers_dock: Optional[QDockWidget] = None
@@ -39,13 +60,22 @@ class MainDesignerWindow(QMainWindow):
 
         self.cli_mode = False # Still managed by main window
 
+        # Autosave every 5 minutes (300 000 ms):
+        self._autosave_timer = QTimer(self)
+        self._autosave_timer.setInterval(5 * 60 * 1000)
+        self._autosave_timer.timeout.connect(self._auto_save_current_tab)
+        self._autosave_timer.start()
+
         self.setup_ui()
         self.setup_status_bar()
-        self.create_menus()
+        self.setup_actions_and_menus()
 
-        # Add initial tab
+        # Add initial tabs
         self.add_new_component_tab()
+        self.add_new_layout_tab()
+        print(f"Currently open globally {self.registry.get_all()}")
 
+    ### GUI Setup ###
     def setup_ui(self):
         self.tab_widget = QTabWidget()
         self.tab_widget.setTabsClosable(True)
@@ -56,30 +86,49 @@ class MainDesignerWindow(QMainWindow):
         self.setup_dock_widgets()
 
     def setup_dock_widgets(self):
-        # Toolbar Dock
-        self.toolbar_dock = QDockWidget("", self)
-        self.addDockWidget(Qt.TopDockWidgetArea, self.toolbar_dock)
-        self.toolbar_dock.setFeatures(QDockWidget.NoDockWidgetFeatures)
-        self.toolbar_dock.setTitleBarWidget(QWidget())
-        self.toolbar_dock.setFeatures(QDockWidget.NoDockWidgetFeatures)
-        # Component Palette Dock
-        self.palette_dock = QDockWidget("Components", self)
-        # The actual palette widget will be dynamic based on the active tab
-        self.palette_dock.setMinimumWidth(150)
-        self.addDockWidget(Qt.LeftDockWidgetArea, self.palette_dock)
-
-        # Properties Dock
+        # Create dock widgets
+        self.toolbar_dock = QDockWidget("Toolbar", self)
+        self.palette_dock = QDockWidget("Palette", self)
         self.properties_dock = QDockWidget("Properties", self)
-        # The actual property panel widget will be dynamic based on the active tab
-        self.properties_dock.setMinimumWidth(150)
+        self.layers_dock = QDockWidget("Layers", self)
+
+        # List of all dock widgets
+        all_docks = [
+            ("toolbar", self.toolbar_dock),
+            ("palette", self.palette_dock),
+            ("properties", self.properties_dock),
+            ("layers", self.layers_dock),
+        ]
+
+        # Assign a safe fallback widget to each dock
+        for name, dock in all_docks:
+            fallback = QWidget()
+            fallback.setObjectName(f"{name}_fallback")
+            layout = QVBoxLayout(fallback)
+            layout.setContentsMargins(0, 0, 0, 0)
+            layout.addStretch(1)
+            fallback.setLayout(layout)
+            fallback.setMinimumSize(1, 1)
+            dock.setWidget(fallback)
+
+        # Add docks to the main window
+        self.addDockWidget(Qt.TopDockWidgetArea, self.toolbar_dock)
+        self.addDockWidget(Qt.LeftDockWidgetArea, self.palette_dock)
         self.addDockWidget(Qt.RightDockWidgetArea, self.properties_dock)
 
-        # Layers Dock
-        self.layers_dock = QDockWidget("Layers", self)
-        # The actual layers list widget will be dynamic based on the active tab
-        self.layers_dock.setMinimumWidth(100)
-        self.layers_dock.setMaximumWidth(300)
-        self.addDockWidget(Qt.LeftDockWidgetArea, self.layers_dock)
+        # Optional: only add layers dock if actively used
+        self.addDockWidget(Qt.RightDockWidgetArea, self.layers_dock) 
+        # Optional dock features setup
+        self.toolbar_dock.setFeatures(QDockWidget.NoDockWidgetFeatures)
+        self.toolbar_dock.setTitleBarWidget(QWidget())  # hide title bar
+
+        # Log initial sizing for diagnostics
+        for name, dock in all_docks:
+            w = dock.widget()
+            if w:
+                print(f"{name}_dock widget: sizeHint={w.sizeHint()}, minSize={w.minimumSize()}, maxSize={w.maximumSize()}")
+            else:
+                print(f"{name}_dock widget: None assigned")
 
     def setup_status_bar(self):
         self.statusBar = self.statusBar()
@@ -113,29 +162,40 @@ class MainDesignerWindow(QMainWindow):
         self.status_label.setStyleSheet("color: black;")
         self.status_label.setText("")
 
-    def create_menus(self):
+    def setup_actions_and_menus(self):
+        # 1. File Menu
         file_menu = self.menuBar().addMenu("&File")
 
-        new_action = file_menu.addAction("&New Template Tab")
+        new_action = file_menu.addAction("&New Component Tab")
         new_action.triggered.connect(self.add_new_component_tab)
 
-        open_action = file_menu.addAction("&Open Template in New Tab...")
-        open_action.triggered.connect(self.open_template_in_new_tab)
+        new_action = file_menu.addAction("New &Layout Tab")
+        new_action.triggered.connect(self.add_new_layout_tab)
+
+        open_act = file_menu.addAction("&Open")
+        open_act.setShortcut(QKeySequence.Open)
+        open_act.triggered.connect(self.open_template)
 
         file_menu.addSeparator()
 
-        save_action = file_menu.addAction("&Save Current Tab Template...")
-        save_action.triggered.connect(self.save_current_tab_template)
+        save_act = file_menu.addAction("&Save")
+        save_act.setShortcut(QKeySequence.Save)
+        save_act.triggered.connect(self.save_template)
+
+        save_as_act = file_menu.addAction("Save &As…")
+        save_as_act.setShortcut(QKeySequence.SaveAs)
+        save_as_act.triggered.connect(self.save_as_template)
+
+
+        file_menu.addSeparator()
 
         import_data_action = file_menu.addAction("Import &Data (CSV) for Current Tab...")
         import_data_action.triggered.connect(self.import_csv_for_current_tab)
 
-        file_menu.addSeparator()
-
         export_png_action = file_menu.addAction("&Export Current Tab as PNG...")
         export_png_action.triggered.connect(self.export_current_tab_png)
 
-        export_pdf_action = file_menu.addAction("Export Current Tab as &PDF...")
+        export_pdf_action = file_menu.addAction("Export Current Tab as PDF...")
         export_pdf_action.triggered.connect(self.export_current_tab_pdf)
 
         file_menu.addSeparator()
@@ -143,59 +203,237 @@ class MainDesignerWindow(QMainWindow):
         exit_action = file_menu.addAction("E&xit")
         exit_action.triggered.connect(self.close)
 
-        undo_action = self.undo_group.createUndoAction(self, "&Undo")
-        undo_action.setShortcut(QKeySequence.Undo)
-
-        redo_action = self.undo_group.createRedoAction(self, "&Redo")
-        redo_action.setShortcut(QKeySequence.Redo)
-
+        # ————— Edit Menu —————
         edit_menu = self.menuBar().addMenu("&Edit")
-        edit_menu.addAction(undo_action)
-        edit_menu.addAction(redo_action)
-        undo_action.setShortcutContext(Qt.ApplicationShortcut)
-        redo_action.setShortcutContext(Qt.ApplicationShortcut)
+
+        # 1) Undo / Redo
+        undo_act = self.undo_group.createUndoAction(self, "&Undo")
+        undo_act.setShortcut(QKeySequence.Undo)
+        redo_act = self.undo_group.createRedoAction(self, "&Redo")
+        redo_act.setShortcut(QKeySequence.Redo)
+
+        edit_menu.addActions([undo_act, redo_act])
+        edit_menu.addSeparator()
+
+        # 2) Copy / Cut / Paste
+        copy_act = QAction("&Copy", self)
+        copy_act.setShortcut(QKeySequence.Copy)
+        copy_act.triggered.connect(self.on_copy)
+
+        cut_act = QAction("Cu&t", self)
+        cut_act.setShortcut(QKeySequence.Cut)
+        cut_act.triggered.connect(self.on_cut)
+
+        paste_act = QAction("&Paste", self)
+        paste_act.setShortcut(QKeySequence.Paste)
+        paste_act.triggered.connect(self.on_paste)
+
+        edit_menu.addActions([copy_act, cut_act, paste_act])
+
+        # 3) Shortcuts should fire even when menu isn’t open
+        for act in (copy_act, cut_act, paste_act,
+                    undo_act, redo_act):
+            act.setShortcutContext(Qt.ApplicationShortcut)
+            self.addAction(act)
+
+        # ———— Project Menu ———— #
+        proj_menu = self.menuBar().addMenu("Pro&ject")
+
+        save_proj_act = QAction("Save Project...", self)
+        save_proj_act.setShortcut(MetaKeySequence("Shift+S"))
+        save_proj_act.triggered.connect(self.on_save_project)
+        proj_menu.addAction(save_proj_act)
+
+        open_proj_act = QAction("Open Project...", self)
+        open_proj_act.setShortcut(MetaKeySequence("Shift+O"))
+        open_proj_act.triggered.connect(self.on_open_project)
+        proj_menu.addAction(open_proj_act)
+
+        close_proj_act = QAction("&Close Project", self)
+        close_proj_act.triggered.connect(self.on_close_project)
+        proj_menu.addAction(close_proj_act)
+
+    # ———— Tab Handling ———— #
+    def _auto_save_current_tab(self):
+        pass
+        # tab = self.get_current_tab()
+        # if tab is None:
+        #     return
+
+        # # Figure out a safe temp directory
+        # tmp_dir = QStandardPaths.writableLocation(QStandardPaths.TempLocation)
+        # # Name it by PID so each template has its own autosave
+        # filename = f"autosave-{tab.template.pid}.json"
+        # tmp_path = Path(tmp_dir) / filename
+
+        # try:
+        #     # Fetch a dict just for this template
+        #     data = self.registry.to_dict(root_pid=tab.template.pid)
+        #     # Write atomically via QSaveFile
+        #     saver = QSaveFile(str(tmp_path), self)
+        #     if not saver.open(QSaveFile.WriteOnly | QSaveFile.Text):
+        #         raise IOError(f"Cannot open {tmp_path}")
+        #     saver.write(json.dumps(data, indent=2).encode("utf-8"))
+        #     if not saver.commit():
+        #         raise IOError(f"Failed to commit autosave for {tmp_path}")
+        #     # Optionally, you could status‐bar a timestamp here
+        # except Exception as e:
+        #     # Don’t crash—just log or show a brief warning
+        #     print(f"Autosave failed: {e}")
+
+    @Slot(int)
+    def on_tab_changed(self, index: int):
+        # first thing: persist whatever was open before
+        self._auto_save_current_tab()
+
+        active_tab = self.tab_widget.widget(index)
+
+        # Set the active undo stack for the selected tab
+        self.undo_group.setActiveStack(active_tab.undo_stack)
+        # Return early if there is no active tab
+        if not active_tab:
+            # Hide or clear all docks if no tab is selected
+            self.toolbar_dock.hide()
+            self.palette_dock.hide()
+            self.properties_dock.hide()
+            self.layers_dock.hide()
+            return
+
+        if isinstance(active_tab, ComponentTab):
+            # Show all docks used by ComponentTab
+            self.toolbar_dock.show()
+            self.palette_dock.show()
+            self.properties_dock.show()
+            self.layers_dock.hide()
+            print("property_panel sizeHint:", active_tab.property_panel.sizeHint())
+            print("remove_element_btn sizeHint:", active_tab.remove_element_btn.sizeHint())
+            # Place ComponentTab's widgets into the main window docks
+            self.toolbar_dock.setWidget(active_tab.measure_toolbar) #
+            self.palette_dock.setWidget(active_tab.palette) #
+            self.layers_dock.setWidget(active_tab.layers_list) #
+            self.layers_dock.show()
+            # The property panel needs a container to include the "Remove" button
+            prop_container = QWidget()
+
+            prop_layout = QVBoxLayout(prop_container)
+            prop_layout.setContentsMargins(0, 0, 0, 0)
+            prop_layout.addWidget(active_tab.property_panel)
+            prop_layout.addWidget(active_tab.remove_element_btn, alignment=Qt.AlignCenter) #
+            prop_layout.addStretch(1)
+            self.properties_dock.setWidget(prop_container)
+
+        elif isinstance(active_tab, LayoutTab):
+            # Show all docks used by LayoutTab (note: no layers dock)
+            self.toolbar_dock.show()
+            self.palette_dock.show()
+            self.properties_dock.show()
+            self.layers_dock.hide() # LayoutTab does not use the layers list
+
+            # Place LayoutTab's widgets into the main window docks
+            self.toolbar_dock.setWidget(active_tab.layout_toolbar)
+
+            palette_container = QWidget()
+            palette_layout = QVBoxLayout(palette_container)
+            palette_layout.setContentsMargins(0, 0, 0, 0)
+            palette_layout.addWidget(active_tab.layout_palette)
+            palette_layout.addWidget(active_tab.import_panel)
+            palette_layout.addStretch(1)
+            self.palette_dock.setWidget(palette_container)
+
+            # The property panel for LayoutTab has its own unique combination of widgets
+            prop_container = QWidget()
+            prop_layout = QVBoxLayout(prop_container)
+            prop_layout.setContentsMargins(0, 0, 0, 0)
+            prop_layout.addWidget(active_tab.property_panel)
+            prop_layout.addWidget(active_tab.margin_spacing_panel)
+            prop_layout.addWidget(active_tab.remove_slot_btn, alignment=Qt.AlignCenter)
+            prop_layout.addStretch(1)
+            self.properties_dock.setWidget(prop_container)
+
+    @Slot(str)
+    def on_tab_title_changed(self, title: str):
+        sender_tab = self.sender()
+        if isinstance(sender_tab, ComponentTab):
+            index = self.tab_widget.indexOf(sender_tab)
+            if index != -1:
+                self.tab_widget.setTabText(index, title)
+
+
+    def get_current_tab(self) -> Optional[ComponentTab]:
+        tw = getattr(self, "tab_widget")
+        return tw.currentWidget() if isinstance(tw, QTabWidget) else None
+
+    def get_tab_at_index(self, index):
+        tab_widget = getattr(self, "tab_widget")
+        return self.tab_widget.widget(index) if isinstance(tw, QTabWidget) else None
 
     @Slot()
-    def add_new_component_tab(self):
-        new_template = self.registry.create("ct")
-        new_tab = ComponentTab(parent=self, registry=self.registry, template=new_template)
+    def add_new_layout_tab(self):
+        new_registry = self.registry.create_child_registry()
+
+        new_template = new_registry.create("lt", registry=new_registry)
+        new_tab = LayoutTab(parent=self, template=new_template, registry=new_registry)
         self.undo_group.addStack(new_tab.undo_stack)
         # Connect the tab's status message signal to the main window's slot
         new_tab.status_message_signal.connect(self.show_status_message)
         new_tab.tab_title_changed.connect(self.on_tab_title_changed)
-
-        index = self.tab_widget.addTab(new_tab, "New Template")
+        index = self.tab_widget.addTab(new_tab, new_template.name)
         self.tab_widget.setCurrentIndex(index)
         self.show_status_message("New template tab created.", "info")
         self.on_tab_changed(index) # Manually trigger update for new tab
 
     @Slot()
-    def open_template_in_new_tab(self):
-        options = QFileDialog.Options()
-        path, _ = QFileDialog.getOpenFileName(
-            self, "Load Template", "", "JSON Files (*.json)", options=options)
+    def add_new_component_tab(self):
+        new_registry = self.registry.create_child_registry()
+        new_template = new_registry.create("ct", registry=new_registry)
+        new_tab = ComponentTab(parent=self, template=new_template, registry=new_registry)
+        self.undo_group.addStack(new_tab.undo_stack)
+        # Connect the tab's status message signal to the main window's slot
+        new_tab.status_message_signal.connect(self.show_status_message)
+        new_tab.tab_title_changed.connect(self.on_tab_title_changed)
+        index = self.tab_widget.addTab(new_tab, new_template.name)
+        self.tab_widget.setCurrentIndex(index)
+        self.show_status_message("New template tab created.", "info")
+        self.on_tab_changed(index) # Manually trigger update for new tab
 
-        if path:
-            try:
-                loaded_template = self.registry.load_from_file(path)
-                print(loaded_template)
-                new_tab = ComponentTab(parent=self, registry=self.registry, template=loaded_template)
-                self.undo_group.addStack(component_tab.undo_stack)
-                new_tab.status_message_signal.connect(self.show_status_message)
-                new_tab.tab_title_changed.connect(self.on_tab_title_changed)
+    # ————— Template File ———— #
+    @Slot()
+    def on_save_template(self):
+        tab = self.get_current_tab()
+        if not tab:
+            return
 
-                index = self.tab_widget.addTab(new_tab, new_tab.get_template_name())
-                self.tab_widget.setCurrentIndex(index)
-                self.show_status_message(f"Template '{Path(path).name}' loaded in new tab.", "success")
-                self.on_tab_changed(index)
-            except json.JSONDecodeError:
-                QMessageBox.critical(self, "Load Error", "Invalid JSON file.")
-                self.show_status_message("Load Error: Invalid JSON file.", "error")
-            except Exception as e:
-                QMessageBox.critical(self, "Load Error", f"An error occurred while loading: {e}")
-                self.show_status_message(f"Error loading template: {e}", "error")
-        else:
-            self.show_status_message("Template load cancelled.", "info")
+        # Remember: each tab stores its ProtoRegistry as `tab.registry`
+        path, _ = QFileDialog.getSaveFileName(self, "Save Template…", "", "JSON Files (*.json)")
+        if not path:
+            return
+
+        # Dump just that registry out
+        self.root_registry.dump_proto_registry(tab.registry, path)
+        self.show_status_message(f"Template saved to {path}", "success")
+        # update tab title if you like:
+        self.tab_widget.setTabText(self.tab_widget.currentIndex(), Path(path).stem)
+
+    @Slot()
+    def open_template(self):
+        path, _ = QFileDialog.getOpenFileName(self, "Open Template…", "", "JSON Files (*.json)")
+        if not path:
+            return
+
+        try:
+            # Load it into a fresh child registry
+            new_reg = self.root_registry.load_proto_registry(path)
+            # Then create a tab around its root object:
+            tpl = next(iter(new_reg._store.values()))  # or however you pick the “root” PID
+            new_tab = ComponentTab(parent=self,
+                                   registry=new_reg,
+                                   template=tpl)
+            # … wire up undo_group, signals, etc. …
+            idx = self.tab_widget.addTab(new_tab, Path(path).stem)
+            self.tab_widget.setCurrentIndex(idx)
+        except Exception as e:
+            QMessageBox.critical(self, "Load Error", f"Could not load template: {e}")
+            self.show_status_message(f"Error loading template: {e}", "error")
 
     @Slot(int)
     def close_tab(self, index: int):
@@ -218,52 +456,57 @@ class MainDesignerWindow(QMainWindow):
             self.tab_widget.removeTab(index)
             tab_to_close.deleteLater() # Important to clean up
 
-    @Slot(int)
-    def on_tab_changed(self, index: int):
-        active_tab = self.tab_widget.widget(index)
-        self.undo_group.setActiveStack(active_tab.undo_stack)
-        if isinstance(active_tab, ComponentTab):
-            # Update dock widgets with the content of the active tab
-            self.toolbar_dock.setWidget(active_tab.measure_toolbar)
+    @Slot()
+    def save_template(self):
+        tab = self.get_current_tab()
+        if not tab:
+            return
 
-            self.palette_dock.setWidget(active_tab.palette)
-            
-            # Create a temporary container for the property panel and remove button
-            # This is because a widget can only have one parent, and the property panel
-            # needs to be inside the dock, but also needs its remove button.
-            prop_panel_container = QWidget()
-            prop_panel_layout = QVBoxLayout(prop_panel_container)
-            prop_panel_layout.setContentsMargins(0,0,0,0) # Remove extra margins
-            prop_panel_layout.addWidget(active_tab.property_panel)
-            prop_panel_layout.addWidget(active_tab.remove_element_btn, alignment=Qt.AlignCenter) # Use the tab's remove button
-            prop_panel_layout.addStretch(1)
-            self.properties_dock.setWidget(prop_panel_container)
+        # If we’ve never saved before, fall back to Save As…
+        if not getattr(tab, "file_path", None):
+            return self.on_save_as()
 
-            self.layers_dock.setWidget(active_tab.layers_list)
-        else:
-            # If no tab or invalid tab, clear dock widgets
-            self.palette_dock.setWidget(QWidget())
-            self.properties_dock.setWidget(QWidget())
-            self.layers_dock.setWidget(QWidget())
-            self.show_status_message("No active component tab selected.", "info")
+        self._write_tab_to_path(tab, tab.file_path)
+        self.show_status_message(f"Saved to {tab.file_path}", "success")
+        # update the tab title if needed
+        idx = self.tab_widget.indexOf(tab)
+        self.tab_widget.setTabText(idx, Path(tab.file_path).stem)
 
-    @Slot(str)
-    def on_tab_title_changed(self, title: str):
-        sender_tab = self.sender()
-        if isinstance(sender_tab, ComponentTab):
-            index = self.tab_widget.indexOf(sender_tab)
-            if index != -1:
-                self.tab_widget.setTabText(index, title)
+    @Slot()
+    def save_as_template(self):
+        tab = self.get_current_tab()
+        if not tab:
+            return
 
+        path, _ = QFileDialog.getSaveFileName(self, "Save Template As", "", "JSON Files (*.json)")
+        if not path:
+            self.show_status_message("Save cancelled", "info")
+            return
 
-    def get_current_tab(self) -> Optional[ComponentTab]:
-        return self.tab_widget.currentWidget() if self.tab_widget else None
+        self._write_tab_to_path(tab, path)
+        tab.file_path = path
+        self.show_status_message(f"Saved to {path}", "success")
+        idx = self.tab_widget.indexOf(tab)
+        self.tab_widget.setTabText(idx, Path(path).stem)
 
+    def _write_tab_to_path(self, tab, path: str):
+        try:
+            # Grab only that template’s data
+            data = self.registry.to_dict(root_pid=tab.template.pid)
+            saver = QSaveFile(path, self)
+            if not saver.open(QSaveFile.WriteOnly | QSaveFile.Text):
+                raise IOError(f"Cannot open {path} for writing")
+            saver.write(json.dumps(data, indent=2).encode("utf-8"))
+            if not saver.commit():
+                raise IOError(f"Could not commit save to {path}")
+        except Exception as e:
+            QMessageBox.critical(self, "Save Error", str(e))
+            self.show_status_message(f"Error saving: {e}", "error")
     @Slot()
     def save_current_tab_template(self):
         current_tab = self.get_current_tab()
-        template = current_tab.template
-        print(f"Preparing to Save. Current template PID is {template.pid}")
+        current_template = current_tab.template
+        print(f"Preparing to Save. Current template PID is {current_template.pid}")
         if not current_tab:
             self.show_status_message("No active tab to save.", "warning")
             return
@@ -274,7 +517,7 @@ class MainDesignerWindow(QMainWindow):
 
         if path:
             try:
-                root_pid = template.pid
+                root_pid = current_template.pid
                 print(f"Saving template with root pid: {root_pid}")
                 
                 self.registry.save_to_file(root_pid, path)
@@ -286,6 +529,176 @@ class MainDesignerWindow(QMainWindow):
         else:
             self.show_status_message("Template save cancelled.", "info")
 
+
+
+
+    # ———— Project Handling ———— #
+
+    @Slot()
+    def on_save_project(self):
+        path, _ = QFileDialog.getSaveFileName(
+            self, "Save Project", "", "JSON Files (*.json)"
+        )
+        if not path:
+            return
+
+        try:
+            data = self.root_registry.to_dict()
+            saver = QSaveFile(path, self)
+            if not saver.open(QSaveFile.WriteOnly | QSaveFile.Text):
+                raise IOError(f"Cannot open {path}")
+            saver.write(json.dumps(data, indent=2).encode("utf-8"))
+            if not saver.commit():
+                raise IOError(f"Failed to commit save to {path}")
+            self.show_status_message(f"Project saved to {path}", "success")
+        except Exception as e:
+            QMessageBox.critical(self, "Save Project Error", str(e))
+            self.show_status_message(f"Error saving project: {e}", "error")
+
+    @Slot()
+    def on_open_project(self):
+        path, _ = QFileDialog.getOpenFileName(
+            self, "Open Project", "", "JSON Files (*.json)"
+        )
+        if not path:
+            return
+
+        try:
+            with open(path, "r", encoding="utf-8") as f:
+                data = json.load(f)
+
+            # 1) Rebuild the entire global registry + all children
+            self.root_registry.from_dict(data)
+
+            # 2) Clear out UI tabs & undo stacks
+            self.tab_widget.clear()
+            self.undo_group.clear()
+
+            # 3) Re-create one tab per child registry
+            for child_reg in self.root_registry.children:
+                # find the “root” template object in that registry:
+                # assume it’s the one whose pid prefix is 'ct' or 'lt'
+                for obj in child_reg.get_all():
+                    prefix = obj.pid.split("_", 1)[0]
+                    if prefix == "ct":
+                        tab = ComponentTab(
+                            parent=self, registry=child_reg, template=obj
+                        )
+                        break
+                    elif prefix == "lt":
+                        tab = LayoutTab(
+                            parent=self, registry=child_reg, template=obj,
+                            settings=self.settings
+                        )
+                        break
+                else:
+                    # no recognizable template—skip
+                    continue
+
+                # wire up undo & signals
+                self.undo_group.addStack(tab.undo_stack)
+                tab.status_message_signal.connect(self.show_status_message)
+                tab.tab_title_changed.connect(self.on_tab_title_changed)
+
+                # add to UI
+                idx = self.tab_widget.addTab(tab, tab.template.name)
+                # you might call self.on_tab_changed(idx) here if you want it to become active
+
+            self.show_status_message(f"Project loaded from {path}", "success")
+
+        except Exception as e:
+            QMessageBox.critical(self, "Open Project Error", str(e))
+            self.show_status_message(f"Error loading project: {e}", "error")
+
+    @Slot()
+    def on_close_project(self):
+        reply = QMessageBox.question(
+            self, "Close Project",
+            "Are you sure you want to close the current project? Unsaved changes will be lost.",
+            QMessageBox.Yes | QMessageBox.No
+        )
+        if reply != QMessageBox.Yes:
+            return
+
+        # 1) Clear registry (drops all children & global objects)
+        self.root_registry.from_dict({"global": {}, "children": []})
+
+        # 2) Clear the UI and undo stacks
+        self.tab_widget.clear()
+        self.undo_group.clear()
+
+        # 3) Optionally create a fresh blank tab:
+        self.add_new_component_tab()
+        self.show_status_message("Project closed; new blank template created.", "info")
+
+    ### Copy/Pase methods
+
+    def on_copy(self):
+        """
+        Copy the currently selected object (if any) into the registry+clipboard.
+        """
+        sel = self.scene.selectedItems()
+        if sel:
+            obj = sel[0]                      # assume your QGraphicsItem has a .pid
+            mime = self.registry.make_mime_data_for(obj.pid)
+            QGuiApplication.clipboard().setMimeData(mime)
+
+    def on_cut(self):
+        sel = self.scene.selectedItems()
+        if sel:
+            obj = sel[0]
+            # Copy first…
+            mime = self.registry.make_mime_data_for(obj.pid)
+            QGuiApplication.clipboard().setMimeData(mime)
+            # …then remove from registry & scene
+            self.registry.deregister(obj.pid)
+            self.scene.removeItem(obj)
+
+    def on_paste(self):
+        cb   = QGuiApplication.clipboard()
+        md   = cb.mimeData()
+        # 1) custom python-object clone
+        clone = self.registry.paste_from_mime_data(md)
+        if clone:
+            self.scene.addItem(clone)
+            return
+
+        # 2) image data
+        if md.hasImage():
+            img = md.imageData()  # a QImage
+            pix = QPixmap.fromImage(img)
+            # if an ImageElement is already selected, update it…
+            sel = self.scene.selectedItems()
+            if sel and hasattr(sel[0], "setPixmap"):
+                sel[0].setPixmap(pix)
+            else:
+                # otherwise, create a brand-new ImageElement via registry
+                new_img_elem = self.registry.create("ie", pixmap=pix)
+                self.scene.addItem(new_img_elem)
+            return
+
+        # 3) plain text
+        if md.hasText():
+            txt = md.text()
+            # if the focus is in a QLineEdit, let it paste normally
+            fw = QApplication.focusWidget()
+            if isinstance(fw, QLineEdit):
+                fw.insert(txt)
+            else:
+                # or inject into a selected TextElement
+                sel = self.scene.selectedItems()
+                if sel and hasattr(sel[0], "setText"):
+                    sel[0].setText(txt)
+                else:
+                    # or build a new TextElement
+                    new_te = self.registry.create("te", text=txt)
+                    self.scene.addItem(new_te)
+            return
+
+        # 4) fallback: do nothing or show “nothing to paste”
+        self.statusBar().showMessage("Nothing to paste", 2000)
+
+    # Import/Export
     @Slot()
     def import_csv_for_current_tab(self):
         current_tab = self.get_current_tab()
@@ -310,25 +723,13 @@ class MainDesignerWindow(QMainWindow):
             return
         current_tab.export_pdf_gui()
 
+
+    ########################
+    # Command Line methods #
+    ########################
+
     def set_cli_mode(self, mode: bool):
         self.cli_mode = mode
-        # You might want to adjust UI visibility based on CLI mode if needed
-
-    # CLI export methods (these would typically be called from a main CLI script,
-    # not directly from the GUI)
-    def export_png_cli_for_current_tab(self, output_dir: Path):
-        current_tab = self.get_current_tab()
-        if current_tab:
-            current_tab.export_png_cli(output_dir)
-        else:
-            print("No active tab for CLI PNG export.")
-
-    def export_pdf_cli_for_current_tab(self, output_dir: Path):
-        current_tab = self.get_current_tab()
-        if current_tab:
-            current_tab.export_pdf_cli(output_dir)
-        else:
-            print("No active tab for CLI PDF export.")
 
     def load_template_cli(self, filepath: str):
         try:
@@ -352,3 +753,17 @@ class MainDesignerWindow(QMainWindow):
             current_tab.load_csv_and_merge_from_cli(filepath)
         else:
             print("No active tab for CLI CSV merge.")
+
+    def export_png_cli_for_current_tab(self, output_dir: Path):
+        current_tab = self.get_current_tab()
+        if current_tab:
+            current_tab.export_png_cli(output_dir)
+        else:
+            print("No active tab for CLI PNG export.")
+
+    def export_pdf_cli_for_current_tab(self, output_dir: Path):
+        current_tab = self.get_current_tab()
+        if current_tab:
+            current_tab.export_pdf_cli(output_dir)
+        else:
+            print("No active tab for CLI PDF export.")

@@ -1,6 +1,7 @@
 import re
-from typing import List
+from typing import List, Dict, Tuple
 from PySide6.QtCore import QRectF, QPointF
+from PySide6.QtGui import QPageSize
 
 from prototypyside.utils.unit_str import UnitStr
 
@@ -265,3 +266,107 @@ def list_to_qpointf(data: List[float]) -> QPointF:
     if len(data) == 2:
         return QPointF(data[0], data[1])
     raise ValueError("Invalid QRectF data: must be a list of 4 floats.")
+
+
+def page_in_units(page_size_obj: QPageSize, unit_str: str, dpi) -> Dict[str, str]:
+    """
+    Returns the width and height of a QPageSize object in the specified unit string.
+
+    Args:
+        page_size_obj: The QPageSize object representing the page.
+        unit_str: The desired unit as a string (e.g., "in", "cm", "pt", "mm").
+                  Case-insensitive.
+
+    Returns:
+        A dictionary with 'width' and 'height' as unit-formatted strings
+        (e.g., {'width': '10.50in', 'height': '7.20cm'}).
+        Returns values formatted to two decimal places.
+
+    Raises:
+        ValueError: If an unsupported unit string is provided.
+    """
+    unit_str_lower = unit_str.lower()
+
+    if unit_str_lower not in _Q_PAGE_SIZE_UNIT_MAP:
+        raise ValueError(
+            f"Unsupported unit string: '{unit_str}'. "
+            f"Supported units are: {', '.join(list(_Q_PAGE_SIZE_UNIT_MAP.keys()))}"
+        )
+
+    # Determine the QPageSize.Unit enum to pass to page_size_obj.size()
+    q_page_unit_enum = _Q_PAGE_SIZE_UNIT_MAP[unit_str_lower]
+
+    # Get dimensions from QPageSize in the base unit (e.g., mm if 'cm' was requested)
+    dims_qsizef: QSizeF = page_size_obj.size(q_page_unit_enum)
+    width = dims_qsizef.width()
+    height = dims_qsizef.height()
+
+    # Apply any specific conversion factors for display (e.g., mm to cm)
+    display_factor = _UNIT_DISPLAY_FACTOR.get(unit_str_lower, 1.0) # Default to 1.0 if not specified
+    width /= display_factor
+    height /= display_factor
+
+    # Format the output strings to two decimal places for consistency
+    formatted_width = f"{width:.2f}{unit_str_lower}"
+    formatted_height = f"{height:.2f}{unit_str_lower}"
+
+    return formatted_width, formatted_height
+
+_Q_PAGE_SIZE_UNIT_MAP = {
+    "pt": QPageSize.Point,
+    "in": QPageSize.Inch,
+    "mm": QPageSize.Millimeter,
+    "cm": QPageSize.Millimeter, # We'll convert from mm to cm
+}
+
+def page_in_px(page_size_obj: QPageSize, dpi: float) -> Dict[str, float]:
+    """
+    Returns the width and height of a QPageSize object in pixels.
+
+    Args:
+        page_size_obj: The QPageSize object representing the page.
+        dpi: The Dots Per Inch value to use for conversion. This is a required parameter,
+             typically obtained from application settings or a screen's DPI.
+
+    Returns:
+        A dictionary with 'width' and 'height' as float values in pixels.
+
+    Raises:
+        ValueError: If DPI is not a positive value.
+    """
+    if dpi <= 0:
+        raise ValueError("DPI must be a positive value to convert to pixels.")
+
+    # Get the dimensions of the page in inches first.
+    # DPI is a conversion factor from inches to pixels.
+    dims_in_inches: QSizeF = page_size_obj.size(QPageSize.Inch)
+
+    # Convert width and height from inches to pixels
+    width_px = dims_in_inches.width() * dpi
+    height_px = dims_in_inches.height() * dpi
+
+    return width_px, height_px
+
+def compute_scale_factor(
+    max_size: Tuple[float, float],
+    current_size: Tuple[float, float]
+) -> float:
+    """
+    Given max_size (width, height) and current_size (width, height),
+    return the uniform scale factor ≤ 1.0 needed to make
+    current_size fit inside max_size.  Returns 1.0 if no scaling needed.
+    """
+    max_w, max_h = max_size
+    cur_w, cur_h = current_size
+
+    # avoid division by zero; if cur dimension is zero, treat it as no scale needed
+    if cur_w <= 0 or cur_h <= 0:
+        return 1.0
+
+    # if already fits, no scaling
+    if cur_w <= max_w and cur_h <= max_h:
+        return 1.0
+
+    scale_w = max_w / cur_w
+    scale_h = max_h / cur_h
+    return min(scale_w, scale_h)

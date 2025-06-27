@@ -13,6 +13,7 @@ from PySide6.QtWidgets import QMessageBox
 from prototypyside.utils.qt_helpers import list_to_qrectf
 from prototypyside.utils.unit_converter import to_px, format_dimension
 from prototypyside.utils.unit_str import UnitStr
+from prototypyside.services.undo_commands import AddElementCommand
 # Use TYPE_CHECKING for type hinting
 if TYPE_CHECKING:
     from prototypyside.models.component_elements import ComponentElement
@@ -21,7 +22,7 @@ class ComponentTemplate(QGraphicsObject):
     template_changed = Signal()
     element_z_order_changed = Signal()
 
-    def __init__(self, pid, dpi=300, width="2.5 in", height="3.5 in", parent: QObject = None, name="Component Template"):
+    def __init__(self, pid, registry, dpi=300, width="2.5 in", height="3.5 in", parent: QObject = None, name="Component Template"):
         super().__init__(parent)
         self._pid = pid
         self.name = name
@@ -30,7 +31,6 @@ class ComponentTemplate(QGraphicsObject):
         self._unit = self._width.unit
         self._dpi = dpi
         self.is_template = True
-        self.element_pids = []
         self.elements: List['ComponentElement'] = []
         self.background_image_path: Optional[str] = None
 
@@ -83,8 +83,8 @@ class ComponentTemplate(QGraphicsObject):
     def dpi(self):
         return self._dpi
 
-    def add_element(self, element) -> 'ComponentElement':
-        # Use consistent z-value increments
+    def add_element(self, element) -> "ComponentElement":
+        self.elements.append(element)
         max_z = max([e.zValue() for e in self.elements], default=0)
         element.setZValue(max_z + 100)
         self.elements.append(element)
@@ -209,7 +209,7 @@ class ComponentTemplate(QGraphicsObject):
             'height': self._height.format(),
             'dpi': self._dpi,
             'background_image_path': self.background_image_path,
-            'element_pids': [e.pid for e in self.elements]  # 🔄 save only references
+            'elements': [e.to_dict() for e in self.elements]  # 🔄 save only references
         }
   
     @classmethod
@@ -223,6 +223,7 @@ class ComponentTemplate(QGraphicsObject):
             parent=parent,
             name=data.get('name', "Component Template")
         )
-
+        elements = data.get("elements")
+        self.elments = [e.from_dict() for e in elements]
         template.background_image_path = data.get('background_image_path')
         return template

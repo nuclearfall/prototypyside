@@ -370,9 +370,9 @@ class ComponentElement(QGraphicsObject):
             "y": self._y.raw if self._y else "0 in",
             "width": self._width.raw if self._width else "0.5 in",
             "height": self._height.raw if self._height else "0.5 in",
-            "color": self._color.name() if self._color else None,
-            "bg_color": self._bg_color.name() if self._bg_color else None,
-            "border_color": self._border_color.name() if self._border_color else None,
+            "color": self._color.rgba() if self._color else None,  # Modified for alpha
+            "bg_color": self._bg_color.rgba() if self._bg_color else None, # Modified for alpha
+            "border_color": self._border_color.rgba() if self._border_color else None, # Modified for alpha
             "border_width": self._border_width.raw if self._border_width else "0.05 pt",
             "alignment": int(self._alignment) if self._alignment is not None else None,
             "content": self._content if self._content is not None else "",
@@ -410,12 +410,13 @@ class ComponentElement(QGraphicsObject):
             name=name
         )
         # Restore style and other fields
-        if "color" in data and data["color"]:
-            obj._color = QColor(data["color"])
-        if "bg_color" in data and data["bg_color"]:
-            obj._bg_color = QColor(data["bg_color"])
-        if "border_color" in data and data["border_color"]:
-            obj._border_color = QColor(data["border_color"])
+        if "color" in data and data["color"] is not None:
+            obj._color = QColor.fromRgba(data["color"])
+        if "bg_color" in data and data["bg_color"] is not None:
+            obj._bg_color = QColor.fromRgba(data["bg_color"])
+        if "border_color" in data and data["border_color"] is not None:
+            obj._border_color = QColor.fromRgba(data["border_color"])
+
         if "border_width" in data and data["border_width"]:
             obj._border_width = UnitStr(data["border_width"], dpi=dpi)
         if "alignment" in data and data["alignment"] is not None:

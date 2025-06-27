@@ -175,13 +175,14 @@ class ComponentGraphicsScene(QGraphicsScene):
         if event.modifiers() & Qt.AltModifier and is_movable(item):
             # emit both the item to clone and the raw scene‐pos
             self._alt_drag_started = True
-            self.tab
             self.element_cloned.emit(item, event.scenePos())
             event.accept()
             return
 
         if is_movable(item):  # For your item type, using the helper function
             self._dragging_item = item
+            self.select_exclusive(self._dragging_item)
+
             # Calculate the offset from the snapped *item's top-left corner* to the snapped *mouse press position*.
             # The item's position (pos()) is relative to its parent, which for top-level items is the scene's origin (0,0).
             # So, item.pos() is already in scene coordinates for top-level items.
@@ -228,11 +229,14 @@ class ComponentGraphicsScene(QGraphicsScene):
             # Use the stored start position (already snapped by mousePressEvent)
             old_pos = self._dragging_start_pos
             new_pos = self._dragging_item.pos() # This should already be snapped due to mouseMoveEvent logic
+            command = MoveElementCommand(self._dragging_item, new_pos, old_pos)
+            self.tab.undo_stack.push(command)
         elif self._resizing and self.resizing_element and self.resize_start_item_rect is not None:
             old_values = (self.resize_start_item_pos, self.resize_start_item_rect)
             new_values = (self.resizing_element.pos(), self.resizing_element.rect)
-            self.tab.undo_stack.push(ResizeAndMoveElementCommand(
-                 self.resizing_element, new_values, old_values))
+            command = ResizeAndMoveElementCommand(
+                 self.resizing_element, new_values, old_values)
+            self.tab.undo_stack.push(command)
             pass  # Implement your undo/redo integration
 
         # Reset state
@@ -287,3 +291,18 @@ class ComponentGraphicsScene(QGraphicsScene):
             if isinstance(item, ComponentElement):
                 return item
         return None
+
+    def select_exclusive(self, element: QGraphicsItem):
+        """
+        Deselect all items except `element`, and select `element`.
+        """
+        # Deselect all other items
+        for item in self.selectedItems():
+            if item is not element:
+                item.setSelected(False)
+        # Select the desired element (if not already)
+        if element is not None and not element.isSelected():
+            element.setSelected(True)
+        # Emit selectionChanged signal if you want property panel, etc. to update
+        self.selectionChanged.emit()
+

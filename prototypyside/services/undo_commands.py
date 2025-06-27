@@ -51,6 +51,7 @@ class AddElementCommand(QUndoCommand):
                 parent=self.tab.template,
                 name=None
             )
+            self.tab.template.add_element(self.element)
 
         elif self.element is not None and self.tab.registry.is_orphan(self.element.pid):
             self.tab.registry.reinsert(self.element.pid)

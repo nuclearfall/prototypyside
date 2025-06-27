@@ -509,7 +509,7 @@ class ComponentTab(QWidget):
 
         # 2) Place it exactly on top of the original
         new.setPos(original.pos())
-        new.setSelected(True)
+        self.scene.select_exclusive(new)
         
         # 3) Compute and stash the drag offset so mouseMoveEvent will pick it up
         drag_offset = press_scene_pos - new.pos()
