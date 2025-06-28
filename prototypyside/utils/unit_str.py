@@ -123,6 +123,70 @@ class UnitStr:
             "px": self.to("px"),
         }
 
+    # def __add__(self, other):
+    #     if isinstance(other, UnitStr):
+    #         value = self.to(self.unit) + other.to(self.unit)
+    #         return UnitStr(value, unit=self.unit, dpi=self.dpi)
+    #     elif isinstance(other, (float, int)):
+    #         value = self.to(self.unit) + other
+    #         return UnitStr(value, unit=self.unit, dpi=self.dpi)
+    #     else:
+    #         return NotImplemented
+
+    # def __radd__(self, other):
+    #     # Supports int/float + UnitStr and also sum() calls.
+    #     return self.__add__(other)
+        
+    # def __sub__(self, other):
+    #     # Support subtraction for UnitStr - UnitStr and UnitStr - float/int
+    #     if isinstance(other, UnitStr):
+    #         # Convert other to self's unit (or to px for safety), subtract
+    #         value = self.to("px") - other.to("px")
+    #         # Result in px, or optionally in self.unit for chaining
+    #         return UnitStr(value, unit="px", dpi=self.dpi)
+    #     elif isinstance(other, (float, int)):
+    #         return UnitStr(self.to("px") - other, unit="px", dpi=self.dpi)
+    #     else:
+    #         return NotImplemented
+
+    # def __rsub__(self, other):
+    #     if isinstance(other, (float, int)):
+    #         return UnitStr(other - self.to("px"), unit="px", dpi=self.dpi)
+    #     else:
+    #         return NotImplemented
+
+    # def __sub__(self, other):
+    #     if isinstance(other, UnitStr):
+    #         value = self.to(self.unit) - other.to(self.unit)
+    #         return UnitStr(value, unit=self.unit, dpi=self.dpi)
+    #     elif isinstance(other, (float, int)):
+    #         value = self.to(self.unit) - other
+    #         return UnitStr(value, unit=self.unit, dpi=self.dpi)
+    #     else:
+    #         return NotImplemented
+
+    # def __mul__(self, other):
+    #     if isinstance(other, (int, float)):
+    #         return UnitStr(self.to(self.unit) * other, unit=self.unit, dpi=self.dpi)
+    #     elif isinstance(other, UnitStr):
+    #         # Multiplying two lengths doesn't make much sense, but allow if you want
+    #         return UnitStr(self.to(self.unit) * other.to(self.unit), unit=self.unit, dpi=self.dpi)
+    #     else:
+    #         return NotImplemented
+
+    # def __rmul__(self, other):
+    #     # Handles int * UnitStr
+    #     return self.__mul__(other)
+
+    # def __truediv__(self, other):
+    #     if isinstance(other, (int, float)):
+    #         return UnitStr(self.to(self.unit) / other, unit=self.unit, dpi=self.dpi)
+    #     elif isinstance(other, UnitStr):
+    #         # Returns a scalar (unitless ratio)
+    #         return self.to(self.unit) / other.to(self.unit)
+    #     else:
+    #         return NotImplemented
+
     def __str__(self):
         return self.raw
 

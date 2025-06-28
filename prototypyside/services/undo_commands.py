@@ -4,6 +4,20 @@ from PySide6.QtCore import QPointF, QRectF
 from prototypyside.utils.unit_converter import pos_to_unit_str
 from prototypyside.utils.unit_str import UnitStr
 
+class AddSlotCommand(QUndoCommand):
+    def __init__(self, registry, template):
+        self.template = template
+        self.registry = registry
+        self.slot = None
+
+    def undo(self):
+        self.registry.deregister(self.slot.pid)
+
+    def redo(self):
+        if slot is None:
+            self.slot = self.registry.create("ls", tpid=self.template.pid, cpid=None, parent=self.template)
+        else:
+            self.registry.reinsert(self.slot)
 
 class AddElementCommand(QUndoCommand):
     def __init__(self, prefix, scene_pos, tab, description="Add Element"):

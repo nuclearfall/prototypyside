@@ -40,7 +40,6 @@ class LayoutScene(QGraphicsScene):
         self.draw_grid(painter, rect)
 
     def draw_grid(self, painter, rect):
-        print("Draw to grid has been called")
         if not getattr(self.parent(), "show_grid", True):
             return
 

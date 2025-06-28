@@ -73,7 +73,6 @@ class MainDesignerWindow(QMainWindow):
         # Add initial tabs
         self.add_new_component_tab()
         self.add_new_layout_tab()
-        print(f"Currently open globally {self.registry.get_all()}")
 
     ### GUI Setup ###
     def setup_ui(self):
@@ -370,8 +369,7 @@ class MainDesignerWindow(QMainWindow):
     @Slot()
     def add_new_layout_tab(self):
         new_registry = self.registry.create_child_registry()
-
-        new_template = new_registry.create("lt", registry=new_registry)
+        new_template = new_registry.create("lt", registry=new_registry, parent=None)
         new_tab = LayoutTab(parent=self, template=new_template, registry=new_registry)
         self.undo_group.addStack(new_tab.undo_stack)
         # Connect the tab's status message signal to the main window's slot

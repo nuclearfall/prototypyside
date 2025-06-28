@@ -6,7 +6,7 @@ from PySide6.QtWidgets import (
     QGraphicsView)
 from PySide6.QtCore import Qt, Signal, QRectF, QPointF, Slot, QTimer
 from PySide6.QtGui import (QKeySequence, QShortcut, QUndoStack, 
-    QUndoGroup, QUndoCommand, QPainter)
+    QUndoGroup, QUndoCommand, QPainter, QPageSize)
 from prototypyside.models.layout_template import LayoutTemplate, LayoutSlot
 from prototypyside.views.layout_property_panel import LayoutPropertyPanel
 from prototypyside.widgets.layout_toolbar import LayoutToolbar
@@ -18,6 +18,24 @@ from prototypyside.views.layout_view import LayoutView
 from prototypyside.utils.unit_converter import to_px
 from prototypyside.config import PAGE_SIZES
 # Import your palette, panel, toolbar widgets as needed
+
+def addItems(scene, items):
+    """
+    Recursively adds QGraphicsItems (including any in nested lists/tuples) to the scene.
+    """
+    if items is None:
+        return
+    # If items is a single slot/item, add it directly
+    # (optional: check isinstance(items, QGraphicsItem) for robustness)
+    if hasattr(items, 'scene') and callable(items.scene):
+        if items.scene() is not scene:
+            scene.addItem(items)
+        return
+    # If items is a container, recurse
+    if isinstance(items, (list, tuple)):
+        for child in items:
+            addItems(scene, child)
+
 
 class LayoutTab(QWidget):
     """Tab for editing a LayoutTemplate via grid/slot assignment."""
@@ -40,40 +58,43 @@ class LayoutTab(QWidget):
 
         # --- 1. Create UI components to be docked by MainWindow ---
         # These are now member properties, not part of this widget's layout
+
+
+        # --- 2. Setup the central widget for the tab's main area ---
+        self.scene = LayoutScene(scene_rect=self.template.boundingRect(), tab=self)
+        self.view = LayoutView(self.scene)
+        # self.template.setGrid()
+        self.view.setRenderHints(QPainter.Antialiasing | QPainter.TextAntialiasing | QPainter.SmoothPixmapTransform)
+        self.view.setViewportUpdateMode(QGraphicsView.FullViewportUpdate)
+        self.view.setOptimizationFlag(QGraphicsView.DontSavePainterState)
+        self.view.setOptimizationFlag(QGraphicsView.DontAdjustForAntialiasing)
+        print(f"Size of scene rect before add item: {self.scene.sceneRect()}")
+        print(f"Size of scene rect after add item: {self.scene.sceneRect()}")
+        self.view.setScene(self.scene)
+        self.view.fitInView(self.scene.sceneRect(), Qt.KeepAspectRatio)
+        self.view.show()
+        # self.template.parent = self.scene
+
+        self.scene.addItem(self.template)
+        self.layout_template.setGrid()
         self._create_layout_toolbar()
         self._create_layout_palette()
         self._create_import_panel()
         self._create_property_panel()
         self.margin_spacing_panel = self._create_margin_spacing_panel()
         self.remove_slot_btn = QPushButton("Remove Assignment")
-        self.remove_slot_btn.clicked.connect(self._on_remove_slot)
-
-        # --- 2. Setup the central widget for the tab's main area ---
-        self.scene = LayoutScene(scene_rect=self.template.boundingRect(), tab=self)
-        self.view = LayoutView(self.scene)
-        self.view.setRenderHints(QPainter.Antialiasing | QPainter.TextAntialiasing | QPainter.SmoothPixmapTransform)
-        self.view.setViewportUpdateMode(QGraphicsView.FullViewportUpdate)
-        self.view.setOptimizationFlag(QGraphicsView.DontSavePainterState)
-        self.view.setOptimizationFlag(QGraphicsView.DontAdjustForAntialiasing)
-        print(f"Size of scene rect before add item: {self.scene.sceneRect()}")
-        self.scene.addItem(self.template)
-        print(f"Size of scene rect after add item: {self.scene.sceneRect()}")
-        self.view.setScene(self.scene)
-        self.view.fitInView(self.scene.sceneRect(), Qt.KeepAspectRatio)
-        self.view.show()
+        #self.remove_slot_btn.clicked.connect(self._on_remove_slot)
 
         # Connect margin/spacing signals to handler methods
-        self.template.marginsChanged.connect(self.on_template_margins_changed)
+        self.template.marginsChanged.connect(self.on_template_margin_changed)
         self.template.spacingChanged.connect(self.on_template_spacing_changed)
 
         # --- 3. Set the simple, single layout for the tab itself ---
         main_layout = QHBoxLayout(self)
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.addWidget(self.view)
-        
         # --- 4. Load data and connect signals ---
         #self.load_layout_template(self.template) # Make sure this is called!
-        self._connect_signals()
         self.update_grid() # This method currently does nothing in your provided code for LayoutTab
         self.refresh_panels()
 
@@ -86,16 +107,6 @@ class LayoutTab(QWidget):
         if new_name:
             self.template.name = new_name
             self.tab_title_changed.emit(new_name)
-
-    def _connect_signals(self):
-
-        tb = self.layout_toolbar
-        # tb.page_size_changed.connect(self.on_page_size_changed)
-        tb.orientation_changed.connect(self.on_orientation_changed)
-        tb.grid_size_changed.connect(self.on_grid_size_changed)
-        tb.margin_changed.connect(self.on_margin_changed)
-        tb.spacing_changed.connect(self.on_spacing_changed)
-        tb.autofill_checkbox.stateChanged.connect(lambda state: self.on_auto_fill_changed(state == 2))
 
     # --- Properties ---
     @property
@@ -177,38 +188,25 @@ class LayoutTab(QWidget):
             ("margin_right", self.margin_right),
         ]:
             field.editingFinishedWithValue.connect(
-                lambda val, n=name: self.on_margin_changed(n, val))
+                self.on_template_margin_changed)
 
         for name, field in [("spacing_x", self.spacing_x),
                             ("spacing_y", self.spacing_y)]:
             field.editingFinishedWithValue.connect(
-                lambda val, n=name: self.on_spacing_changed(n, val))           
+                self.on_template_spacing_changed)           
         # print("MarginPanel sizeHint:", self.margin_panel.sizeHint())
         return self.margin_panel
 
-    def on_template_margins_changed(self):
-        # This method is called whenever any margin property changes
-        # You might update the view, redraw the layout, or update a property panel
-        print("Margins changed, update layout or property panel as needed.")
-        # For example:
-        # self.refresh_layout_view()
-        # self.update_property_panel()
-
-    def on_template_spacing_changed(self):
-        # This method is called whenever spacing_x or spacing_y changes
-        print("Spacing changed, update layout as needed.")
-        self.scene.update()
-        # self.refresh_layout_view()
-        # self.update_property_panel()
-
     def _create_layout_toolbar(self) -> QWidget:
         self.layout_toolbar = LayoutToolbar(self.settings, parent=self)
-        
         # Connect signals
-        # self.layout_toolbar.page_size_changed.connect(self.on_page_size_changed)
+        self.layout_toolbar.page_size_changed.connect(self.on_page_size_changed)
         self.layout_toolbar.orientation_changed.connect(self.on_orientation_changed)
         self.layout_toolbar.grid_size_changed.connect(self.on_grid_size_changed)
         self.layout_toolbar.autofill_changed.connect(self.on_auto_fill_changed)
+
+        # Set up initial toolbar state from the template
+        self.layout_toolbar.apply_template(self.layout_template)
         # print("LayoutToolbar sizeHint:", self.layout_toolbar.sizeHint())
         return self.layout_toolbar
 
@@ -232,34 +230,59 @@ class LayoutTab(QWidget):
         pass
 
     # --- Grid/Scene Logic ---
+
     def update_grid(self):
         """Refresh the scene grid based on template settings."""
         # Rebuild scene items for each slot; gray out empty slots, assign templates as needed
         pass
 
-    # def assign_template_to_slot(self, row: int, col: int, tpid: str):
-    #     self.layout_template.assign_template_to_slot(row, col, tpid, self.registry)
-    #     self.update_grid()
-    #     self.push_undo_command(...)  # Implement appropriate QUndoCommand
+    @Slot(str, QPageSize)
+    def on_page_size_changed(self, display_string, qpagesize):
+        self.layout_template.page_size = display_string  # Save the display string!
+        # Optionally also save qpagesize for calculations/rendering
+        self.update_grid()
 
-    # def clear_slot(self, row: int, col: int):
-    #     self.layout_template.clear_slot(row, col, self.registry)
-    #     self.update_grid()
-    #     self.push_undo_command(...)  # Implement appropriate QUndoCommand
+    @Slot(bool)
+    def on_orientation_changed(self, landscape: bool):
+        self.layout_template.landscape = landscape
+        self.update_grid()
 
-    # def auto_fill_templates(self, tpids: List[str]):
-    #     self.layout_template.auto_fill_templates(tpids, self.registry)
-    #     self.update_grid()
-    #     self.push_undo_command(...)  # Implement appropriate QUndoCommand
+    @Slot(int, int)
+    def on_grid_size_changed(self, rows: int, cols: int):
+        # self.layout_template.setGrid(rows, cols)
+        # self.update_grid()
+        self.layout_template.setGrid(rows, cols)
+        self.scene.update()
 
-    # def on_auto_fill_changed(self, checked: bool):
-    #     self.layout_template.auto_fill = checked
-    #     self.update_grid()
+    @Slot(bool)
+    def on_auto_fill_changed(self, autofill: bool):
+        self.layout_template.auto_fill = autofill
+        self.update_grid()
+
+    def on_template_margin_changed(self):
+        # 1. Read current values from the UI fields
+        self.layout_template.margin_top = self.margin_top.getValue()
+        self.layout_template.margin_bottom = self.margin_bottom.getValue()
+        self.layout_template.margin_left = self.margin_left.getValue()
+        self.layout_template.margin_right = self.margin_right.getValue()
+        
+        # 2. Update the grid/layout
+        self.layout_template.setGrid()
+
+
+    def on_template_spacing_changed(self):
+        # This method is called whenever spacing_x or spacing_y changes
+        print("Spacing changed, update layout as needed.")
+        # self.scene.clear()
+        self.layout_template.spacing_x = self.spacing_x.getValue()
+        self.layout_template.spacing_y = self.spacing_y.getValue()
+        
+        self.layout_template.setGrid()
 
     # --- Selection Logic ---
     def select_slot(self, row: int, col: int):
-        slot_pid = self.layout_template.slots[row][col]
-        self._current_selected_slot_pid = slot_pid
+        slot = self.layout_template.layout_slots[row][col]
+        self._current_selected_slot = slot
         self.refresh_panels()
 
     def deselect_slot(self):
@@ -273,17 +296,6 @@ class LayoutTab(QWidget):
     def on_palette_template_selected(self, tpid: str):
         self._layout_tpid = tpid
         self.refresh_panels()
-
-    def _on_remove_slot(self):
-        """Clear template from selected slot."""
-        pass
-        # slot = self.current_selected_slot
-        # if slot is not None:
-        #     for row in range(self.layout_template.rows):
-        #         for col in range(self.layout_template.cols):
-        #             if self.layout_template.slots[row][col] == slot.pid:
-        #                 self.clear_slot(row, col)
-        #                 return
 
     @Slot(str, QPointF)
     def on_component_dropped(self, tpid: str, scene_pos: QPointF):
@@ -307,92 +319,6 @@ class LayoutTab(QWidget):
         else:
             self.show_status_message(f"No layout‐slot at {scene_pos}", "warning")
 
-
-    def fit_and_place_instance(self, instance, slot_origin: QPointF):
-        """
-        1. Delegate resizing to the LayoutTemplate (warn if scaled)
-        2. Center‐align the (possibly scaled) instance within the slot
-        3. Add to the scene
-        """
-        # 1️⃣ resize (and get scale factor)
-        scale = self.layout_template.resize_component(instance)
-
-        if scale < 1.0:
-            QMessageBox.warning(
-                self,
-                "Component Too Large",
-                "This component is larger than its slot; it has been scaled down to fit."
-            )
-
-        # 2️⃣ compute centered offset
-        slot_w, slot_h = self.layout_template.get_cell_size_px()
-        inst_rect = instance.boundingRect()
-        inst_w = inst_rect.width() * scale
-        inst_h = inst_rect.height() * scale
-
-        offset_x = (slot_w - inst_w) / 2
-        offset_y = (slot_h - inst_h) / 2
-
-        instance.setPos(slot_origin + QPointF(offset_x, offset_y))
-
-        # 3️⃣ add to scene
-        self.scene.addItem(instance)
-    ## Existing files are loaded in main_window.py
-    # def load_template(self, template: LayoutTemplate):
-    #     # Remove any existing item
-    #     if self.template_item:
-    #         self.removeItem(self.template_item)
-    #         self.template_item = None
-    #     # Clear scene for fresh layout
-    #     self.clear()
-    #     # Create and add the template item
-    #     item = LayoutTemplateItem(template)
-    #     self.template_item = item
-    #     self.addItem(item)
-    #     # Set the scene rectangle to match page size
-    #     self.setSceneRect(item.boundingRect())
-
-    #     # Connect model signals to update view
-    #     item.pageRectChanged.connect(lambda: self._on_template_shape_changed())
-    #     item.gridSettingsChanged.connect(lambda: self._on_template_shape_changed())
-    #     item.slotsChanged.connect(lambda: self._on_template_shape_changed())
-
-    # --- Toolbar / UI Interactions ---
-
-    def on_orientation_changed(self, landscape: bool):
-        self.layout_template.landscape = landscape
-        self.update_grid()
-
-    def on_grid_size_changed(self, rows: int, cols: int):
-        template = self.layout_template
-        pid = template.pid 
-        old_array_len = template.rows * template.cols
-        template.rows = rows
-        template.cols = cols
-        new_array_len = rows, cols
-
-        if old_array_len == new_array_len:
-            return
-        elif old_array_len > new_array_len:
-            self.registry.grid_contracted(pid, rows=rows, cols=cols)
-        elif old_array_len < new_array_len:
-            self.registry.grid_expanded(pid, rows=rows, cols=cols)
-
-        self.update_grid()
-
-    def on_margin_changed(self, margin_type: str, value: str):
-        setattr(self.layout_template, margin_type, value)
-        self.scene.update()
-        self.update_grid()
-
-    def on_spacing_changed(self, spacing_type: str, value: str):
-        setattr(self.layout_template, spacing_type, value)
-        print(f"Spacing x should be set to {value} currently {self.layout_template.spacing_x}")
-        self.update_grid()
-
-    def on_auto_fill_changed(self, checked: bool):
-        self.layout_template.auto_fill = checked
-        self.update_grid()
 
     # --- Export / Print ---
     def export_pdf(self, *args, **kwargs):

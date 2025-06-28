@@ -74,6 +74,7 @@ class ProtoRegistry(QObject):
         Factory + register in one call.
         """
         final_pid = issue_pid(prefix_or_pid)
+        # print(f"Object created with final_pid {final_pid}")
         obj = self._factory.create(pid=final_pid, **kwargs)
         self.register(obj)
         return obj
@@ -200,38 +201,34 @@ class RootRegistry(ProtoRegistry):
         self._global_orphans: Dict[str, Any] = {}
         self.children: List[ProtoRegistry] = []
 
-        # mirror own signals into the global maps
-        self.object_registered.connect(self._add_global)
-        self.object_deregistered.connect(self._remove_global)
-        self.object_orphaned.connect(self._orphan_global)
+        # # mirror own signals into the global maps
+        # self.object_registered.connect(self._add_global)
+        # self.object_deregistered.connect(self._remove_global)
+        # self.object_orphaned.connect(self._orphan_global)
 
         # watch the system clipboard for copy/cut/paste
         cb: QClipboard = QGuiApplication.clipboard()
         cb.dataChanged.connect(self._on_clipboard_event)
 
-    def _add_global(self, obj: Any):
-        self._global_store[obj.pid] = obj
-        self.object_registered.emit(obj)  # <-- re-emit
-
-    def _remove_global(self, obj: Any):
-        self._global_store.pop(obj.pid, None)
-        self.object_deregistered.emit(obj)  # <-- re-emit
-
-    def _orphan_global(self, obj: Any):
-        self._global_orphans[obj.pid] = obj
-        self.object_orphaned.emit(obj)  # <-- re-emit
-
-    def create_child_registry(self) -> ProtoRegistry:
-        """
-        Instantiate a new per‐template registry, wire its signals,
-        and keep track of it in self.children.
-        """
+    def create_child_registry(self):
         child = ProtoRegistry(parent=self, settings=self.settings)
         child.object_registered.connect(self._add_global)
         child.object_deregistered.connect(self._remove_global)
         child.object_orphaned.connect(self._orphan_global)
         self.children.append(child)
         return child
+
+    def _add_global(self, obj):
+        self._global_store[obj.pid] = obj
+        self.object_registered.emit(obj)  # This is OK
+
+    def _remove_global(self, obj):
+        self._global_store.pop(obj.pid, None)
+        self.object_deregistered.emit(obj)  # <-- Only emits to root listeners; OK if not connected back to self!
+
+    def _orphan_global(self, obj):
+        self._global_orphans[obj.pid] = obj
+        self.object_orphaned.emit(obj)
 
     def get_global(self, pid: str) -> Any:
         """Retrieve any object from the unified global store."""
