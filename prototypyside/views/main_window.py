@@ -53,6 +53,9 @@ class MainDesignerWindow(QMainWindow):
         # Main application settings, might be shared or passed to tabs
         self.settings = AppSettings(unit='px', display_dpi=96, print_dpi=300)
         self.registry = RootRegistry(settings=self.settings)
+
+        self._tab_map = {}  # pid: tab
+
         self.tab_widget: Optional[QTabWidget] = None
         self.palette_dock: Optional[QDockWidget] = None
         self.layers_dock: Optional[QDockWidget] = None
@@ -280,6 +283,13 @@ class MainDesignerWindow(QMainWindow):
         #     # Don’t crash—just log or show a brief warning
         #     print(f"Autosave failed: {e}")
 
+    def get_scene_for_template_pid(self, tpid):
+        index = self._tab_map.get(tpid)
+        if index is not None and 0 <= index < self.tab_widget.count():
+            tab = self.tab_widget.widget(index)
+            return tab.scene
+        return None
+
     @Slot(int)
     def on_tab_changed(self, index: int):
         # first thing: persist whatever was open before
@@ -370,12 +380,13 @@ class MainDesignerWindow(QMainWindow):
     def add_new_layout_tab(self):
         new_registry = self.registry.create_child_registry()
         new_template = new_registry.create("lt", registry=new_registry, parent=None)
-        new_tab = LayoutTab(parent=self, template=new_template, registry=new_registry)
+        new_tab = LayoutTab(parent=self, main_window=self, template=new_template, registry=new_registry)
         self.undo_group.addStack(new_tab.undo_stack)
         # Connect the tab's status message signal to the main window's slot
         new_tab.status_message_signal.connect(self.show_status_message)
         new_tab.tab_title_changed.connect(self.on_tab_title_changed)
         index = self.tab_widget.addTab(new_tab, new_template.name)
+        self._tab_map[new_template.pid] = index
         self.tab_widget.setCurrentIndex(index)
         self.show_status_message("New template tab created.", "info")
         self.on_tab_changed(index) # Manually trigger update for new tab
@@ -390,6 +401,7 @@ class MainDesignerWindow(QMainWindow):
         new_tab.status_message_signal.connect(self.show_status_message)
         new_tab.tab_title_changed.connect(self.on_tab_title_changed)
         index = self.tab_widget.addTab(new_tab, new_template.name)
+        self._tab_map[new_template.pid] = index
         self.tab_widget.setCurrentIndex(index)
         self.show_status_message("New template tab created.", "info")
         self.on_tab_changed(index) # Manually trigger update for new tab
@@ -456,19 +468,20 @@ class MainDesignerWindow(QMainWindow):
 
     @Slot()
     def save_template(self):
-        tab = self.get_current_tab()
-        if not tab:
-            return
+        pass
+        # tab = self.get_current_tab()
+        # if not tab:
+        #     return
 
-        # If we’ve never saved before, fall back to Save As…
-        if not getattr(tab, "file_path", None):
-            return self.on_save_as()
+        # # If we’ve never saved before, fall back to Save As…
+        # if not getattr(tab, "file_path", None):
+        #     return self.on_save_as()
 
-        self._write_tab_to_path(tab, tab.file_path)
-        self.show_status_message(f"Saved to {tab.file_path}", "success")
-        # update the tab title if needed
-        idx = self.tab_widget.indexOf(tab)
-        self.tab_widget.setTabText(idx, Path(tab.file_path).stem)
+        # self._write_tab_to_path(tab, tab.file_path)
+        # self.show_status_message(f"Saved to {tab.file_path}", "success")
+        # # update the tab title if needed
+        # idx = self.tab_widget.indexOf(tab)
+        # self.tab_widget.setTabText(idx, Path(tab.file_path).stem)
 
     @Slot()
     def save_as_template(self):

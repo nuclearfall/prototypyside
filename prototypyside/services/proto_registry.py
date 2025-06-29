@@ -32,7 +32,8 @@ class ProtoRegistry(QObject):
 
     def __init__(self, parent, settings):
         super().__init__()
-        self.parent_registry = parent
+
+        self.root = parent
         self.settings = settings
         self._root_pid = None
         self._store: Dict[str, Any] = {}
@@ -140,6 +141,26 @@ class ProtoRegistry(QObject):
 
     def is_orphan(self, pid: str) -> bool:
         return True if pid in self._orphans else False
+
+    def find(self, pid: str):
+        obj = self._store.get(pid)
+        if obj:
+            return obj
+        for child_registry in self.children:
+            found = child_registry.find(pid)
+            if found:
+                return found
+        return None
+
+    # def find_all_by_type(self, klass):
+    #     results = []
+    #     for obj in self._store.values():
+    #         if isinstance(obj, klass):
+    #             results.append(obj)
+    #     for child in self.child_registries:
+    #         results.extend(child.find_all_by_type(klass))
+    #     return results
+
     def get(self, pid: str) -> Any:
         """
         Retrieve a registered object by PID.
@@ -191,24 +212,20 @@ class ProtoRegistry(QObject):
 class RootRegistry(ProtoRegistry):
     """
     A global registry that tracks all children registries.
-    Mirrors every child’s registrations → a single _global_store,
+    Mirrors every child’s registrations → a single _store,
     and coordinates copy/cut/paste via the Qt clipboard.
     """
 
     def __init__(self, settings):
         super().__init__(parent=None, settings=settings)
-        self._global_store: Dict[str, Any] = {}
+        self._store: Dict[str, Any] = {}
         self._global_orphans: Dict[str, Any] = {}
         self.children: List[ProtoRegistry] = []
-
-        # # mirror own signals into the global maps
-        # self.object_registered.connect(self._add_global)
-        # self.object_deregistered.connect(self._remove_global)
-        # self.object_orphaned.connect(self._orphan_global)
 
         # watch the system clipboard for copy/cut/paste
         cb: QClipboard = QGuiApplication.clipboard()
         cb.dataChanged.connect(self._on_clipboard_event)
+
 
     def create_child_registry(self):
         child = ProtoRegistry(parent=self, settings=self.settings)
@@ -219,11 +236,11 @@ class RootRegistry(ProtoRegistry):
         return child
 
     def _add_global(self, obj):
-        self._global_store[obj.pid] = obj
+        self._store[obj.pid] = obj
         self.object_registered.emit(obj)  # This is OK
 
     def _remove_global(self, obj):
-        self._global_store.pop(obj.pid, None)
+        self._store.pop(obj.pid, None)
         self.object_deregistered.emit(obj)  # <-- Only emits to root listeners; OK if not connected back to self!
 
     def _orphan_global(self, obj):
@@ -233,12 +250,12 @@ class RootRegistry(ProtoRegistry):
     def get_global(self, pid: str) -> Any:
         """Retrieve any object from the unified global store."""
         try:
-            return self._global_store[pid]
+            return self._store[pid]
         except KeyError:
             raise KeyError(f"PID '{pid}' not found in global registry")
 
     def get_global_by_type(self, prefix: str):
-        return [obj for obj in self._global_store.values() if get_prefix(obj.pid) == prefix]
+        return [obj for obj in self._store.values() if get_prefix(obj.pid) == prefix]
 
 
     def to_dict(self) -> Dict[str, Any]:
@@ -306,8 +323,8 @@ class RootRegistry(ProtoRegistry):
         # example convention: when copying, we prefix text with "PID:<pid>"
         if text.startswith("PID:"):
             pid = text[4:]
-            if pid in self._global_store:
-                orig = self._global_store[pid]
+            if pid in self._store:
+                orig = self._store[pid]
                 if hasattr(orig, "clone"):
                     clone = orig.clone()
                     # by default, register into the originating child registry

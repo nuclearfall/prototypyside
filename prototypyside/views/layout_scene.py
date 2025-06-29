@@ -23,7 +23,7 @@ class LayoutScene(QGraphicsScene):
     - Adjusts sceneRect when template changes
     """
     component_dropped = Signal(object, QPointF)
-    selectionChanged = Signal()
+    selectionChanged = Signal(str)
     def __init__(self, scene_rect, tab, parent=None):
         super().__init__(scene_rect, parent) 
         self.tab = tab 
@@ -31,9 +31,7 @@ class LayoutScene(QGraphicsScene):
         self._scene_rect = scene_rect
         print(f"Template Item boundingRect set to {self._scene_rect}")
         self.setSceneRect(self._scene_rect)
-        # self.setBackgroundBrush(QBrush(QColor(100, 100, 255))) # A clear blue, for testing
-        # Or even a checkerboard pattern for transparency debugging
-        # self.setBackgroundBrush(QBrush(Qt.lightGray, Qt.Dense6Pattern))
+
 
     def drawBackground(self, painter: QPainter, rect: QRectF):
         super().drawBackground(painter, rect)
@@ -117,9 +115,7 @@ class LayoutScene(QGraphicsScene):
         if self.is_valid_mime_data(event):
             pid = event.mimeData().data("application/x-component-pid").data().decode("utf-8")
             scene_pos = event.scenePos()
-            self.tab.registry.get(pid)
             self.component_dropped.emit(pid, scene_pos)
             event.acceptProposedAction()
-            print(f"Component pid {pid} successfully dropped.")
         else:
             super().dropEvent(event)

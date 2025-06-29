@@ -9,7 +9,6 @@ class ComponentInstance(QGraphicsItem):
     update_cache = Signal()
     def __init__(self, template, data, rect, parent=None):
         super().__init__(parent)
-        self.template = template
         self.data = data  # dict of merged text/image fields, etc.
         self.rect = rect  # QRectF (the slot this fills)
         # Optionally: pre-render or resolve any resources for efficiency
@@ -43,18 +42,3 @@ class ComponentInstance(QGraphicsItem):
     def invalidate_cache(self):
         self._cache_image = None
         self.update()
-
-    # Optional: add serialization if needed
-    def to_dict(self):
-        return {
-            "template_pid": self.template.pid,
-            "rect": {
-                "x": self.rect.x(),
-                "y": self.rect.y(),
-                "width": self.rect.width(),
-                "height": self.rect.height(),
-            },
-            "data": self.data
-        }
-
-

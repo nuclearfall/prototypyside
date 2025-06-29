@@ -3,15 +3,16 @@
 from typing import Optional, List
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QSplitter, QLabel, QGridLayout,
-    QGraphicsView)
+    QGraphicsView, QGraphicsScene)
 from PySide6.QtCore import Qt, Signal, QRectF, QPointF, Slot, QTimer
 from PySide6.QtGui import (QKeySequence, QShortcut, QUndoStack, 
-    QUndoGroup, QUndoCommand, QPainter, QPageSize)
+    QUndoGroup, QUndoCommand, QPainter, QPageSize, QPixmap, QImage, QPainter)
+
 from prototypyside.models.layout_template import LayoutTemplate, LayoutSlot
-from prototypyside.views.layout_property_panel import LayoutPropertyPanel
+from prototypyside.views.panels.layout_property_panel import LayoutPropertyPanel, scene_to_pixmap
 from prototypyside.widgets.layout_toolbar import LayoutToolbar
 from prototypyside.widgets.layout_palette import LayoutPalette
-from prototypyside.widgets.import_panel import ImportPanel
+from prototypyside.views.panels.import_panel import ImportPanel
 from prototypyside.widgets.unit_field import UnitField
 from prototypyside.views.layout_scene import LayoutScene
 from prototypyside.views.layout_view import LayoutView
@@ -48,8 +49,9 @@ class LayoutTab(QWidget):
     # layout_tab.py (fixed __init__ section)
 
     # layout_tab.py (corrected __init__ section)
-    def __init__(self, parent, template, registry):
+    def __init__(self, parent, main_window, template, registry):
         super().__init__(parent)
+        self.main_window = main_window
         self.registry = registry
         self.template = template
         self.settings = registry.settings
@@ -68,8 +70,6 @@ class LayoutTab(QWidget):
         self.view.setViewportUpdateMode(QGraphicsView.FullViewportUpdate)
         self.view.setOptimizationFlag(QGraphicsView.DontSavePainterState)
         self.view.setOptimizationFlag(QGraphicsView.DontAdjustForAntialiasing)
-        print(f"Size of scene rect before add item: {self.scene.sceneRect()}")
-        print(f"Size of scene rect after add item: {self.scene.sceneRect()}")
         self.view.setScene(self.scene)
         self.view.fitInView(self.scene.sceneRect(), Qt.KeepAspectRatio)
         self.view.show()
@@ -83,12 +83,13 @@ class LayoutTab(QWidget):
         self._create_property_panel()
         self.margin_spacing_panel = self._create_margin_spacing_panel()
         self.remove_slot_btn = QPushButton("Remove Assignment")
+        
         #self.remove_slot_btn.clicked.connect(self._on_remove_slot)
 
-        # Connect margin/spacing signals to handler methods
+        # Connect signals to handler methods
         self.template.marginsChanged.connect(self.on_template_margin_changed)
         self.template.spacingChanged.connect(self.on_template_spacing_changed)
-
+        self.layout_palette.palette_selection_changed.connect(self.on_palette_selection_change)
         # --- 3. Set the simple, single layout for the tab itself ---
         main_layout = QHBoxLayout(self)
         main_layout.setContentsMargins(0, 0, 0, 0)
@@ -204,14 +205,13 @@ class LayoutTab(QWidget):
         self.layout_toolbar.orientation_changed.connect(self.on_orientation_changed)
         self.layout_toolbar.grid_size_changed.connect(self.on_grid_size_changed)
         self.layout_toolbar.autofill_changed.connect(self.on_auto_fill_changed)
-
         # Set up initial toolbar state from the template
         self.layout_toolbar.apply_template(self.layout_template)
         # print("LayoutToolbar sizeHint:", self.layout_toolbar.sizeHint())
         return self.layout_toolbar
 
     def _create_layout_palette(self) -> QWidget:
-        self.layout_palette = LayoutPalette(registry=self.registry.parent_registry, parent=self)
+        self.layout_palette = LayoutPalette(registry=self.registry.root, parent=self)
         # print("LayoutPalette sizeHint:", self.layout_palette.sizeHint())
         # Return a widget listing all open component templates
         pass
@@ -238,9 +238,10 @@ class LayoutTab(QWidget):
 
     @Slot(str, QPageSize)
     def on_page_size_changed(self, display_string, qpagesize):
-        self.layout_template.page_size = display_string  # Save the display string!
+        self.layout_template.page_size = display_string
+        self.scene.setSceneRect(*self.layout_template.boundingRect().getRect()) # Save the display string!
         # Optionally also save qpagesize for calculations/rendering
-        self.update_grid()
+        self.layout_template.setGrid()
 
     @Slot(bool)
     def on_orientation_changed(self, landscape: bool):
@@ -260,15 +261,16 @@ class LayoutTab(QWidget):
         self.update_grid()
 
     def on_template_margin_changed(self):
-        # 1. Read current values from the UI fields
-        self.layout_template.margin_top = self.margin_top.getValue()
-        self.layout_template.margin_bottom = self.margin_bottom.getValue()
-        self.layout_template.margin_left = self.margin_left.getValue()
-        self.layout_template.margin_right = self.margin_right.getValue()
+        # For consistency, use a loop to update all margins
+        for attr, field in [
+            ("margin_top", self.margin_top),
+            ("margin_bottom", self.margin_bottom),
+            ("margin_left", self.margin_left),
+            ("margin_right", self.margin_right)
+        ]:
+            setattr(self.layout_template, attr, field.value())  # Or .get_value()
         
-        # 2. Update the grid/layout
         self.layout_template.setGrid()
-
 
     def on_template_spacing_changed(self):
         # This method is called whenever spacing_x or spacing_y changes
@@ -276,8 +278,29 @@ class LayoutTab(QWidget):
         # self.scene.clear()
         self.layout_template.spacing_x = self.spacing_x.getValue()
         self.layout_template.spacing_y = self.spacing_y.getValue()
-        
+
         self.layout_template.setGrid()
+
+    @Slot(str)
+    def on_palette_selection_change(self, pid):
+
+        ct = self.registry.root.find(pid)
+        # print(ct.name, ct.pid) # This works
+        scene = self.main_window.get_scene_for_template_pid(pid)
+
+        ct_rendered = scene_to_pixmap(scene, ct.width_px, ct.height_px)
+        self.property_panel.display_template(ct, ct_rendered)
+        self.property_panel.update()
+        self.update()
+
+    @Slot()
+    def on_scene_selection_changed(self):
+        selected_items = self.scene.selectedItems()
+        if selected_items:
+            item = selected_items[0]
+            self.property_panel.display_item(item)
+        else:
+            self.property_panel.clear_values()
 
     # --- Selection Logic ---
     def select_slot(self, row: int, col: int):
@@ -290,11 +313,9 @@ class LayoutTab(QWidget):
         self.refresh_panels()
 
     def on_slot_selected(self, slot_pid: str):
+        if prefix(slot_pid) == "ct":
+            self.property_panel.template_
         self._current_selected_slot_pid = slot_pid
-        self.refresh_panels()
-
-    def on_palette_template_selected(self, tpid: str):
-        self._layout_tpid = tpid
         self.refresh_panels()
 
     @Slot(str, QPointF)
@@ -308,17 +329,11 @@ class LayoutTab(QWidget):
 
         if slot_pid:
             # registry sets slot component_id.
-            comp_inst = self.registry.create_component_instance(tpid=tpid, slot_pid=slot_pid)
-            # 🔜 next: create & place your ComponentInstance in that slot.
-            #    You’ll probably do something like:
-            #    tpl = self.registry.get(tpid)
-            #    instance = ComponentInstance(tpl, data_row, QRectF(...))
-            #    instance.setPos(slot_origin)
-            #    self.scene.addItem(instance)
-            pass
+
+            comp_inst = self.registry.clone(registry.root.global_get(tpid))
+            self.property_panel.display_template(comp_inst, self.scene)
         else:
             self.show_status_message(f"No layout‐slot at {scene_pos}", "warning")
-
 
     # --- Export / Print ---
     def export_pdf(self, *args, **kwargs):

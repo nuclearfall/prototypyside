@@ -1,6 +1,6 @@
 # prototypyside/config.py
 
-from PySide6.QtGui import QColor, QPageSize
+from PySide6.QtGui import Qt, QColor, QPageSize
 from enum import Enum, auto
 
 
@@ -8,6 +8,16 @@ from enum import Enum, auto
 HANDLE_SIZE = 8
 HANDLE_COLOR = QColor(0, 120, 215)
 HANDLE_GRAB_WIDTH = 10 # Larger grab area for handles
+
+DISPLAY_MODE_FLAGS = {
+    "stretch":      {"aspect": Qt.IgnoreAspectRatio,         "desc": "Stretch to Fit"},
+    "aspect_fit":   {"aspect": Qt.KeepAspectRatio,           "desc": "Keep Aspect Ratio"},
+    "aspect_fill":  {"aspect": Qt.KeepAspectRatioByExpanding,"desc": "Fill (Crop to Fit)"},
+    "center":       {"aspect": Qt.KeepAspectRatio,           "desc": "Center (No Scaling)"},  # scaling logic must skip resize
+    "topleft":      {"aspect": Qt.KeepAspectRatio,           "desc": "Top-Left (No Scaling)"},# scaling logic must skip resize
+    "tile":         {"aspect": None,                         "desc": "Tile / Repeat"},        # Custom tiling logic
+}
+
 
 MEASURE_INCREMENT = {
     "cm": {

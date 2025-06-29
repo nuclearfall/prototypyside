@@ -18,17 +18,32 @@ INCHES_TO_UNITS = {
 
 UNIT_STR_REGEX = re.compile(r"\s*(\d+(?:\.\d*)?|\.\d+)\s*(px|in|cm|mm|pt|\"?)?\s*", re.IGNORECASE)
 
+class UnitManager:
+
+    def __init__(self, settings):
+        self._dpi = settings.dpi
+        self._unit = settings.unit
+        self._values = {}
+        self._fields = {}
+
+        self.settings.unit_changed.connect(self.set_new_default_units())
+        self.settings.dpi_changed.connect(self.set_px_output_format())
+
+    def display_at_dpi(self, dpi):
+        pass
+
+    def new(self, unit_str):
+        return UnitStr(raw, self.unit, self.dpi)
 class UnitStr:
     __slots__ = ("_raw", "_value", "_unit", "_dpi", "_unit_cache")
-
-    def __init__(self, raw: Union[str, float, int], unit: str = None, dpi: int = 300):
+    def __init__(self, raw: Union[str, float, int], unit: str = None, dpi: int = 300, parent=None):
         self._raw = raw
         self._dpi = dpi
         self._unit_cache = {}
 
         if isinstance(raw, (int, float)):
             self._value = Decimal(str(raw))
-            self._unit = "px" if not unit else unit
+            self._unit = "px" if dpi and not unit else "in"
         elif isinstance(raw, str):
             match = UNIT_STR_REGEX.fullmatch(raw)
             if not match:
@@ -114,7 +129,13 @@ class UnitStr:
         formatted = format(value, fmt)
         return f"{formatted} {unit}"
 
-    def as_dict(self) -> dict:
+    def format_for(self, unit_manager=None):
+        if unit_manager is None:
+            unit_manager = global_unit_manager
+        val = self.to(unit_manager.unit, unit_manager.dpi)
+        return f"{val:.2f}{unit_manager.unit}"
+
+    def dict(self) -> dict:
         return {
             "in": self.to("in"),
             "mm": self.to("mm"),
@@ -122,6 +143,15 @@ class UnitStr:
             "pt": self.to("pt"),
             "px": self.to("px"),
         }
+
+    def __str__(self):
+        return self.raw
+
+    def __repr__(self):
+        return f"UnitStr(raw='{self.raw}', value={self.value}, unit='{self.unit}', dpi={self.dpi})"
+
+
+
 
     # def __add__(self, other):
     #     if isinstance(other, UnitStr):
@@ -186,9 +216,3 @@ class UnitStr:
     #         return self.to(self.unit) / other.to(self.unit)
     #     else:
     #         return NotImplemented
-
-    def __str__(self):
-        return self.raw
-
-    def __repr__(self):
-        return f"UnitStr(raw='{self.raw}', value={self.value}, unit='{self.unit}', dpi={self.dpi})"

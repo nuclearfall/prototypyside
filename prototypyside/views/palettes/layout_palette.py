@@ -9,6 +9,9 @@ class LayoutPalette(QWidget):
     """
     Palette showing all open component templates available for layout assignment.
     """
+    palette_selection_changed = Signal(str)
+    palette_deselected = Signal()
+
     def __init__(self, registry, parent=None):
         super().__init__(parent)
         # registry is the global registry
@@ -16,14 +19,14 @@ class LayoutPalette(QWidget):
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
         self.label = QLabel("Component Templates", self)
-        self.list_widget = DraggableListWidget(self)
+        self.list_widget = DraggableListWidget(self, registry)
         self.list_widget.setDragEnabled(True)        
         self.setMinimumHeight(20)
         self.setMinimumWidth(100) 
         layout.addWidget(self.label)
         layout.addWidget(self.list_widget)
         layout.addStretch(1)
-
+        self.list_widget.itemClicked.connect(self._on_list_item_clicked)
         # Connect signals
         self.registry.object_registered.connect(self._on_component_registered)
         self.registry.object_deregistered.connect(self._on_component_deregistered)
@@ -35,8 +38,12 @@ class LayoutPalette(QWidget):
         self.list_widget.clear()
         existing_components = self.registry.get_global_by_type("ct")
         for obj in existing_components:
-
             self._add_component_item(obj)
+
+    def _on_list_item_clicked(self):
+        item = self.list_widget.currentItem()
+        self.palette_selection_changed.emit(item.data(Qt.UserRole))
+
 
     def _add_component_item(self, obj):
         item = QListWidgetItem(obj.name)
@@ -62,10 +69,11 @@ class LayoutPalette(QWidget):
                     return
 
 class DraggableListWidget(QListWidget):
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, registry=None):
         super().__init__(parent)
         self.setMinimumHeight(20)
-        self.setMinimumWidth(60) 
+        self.setMinimumWidth(60)
+
 
     def mouseMoveEvent(self, event: QMouseEvent):
         if event.buttons() & Qt.LeftButton:

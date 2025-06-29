@@ -9,6 +9,12 @@ from prototypyside.utils.unit_str import UnitStr
 from prototypyside.config import PAGE_SIZES
 from prototypyside.services.undo_commands import AddSlotCommand
 
+PAGE_UNITS = {
+    "in": QPageSize.Unit.Inch,
+    "mm": QPageSize.Unit.Millimeter,
+    "pt": QPageSize.Unit.Point,
+}
+
 class LayoutSlot(QGraphicsObject):
     def __init__(self, pid, width, height, x=0, y=0, parent=None):
         super().__init__(parent)
@@ -22,6 +28,7 @@ class LayoutSlot(QGraphicsObject):
         self._y = float(y.to("px")) if hasattr(y, "to") else float(y)
         self.unit = getattr(parent, "unit", None)
         self.dpi = getattr(parent, "dpi", None)
+        self.render_flag = "keep_aspect"
         self.setRect(self.getRect())
         self.setPos(self._x, self._y)
 
@@ -116,8 +123,6 @@ class LayoutTemplate(QGraphicsObject):
         self._columns = columns 
         self.layout_slots: List[List[LayoutSlot]] = [[]]
 
-        # self.setGrid(self.rows, self.columns)
-
     @property
     def pid(self) -> str:
         return self._pid
@@ -154,27 +159,15 @@ class LayoutTemplate(QGraphicsObject):
         """
         Returns (page_width, page_height) as UnitStr in the template's current unit.
         """
-        ps_enum = PAGE_SIZES.get(self.page_size)
+        ps_enum = PAGE_SIZES.get(self.page_size, None)
         if ps_enum is None:
             ps_enum = QPageSize.Letter
         qpagesize = QPageSize(ps_enum)
+        page_unit = PAGE_UNITS.get(self.unit) or QPageSize.Unit.Inch
+        size = qpagesize.size(page_unit)
+        w = UnitStr(size.width(), unit=self.unit, dpi=self.dpi)
+        h = UnitStr(size.height(), unit=self.unit, dpi=self.dpi)
 
-        if self.unit == "in":
-            size = qpagesize.size(QPageSize.Unit.Inch)
-            w = UnitStr(size.width(), unit="in", dpi=self.dpi)
-            h = UnitStr(size.height(), unit="in", dpi=self.dpi)
-        elif self.unit == "mm":
-            size = qpagesize.size(QPageSize.Unit.Millimeter)
-            w = UnitStr(size.width(), unit="mm", dpi=self.dpi)
-            h = UnitStr(size.height(), unit="mm", dpi=self.dpi)
-        elif self.unit == "cm":
-            size = qpagesize.size(QPageSize.Unit.Millimeter)
-            w = UnitStr(size.width() / 10.0, unit="cm", dpi=self.dpi)
-            h = UnitStr(size.height() / 10.0, unit="cm", dpi=self.dpi)
-        else:
-            size = qpagesize.size(QPageSize.Unit.Inch)
-            w = UnitStr(size.width(), unit="in", dpi=self.dpi)
-            h = UnitStr(size.height(), unit="in", dpi=self.dpi)
         return w, h
 
     @property
@@ -361,6 +354,7 @@ class LayoutTemplate(QGraphicsObject):
                         print("Item is being added to scene")
                         self.scene.addItem(slot)
                     slot.update()
+
     def compute_slot_size(self, row, col):
         """
         Returns slot_width, slot_height in **pixels** for the given grid position.
@@ -403,8 +397,6 @@ class LayoutTemplate(QGraphicsObject):
 
         return x_px, y_px
 
-
-
     def get_px_margins(self):
         return (self.margin_top.to("px", dpi=self.dpi), self.margin_bottom.to("px", dpi=self.dpi), 
                 self.margin_left.to("px", dpi=self.dpi), self.margin_right.to("px", dpi=self.dpi))
@@ -433,30 +425,30 @@ class LayoutTemplate(QGraphicsObject):
     #     y = rect.top() + top + row * (cell_h + spacing_y)
     #     return x, y
 
-    # def get_slot_at_position(self, scene_pos: QPointF) -> Tuple[Optional[str], Optional[QPointF]]:
-    #     """
-    #     Given a scene-coordinate point, return the (slot_pid, slot_origin)
-    #     whose rect contains it, or (None, None) if no slot matches.
-    #     """
-    #     # uniform slot size in pixels
-    #     cell_w, cell_h = self.get_cell_size_px()
+    def get_slot_at_position(self, scene_pos: QPointF) -> Tuple[Optional[str], Optional[QPointF]]:
+        """
+        Given a scene-coordinate point, return the (slot_pid, slot_origin)
+        whose rect contains it, or (None, None) if no slot matches.
+        """
+        # uniform slot size in pixels
+        cell_w, cell_h = self.get_cell_size_px()
 
-    #     for row in range(self.rows):
-    #         for col in range(self.columns):
-    #             # slot’s top-left in px
-    #             x_px, y_px = self.get_slot_position_px(row, col)
-    #             slot_rect = QRectF(x_px, y_px, cell_w, cell_h)
+        for row in range(self.rows):
+            for col in range(self.columns):
+                # slot’s top-left in px
+                x_px, y_px = self.get_slot_position_px(row, col)
+                slot_rect = QRectF(x_px, y_px, cell_w, cell_h)
 
-    #             if slot_rect.contains(scene_pos):
-    #                 # now index into the 2D list
-    #                 slot_pid = None
-    #                 if self.layout_slots and len(self.layout_slots) > row:
-    #                     slot_row = self.layout_slots[row]
-    #                     if len(slot_row) > col:
-    #                         slot_pid = slot_row[col]
-    #                 return slot_pid, QPointF(x_px, y_px)
+                if slot_rect.contains(scene_pos):
+                    # now index into the 2D list
+                    slot = None
+                    if self.layout_slots and len(self.layout_slots) > row:
+                        slot_row = self.layout_slots[row]
+                        if len(slot_row) > col:
+                            slot = slot_row[col]
+                    return slot, QPointF(x_px, y_px)
 
-    #     return None, None
+        return None, None
 
     def iter_slot_geometry(self):
         """

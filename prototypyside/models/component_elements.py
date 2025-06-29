@@ -1,5 +1,5 @@
 from PySide6.QtCore import Qt, QRectF, QPointF, Signal, QObject
-from PySide6.QtGui import QColor, QFont, QPen, QBrush, QPainter
+from PySide6.QtGui import QColor, QFont, QPen, QBrush, QPainter, QPixmap, QImage
 from PySide6.QtWidgets import QGraphicsItem, QGraphicsObject, QGraphicsSceneDragDropEvent
 from typing import Optional, Dict, Any
 from prototypyside.views.graphics_items import ResizeHandle

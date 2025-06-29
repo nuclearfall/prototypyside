@@ -10,17 +10,6 @@ class ElementPalette(QListWidget):
 
     def __init__(self, parent=None):
         super().__init__()
-        print("The ElementPalette has been added")
-        # layout = QVBoxLayout()
-        # layout.setContentsMargins(0, 0, 0, 0)
-        # self.setLayout(layout)
-
-        # Quick-access buttons
-        # text_btn.clicked.connect(lambda: self.element_type_selected.emit("te"))
-        # image_btn.clicked.connect(lambda: self.element_type_selected.emit("ie"))
-
-        # layout.addWidget(text_btn)
-        # layout.addWidget(image_btn)
 
         # Drag-enabled list
         self.setDragEnabled(True)

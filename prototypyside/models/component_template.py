@@ -84,11 +84,12 @@ class ComponentTemplate(QGraphicsObject):
         return self._dpi
 
     def add_element(self, element) -> "ComponentElement":
+        if element in self.elements:
+            return
         self.elements.append(element)
         max_z = max([e.zValue() for e in self.elements], default=0)
         element.setZValue(max_z + 100)
-        self.elements.append(element)
-        element.template_pid = self.pid
+        print(f"Template currently contains: {[o.name for o in self.elements]}")
         self.template_changed.emit()
         self.element_z_order_changed.emit()
 
