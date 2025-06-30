@@ -2,34 +2,21 @@
 
 from PySide6.QtWidgets import QWidget, QFormLayout, QLabel, QTextEdit, QComboBox
 from PySide6.QtGui import QPixmap, QImage, QPainter
-from PySide6.QtCore import Qt, Signal
+from PySide6.QtCore import Qt, Signal, QRectF
 
-from prototypyside.config import DISPLAY_MODE_FLAGS
 
 class LayoutPropertyPanel(QWidget):
     """
     Read-only property panel for showing properties of the selected template.
     """
-    display_mode_changed = Signal(str, str)
-
     def __init__(self, parent=None):
         super().__init__(parent)
         layout = QFormLayout(self)
         self.name_label = QLabel(self)
         self.details_text = QTextEdit(self)
         self.details_text.setReadOnly(True)
-        self.setup_combo()
         layout.addRow("Template Name:", self.name_label)
         layout.addRow("Details:", self.details_text)
-        layout.addWidget(self.fitting_combo)
-
-    def setup_combo(self):
-        self.fitting_combo = QComboBox()
-        for k, v in DISPLAY_MODE_FLAGS.items():
-            self.fitting_combo.addItem(v.get("desc"), k)
-        index = self.fitting_combo.findData("stretch")
-        if index != -1:
-            self.fitting_combo.setCurrentIndex(index)
 
     def display_template(self, template, pixmap=None):
         """
@@ -46,22 +33,22 @@ class LayoutPropertyPanel(QWidget):
                     if hasattr(elem, "content"):
                         text += f"  {getattr(elem, 'content', '')}\n"
             self.details_text.setText(text)
-            self.preview_label = QLabel(self)
-            self.preview_label.setFixedSize(80, 100)  # Or whatever size you want
-            if pixmap:
-                self.set_template_preview(pixmap)
-                self.layout().addWidget(self.preview_label)
+            # self.preview_label = QLabel(self)
+            # self.preview_label.setFixedSize(80, 100)  # Or whatever size you want
+            # if pixmap:
+            #     self.set_template_preview(pixmap)
+            #     self.layout().addWidget(self.preview_label)
 
         else:
             self.name_label.setText("")
             self.details_text.setText("")
 
  
-    def set_template_preview(self, pixmap: QPixmap):
-        preview = pixmap.scaled(self.preview_label.size(),
-                                Qt.KeepAspectRatio,
-                                Qt.SmoothTransformation)
-        self.preview_label.setPixmap(preview)
+    # def set_template_preview(self, pixmap: QPixmap):
+    #     preview = pixmap.scaled(self.preview_label.size(),
+    #                             Qt.KeepAspectRatio,
+    #                             Qt.SmoothTransformation)
+    #     self.preview_label.setPixmap(preview)
 
     def clear_values(self):
         # Remove all fields/widgets, or reset to a blank state

@@ -6,6 +6,8 @@ from PySide6.QtGui import QPageSize
 from prototypyside.widgets.unit_field import UnitField
 from prototypyside.config import PAGE_SIZES
 from prototypyside.utils.unit_converter import to_px
+from prototypyside.config import DISPLAY_MODE_FLAGS
+
 
 class LayoutToolbar(QWidget):
     """
@@ -21,6 +23,7 @@ class LayoutToolbar(QWidget):
     margin_changed = Signal(str, int)
     spacing_changed = Signal(str, int)
     autofill_changed = Signal(bool)
+    display_flag_changed = Signal(object)
 
     def __init__(self, settings, parent=None):
         super().__init__(parent)
@@ -54,6 +57,7 @@ class LayoutToolbar(QWidget):
         self.cols_spin.valueChanged.connect(
             lambda val: self.grid_size_changed.emit(self.rows_spin.value(), val)
         )
+
         layout.addWidget(QLabel("Rows:", self))
         layout.addWidget(self.rows_spin)
         layout.addWidget(QLabel("Cols:", self))
@@ -66,6 +70,14 @@ class LayoutToolbar(QWidget):
             lambda state: self.autofill_changed.emit(state == Qt.Checked)
         )
         layout.addWidget(self.autofill_checkbox)
+        self.fitting_combo = QComboBox()
+        for k, v in DISPLAY_MODE_FLAGS.items():
+            self.fitting_combo.addItem(v.get("desc"), k)
+        index = self.fitting_combo.findData("stretch")
+        if index != -1:
+            self.fitting_combo.setCurrentIndex(index)
+        layout.addWidget(self.fitting_combo)
+        self.fitting_combo.currentTextChanged.connect(self._on_display_flag_changed)
         layout.addStretch(1)
 
     @Slot(str)
@@ -77,6 +89,11 @@ class LayoutToolbar(QWidget):
         else:
             ps = None  # Handle custom size logic as needed
         self.page_size_changed.emit(name, ps)
+
+    @Slot(object)
+    def _on_display_flag_changed(self, flag_key):
+        flag = DISPLAY_MODE_FLAGS.get(display_flag).get("aspect")
+        self.display_flag_changed.emit(flag)
 
     def apply_template(self, template):
         """

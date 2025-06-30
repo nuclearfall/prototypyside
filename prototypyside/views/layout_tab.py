@@ -10,32 +10,33 @@ from PySide6.QtGui import (QKeySequence, QShortcut, QUndoStack,
 
 from prototypyside.models.layout_template import LayoutTemplate, LayoutSlot
 from prototypyside.views.panels.layout_property_panel import LayoutPropertyPanel, scene_to_pixmap
-from prototypyside.widgets.layout_toolbar import LayoutToolbar
-from prototypyside.widgets.layout_palette import LayoutPalette
+from prototypyside.views.toolbars.layout_toolbar import LayoutToolbar
+from prototypyside.views.palettes.layout_palette import LayoutPalette
 from prototypyside.views.panels.import_panel import ImportPanel
 from prototypyside.widgets.unit_field import UnitField
 from prototypyside.views.layout_scene import LayoutScene
 from prototypyside.views.layout_view import LayoutView
 from prototypyside.utils.unit_converter import to_px
 from prototypyside.config import PAGE_SIZES
+from prototypyside.services.undo_commands import CloneComponentCommand
 # Import your palette, panel, toolbar widgets as needed
 
-def addItems(scene, items):
-    """
-    Recursively adds QGraphicsItems (including any in nested lists/tuples) to the scene.
-    """
-    if items is None:
-        return
-    # If items is a single slot/item, add it directly
-    # (optional: check isinstance(items, QGraphicsItem) for robustness)
-    if hasattr(items, 'scene') and callable(items.scene):
-        if items.scene() is not scene:
-            scene.addItem(items)
-        return
-    # If items is a container, recurse
-    if isinstance(items, (list, tuple)):
-        for child in items:
-            addItems(scene, child)
+# def addItems(scene, items):
+#     """
+#     Recursively adds QGraphicsItems (including any in nested lists/tuples) to the scene.
+#     """
+#     if items is None:
+#         return
+#     # If items is a single slot/item, add it directly
+#     # (optional: check isinstance(items, QGraphicsItem) for robustness)
+#     if hasattr(items, 'scene') and callable(items.scene):
+#         if items.scene() is not scene:
+#             scene.addItem(items)
+#         return
+#     # If items is a container, recurse
+#     if isinstance(items, (list, tuple)):
+#         for child in items:
+#             addItems(scene, child)
 
 
 class LayoutTab(QWidget):
@@ -87,6 +88,8 @@ class LayoutTab(QWidget):
         #self.remove_slot_btn.clicked.connect(self._on_remove_slot)
 
         # Connect signals to handler methods
+        self.scene.component_dropped.connect(self.on_component_dropped)
+        self.layout_toolbar.display_flag_changed.connect(self.on_display_flag_changed)
         self.template.marginsChanged.connect(self.on_template_margin_changed)
         self.template.spacingChanged.connect(self.on_template_spacing_changed)
         self.layout_palette.palette_selection_changed.connect(self.on_palette_selection_change)
@@ -260,6 +263,15 @@ class LayoutTab(QWidget):
         self.layout_template.auto_fill = autofill
         self.update_grid()
 
+    @Slot(object)
+    def on_display_flag_changed(self, qflag):
+        self.layout_template.display_flag = qflag
+        for row in self.layout_template.layout_slots:
+            for column in row:
+                for slot in column:
+                    flag = self.layout_template.display_flag
+                    slot.display_flag = flag
+
     def on_template_margin_changed(self):
         # For consistency, use a loop to update all margins
         for attr, field in [
@@ -324,16 +336,21 @@ class LayoutTab(QWidget):
         Called when the user drops a ComponentTemplate onto the layout scene.
         Delegates to the model to figure out which slot that corresponds to.
         """
-        # 2️⃣ Ask the model which slot (if any) lives under that scene_pos
-        slot_pid, slot_origin = self.layout_template.get_slot_at_position(scene_pos)
+        slot, pos = self.layout_template.get_slot_at_position(scene_pos)
+        component = self.registry.root.find(tpid)
 
-        if slot_pid:
-            # registry sets slot component_id.
+        if slot is None or component is None:
+            print("Drop failed: no valid slot or component found")
+            return
 
-            comp_inst = self.registry.clone(registry.root.global_get(tpid))
-            self.property_panel.display_template(comp_inst, self.scene)
-        else:
-            self.show_status_message(f"No layout‐slot at {scene_pos}", "warning")
+        command = CloneComponentCommand(component, self, slot)
+        self.undo_stack.push(command)
+
+        clone = self.registry.get_last("ct")
+        slot.content = clone
+        print(f"Component Template clone {clone.name} being dropped into {slot.pid}")
+        print(f"Verifying we're in {slot.name}: {slot.content.name}")
+
 
     # --- Export / Print ---
     def export_pdf(self, *args, **kwargs):

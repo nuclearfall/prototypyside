@@ -159,7 +159,7 @@ def convert_to_pixels(value: float, unit: str, dpi: int) -> int:
     else:
         raise ValueError("Unsupported unit. Use 'in' for inches or 'cm' for centimeters.")
 
-def from_px_value(pixels: int, unit: str, dpi: int) -> float:
+def from_px(pixels: int, unit: str, dpi: int) -> float:
     """
     Converts a value from pixels to a specified unit ('in' or 'cm').
     Args:

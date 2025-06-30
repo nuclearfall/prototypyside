@@ -7,7 +7,25 @@ from enum import Enum, auto
 # --- Constants for Resize Handles ---
 HANDLE_SIZE = 8
 HANDLE_COLOR = QColor(0, 120, 215)
-HANDLE_GRAB_WIDTH = 10 # Larger grab area for handles
+HANDLE_GRAB_WIDTH = 12 # Larger grab area for handles
+
+
+PAGE_UNITS = {
+    "in": QPageSize.Unit.Inch,
+    "mm": QPageSize.Unit.Millimeter,
+    "pt": QPageSize.Unit.Point,
+}
+
+PAGE_SIZES = {
+    "Letter (8.5 × 11 in)": QPageSize.Letter,
+    "Legal (8.5 × 14 in)": QPageSize.Legal,
+    "A4 (210 × 297 mm)": QPageSize.A4,
+    "A5 (148 × 210 mm)": QPageSize.A5,
+    "Tabloid (11 × 17 in)": QPageSize.Tabloid,
+    "Executive (7.25 × 10.5 in)": QPageSize.Executive,
+    "B5 (176 × 250 mm)": QPageSize.B5,
+    "Custom...": None  # Placeholder if user wants to enter their own dimensions
+}
 
 DISPLAY_MODE_FLAGS = {
     "stretch":      {"aspect": Qt.IgnoreAspectRatio,         "desc": "Stretch to Fit"},
@@ -78,13 +96,4 @@ class HandleType(Enum):
 MIN_ELEMENT_SIZE = 20.0 # Define a minimum size for elements
 MIN_ALLOWED_SCALE = 0.8
 
-PAGE_SIZES = {
-    "Letter (8.5 × 11 in)": QPageSize.Letter,
-    "Legal (8.5 × 14 in)": QPageSize.Legal,
-    "A4 (210 × 297 mm)": QPageSize.A4,
-    "A5 (148 × 210 mm)": QPageSize.A5,
-    "Tabloid (11 × 17 in)": QPageSize.Tabloid,
-    "Executive (7.25 × 10.5 in)": QPageSize.Executive,
-    "B5 (176 × 250 mm)": QPageSize.B5,
-    "Custom...": None  # Placeholder if user wants to enter their own dimensions
-}
+

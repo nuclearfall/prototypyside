@@ -12,11 +12,11 @@ from prototypyside.services.proto_factory import ProtoFactory
 from prototypyside.utils.proto_helpers import get_prefix, issue_pid
 
 BASE_NAMES: Dict[str, str] = {
-    "ct": "Component",
-    "ci": "Component Instance",
-    "ie": "Image Element",
-    "te": "Text Element",
-    "lt": "Layout",
+    "ct": "Component Template",
+    "ci": "Component",
+    "ie": "Image",
+    "te": "Text",
+    "lt": "Layout Template",
     "li": "Layout Instance",
     "ls": "Layout Slot",
 }
@@ -106,29 +106,45 @@ class ProtoRegistry(QObject):
         self.object_deregistered.emit(obj)
         self.object_orphaned.emit(obj)
 
-    def clone(self, obj: Any, **kwargs) -> Any:
+    def clone(self, obj: Any) -> Any:
         """
         Clone an object, give it a new PID, register it, and name it.
         """
-        # --- validate & issue new PID -----------------------------------------
         pid = getattr(obj, "pid", None)
-        if pid is None:
+        if pid is None: 
             raise ValueError("Cannot clone object without a 'pid' attribute.")
+        
         new_pid = issue_pid(get_prefix(pid))
-
-        # --- serialize & rebuild via factory ----------------------------------
         data = self._factory.to_dict(obj)
         data["pid"] = new_pid
-        clone = self._factory.from_dict(data)
+        data["name"] = f"{data.get("name")}_copy" # Optional: let generate_name overwrite this
 
-        # --- name & register --------------------------------------------------
+        clone = self._factory.from_dict(data)
+        if clone is None:
+            raise ValueError("Factory failed to clone object from serialized data.")
+
         self.generate_name(clone)
         self.register(clone)
-        if get_prefix(clone.pid) in ["ie", "te"]:
-            template = self.get(clone.tpid)
-            template.insert_item(clone)
 
         return clone
+
+    def clone_all(self, elements: list, register: bool = True) -> list:
+        """
+        Clone a list of elements using the registry's clone method.
+        
+        Args:
+            elements (list): List of GameComponentElements (TextElement, ImageElement, etc.).
+            register (bool): Whether to auto-register each clone (default: True).
+        
+        Returns:
+            list: List of cloned elements.
+        """
+        clones = []
+        for element in elements:
+            clone = self.clone(element)
+            clones.append(clone)
+        return clones
+
 
     def reinsert(self, pid: str):
         """
@@ -146,24 +162,15 @@ class ProtoRegistry(QObject):
         obj = self._store.get(pid)
         if obj:
             return obj
-        for child_registry in self.children:
+        for child_registry in self.child_registries:
             found = child_registry.find(pid)
             if found:
                 return found
         return None
 
-    # def find_all_by_type(self, klass):
-    #     results = []
-    #     for obj in self._store.values():
-    #         if isinstance(obj, klass):
-    #             results.append(obj)
-    #     for child in self.child_registries:
-    #         results.extend(child.find_all_by_type(klass))
-    #     return results
-
     def get(self, pid: str) -> Any:
         """
-        Retrieve a registered object by PID.
+        Retrieve a locally registered object by PID.
         """
         try:
             return self._store[pid]
@@ -178,8 +185,15 @@ class ProtoRegistry(QObject):
             return list(self._store.values())
         return [o for o in self._store.values() if get_prefix(o.pid) == prefix]
 
-    def get_last(self):
-        return self.get_all()[-1]
+    def get_last(self, prefix=None):
+        if not self._store:
+            return None
+        keys = list(self._store.keys())
+        if prefix:
+            for key in reversed(keys):
+                if get_prefix(key) == prefix:
+                    return self.get(key)
+        return self.get(keys[-1])
 
     def to_dict(self) -> Dict[str, dict]:
         """
@@ -211,7 +225,7 @@ class ProtoRegistry(QObject):
 
 class RootRegistry(ProtoRegistry):
     """
-    A global registry that tracks all children registries.
+    A global registry that tracks all child_registries registries.
     Mirrors every child’s registrations → a single _store,
     and coordinates copy/cut/paste via the Qt clipboard.
     """
@@ -220,19 +234,18 @@ class RootRegistry(ProtoRegistry):
         super().__init__(parent=None, settings=settings)
         self._store: Dict[str, Any] = {}
         self._global_orphans: Dict[str, Any] = {}
-        self.children: List[ProtoRegistry] = []
+        self.child_registries: List[ProtoRegistry] = []
 
         # watch the system clipboard for copy/cut/paste
         cb: QClipboard = QGuiApplication.clipboard()
         cb.dataChanged.connect(self._on_clipboard_event)
-
 
     def create_child_registry(self):
         child = ProtoRegistry(parent=self, settings=self.settings)
         child.object_registered.connect(self._add_global)
         child.object_deregistered.connect(self._remove_global)
         child.object_orphaned.connect(self._orphan_global)
-        self.children.append(child)
+        self.child_registries.append(child)
         return child
 
     def _add_global(self, obj):
@@ -257,14 +270,13 @@ class RootRegistry(ProtoRegistry):
     def get_global_by_type(self, prefix: str):
         return [obj for obj in self._store.values() if get_prefix(obj.pid) == prefix]
 
-
     def to_dict(self) -> Dict[str, Any]:
         """
         Serialize the entire global store plus each child registry.
         """
         return {
             "global": super().to_dict(),
-            "children": [child.to_dict() for child in self.children]
+            "child_registries": [child.to_dict() for child in self.child_registries]
         }
 
     def from_dict(self, data: Dict[str, Any]):
@@ -275,10 +287,10 @@ class RootRegistry(ProtoRegistry):
         # rebuild global portion
         global_data = data.get("global", {})
         super().from_dict(global_data)
-        # clear out old children
-        self.children.clear()
+        # clear out old child_registries
+        self.child_registries.clear()
         # rebuild each child
-        for child_data in data.get("children", []):
+        for child_data in data.get("child_registries", []):
             child = self.create_child_registry()
             child.from_dict(child_data)
 
@@ -330,7 +342,7 @@ class RootRegistry(ProtoRegistry):
                     # by default, register into the originating child registry
                     if hasattr(orig, "tpid"):
                         # find the child registry managing orig.tpid
-                        for child in self.children:
+                        for child in self.child_registries:
                             if pid in child._store:
                                 child.register(clone)
                                 break

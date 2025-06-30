@@ -6,9 +6,9 @@ from pathlib import Path
 
 # Import your model classes
 from prototypyside.models.component_template import ComponentTemplate
+from prototypyside.models.component import Component
 from prototypyside.models.component_elements import TextElement, ImageElement
 from prototypyside.models.layout_template import LayoutSlot, LayoutTemplate
-from prototypyside.models.component_instance import ComponentInstance
 
 # Import helper functions related to PIDs
 from prototypyside.utils.proto_helpers import (
@@ -29,7 +29,7 @@ class ProtoFactory:
         "te": TextElement,
         "ie": ImageElement,
         "ct": ComponentTemplate,
-        "ci": ComponentInstance,
+        "ci": Component,
         "lt": LayoutTemplate,
         "ls": LayoutSlot,
     }
@@ -89,7 +89,7 @@ class ProtoFactory:
 
         return obj_type(pid=pid, **kwargs)
 
-    def from_dict(self, data: dict) -> object:
+    def from_dict(self, data: dict, registry=None) -> object:
         """
         Reconstructs an object from its dictionary representation.
         Assumes the dictionary contains a 'pid' key.
@@ -106,6 +106,8 @@ class ProtoFactory:
             raise TypeError(f"Object type {obj_type.__name__} (for PID '{pid}') does not have a callable 'from_dict' method.")
 
         try:
+            if registry:
+                return obj_type.from_dict(data, registry)
             # Assumes the object's class has a static or class method `from_dict`
             # that can reconstruct the object from the dictionary data.
             return obj_type.from_dict(data)

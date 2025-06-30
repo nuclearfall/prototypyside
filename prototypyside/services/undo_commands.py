@@ -1,7 +1,9 @@
 from PySide6.QtGui import QUndoCommand
 from PySide6.QtCore import QPointF, QRectF
 
+from prototypyside.models.component_template import ComponentTemplate
 from prototypyside.utils.unit_converter import pos_to_unit_str
+from prototypyside.utils.proto_helpers import issue_pid, get_prefix 
 from prototypyside.utils.unit_str import UnitStr
 
 class AddSlotCommand(QUndoCommand):
@@ -18,6 +20,42 @@ class AddSlotCommand(QUndoCommand):
             self.slot = self.registry.create("ls", tpid=self.template.pid, cpid=None, parent=self.template)
         else:
             self.registry.reinsert(self.slot)
+
+
+
+class CloneComponentCommand(QUndoCommand):
+    def __init__(self, component, tab, slot, description="Clone Element"):
+        super().__init__(description)
+        self.tab = tab
+        self.component = component
+        self.registry = tab.registry
+        self.scene = tab.scene
+        self.slot = slot
+
+        self.clone = None
+        self.clone_elements = []
+
+    def redo(self):
+        if self.clone is None:
+            self.clone = self.registry.clone(self.component)
+            self.clone.setParentItem(self.slot)
+
+            self.clone_elements = self.registry.clone_all(self.component.elements)
+
+            for ce in self.clone_elements:
+                self.clone.add_element(ce)
+                ce.setParentItem(self.clone)
+                self.scene.addItem(ce)
+
+    def undo(self):
+        for ce in self.clone_elements:
+            self.registry.deregister(ce.pid)
+            self.scene.removeItem(ce)
+
+        self.slot.content = None
+        self.registry.deregister(self.clone.pid)
+        self.scene.removeItem(self.clone)
+
 
 class AddElementCommand(QUndoCommand):
     def __init__(self, prefix, scene_pos, tab, description="Add Element"):

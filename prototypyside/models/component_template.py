@@ -1,7 +1,7 @@
 # prototypyside/models/game_component_template.py (REVISED to inherit QObject)
 
 from PySide6.QtCore import Qt, QObject, QRectF, QPointF, Signal # Import QObject and Signal
-from PySide6.QtGui import QPainter, QPixmap, QColor, QImage
+from PySide6.QtGui import QPainter, QPixmap, QColor, QImage, QBrush, QPen
 from PySide6.QtWidgets import QGraphicsItem, QGraphicsObject
 from typing import List, Dict, Any, Optional, TYPE_CHECKING
 import csv
@@ -9,11 +9,9 @@ import json
 from pathlib import Path
 from PySide6.QtWidgets import QMessageBox
 
-#from prototypyside.models.game_component_elements import create_element
-from prototypyside.utils.qt_helpers import list_to_qrectf
-from prototypyside.utils.unit_converter import to_px, format_dimension
+from prototypyside.models.component_elements import ImageElement, TextElement
 from prototypyside.utils.unit_str import UnitStr
-from prototypyside.services.undo_commands import AddElementCommand
+from prototypyside.utils.proto_helpers import get_prefix
 # Use TYPE_CHECKING for type hinting
 if TYPE_CHECKING:
     from prototypyside.models.component_elements import ComponentElement
@@ -22,16 +20,20 @@ class ComponentTemplate(QGraphicsObject):
     template_changed = Signal()
     element_z_order_changed = Signal()
 
-    def __init__(self, pid, registry, dpi=300, width="2.5 in", height="3.5 in", parent: QObject = None, name="Component Template"):
+    def __init__(self, pid, registry=None, dpi=300,
+            width="2.5in", height="3.5in", unit="in",
+            parent = None, name=None):
         super().__init__(parent)
         self._pid = pid
-        self.name = name
-        self._width = UnitStr(width, dpi=dpi)
-        self._height = UnitStr(height, dpi=dpi)
-        self._unit = self._width.unit
+        self._name = name
+        self._width = UnitStr(width, unit=unit, dpi=dpi)
+        self._height = UnitStr(height, unit=unit, dpi=dpi)
         self._dpi = dpi
+        self._unit = self._width.unit
+        self._pixmap = None
         self.is_template = True
         self.elements: List['ComponentElement'] = []
+        self.element_pids: List[str] = []
         self.background_image_path: Optional[str] = None
 
     @property
@@ -42,6 +44,9 @@ class ComponentTemplate(QGraphicsObject):
     def pid(self, value):
         self._pid = value
         self.template_changed.emit()
+
+    def boundingRect(self) -> QRectF:
+        return QRectF(0, 0, self.width_px, self.height_px)
 
     @property
     def width_px(self) -> float:
@@ -72,24 +77,38 @@ class ComponentTemplate(QGraphicsObject):
         if isinstance(value, UnitStr):
             self._height = value
         else:
-            self._height = UnitStr(value, dpi=self._dpi)
+            self._height = UnitStr(value, unit=self._unit, dpi=self._dpi)
         self.template_changed.emit()
 
     @property
     def unit(self):
         return self._unit
+
+    # ensure respect for changes via setattr
+    @unit.setter
+    def unit(self, unit):
+        if unit != self._unit and unit != "px":
+            self._width = UnitStr(self._width.to(unit, dpi=self._dpi))
+            self._height = UnitStr(self._height.to(unit, dpi=self._dpi))
         
     @property 
     def dpi(self):
         return self._dpi
 
+    # ensure respect for changes via setattr
+    @dpi.setter
+    def dpi(self, dpi):
+        if dpi != self._dpi:
+            self._width = UnitStr(self._width.to(self._unit, dpi=dpi))
+            self._height = UnitStr(self._height.to(self._unit, dpi=dpi))
+
     def add_element(self, element) -> "ComponentElement":
         if element in self.elements:
             return
         self.elements.append(element)
+        self.element_pids.append(element.pid)
         max_z = max([e.zValue() for e in self.elements], default=0)
         element.setZValue(max_z + 100)
-        print(f"Template currently contains: {[o.name for o in self.elements]}")
         self.template_changed.emit()
         self.element_z_order_changed.emit()
 
@@ -174,26 +193,6 @@ class ComponentTemplate(QGraphicsObject):
         self._normalize_z_values()
         self.element_z_order_changed.emit()
 
-    def load_csv(self, filepath: str):
-        try:
-            with open(filepath, newline='', encoding='utf-8') as csvfile:
-                reader = csv.DictReader(csvfile)
-                data_rows = list(reader)
-                if not data_rows:
-                    QMessageBox.warning(None, "CSV Load Error", "The CSV file is empty or has no data rows.")
-                    return
-
-                data_row = data_rows[0]
-                for element in self.elements:
-                    if element.name in data_row:
-                        element.set_content(data_row[element.name])
-            self.template_changed.emit() # Re-add signal emission
-        except FileNotFoundError:
-            QMessageBox.warning(None, "CSV Load Error", f"File not found: {filepath}")
-        except Exception as e:
-            QMessageBox.critical(None, "CSV Load Error", f"An error occurred: {str(e)}")
-            print(f"CSV Load Error: {str(e)}")
-
     def set_background_image(self, path: str):
         if Path(path).exists():
             self.background_image_path = path
@@ -203,28 +202,59 @@ class ComponentTemplate(QGraphicsObject):
         return False
 
     def to_dict(self) -> Dict[str, Any]:
-        return {
-            'pid': self.pid,
-            'name': self.name,
-            'width': self._width.format(),
-            'height': self._height.format(),
+        data = {
+            'pid': self._pid,
+            'name': self._name,
+            'width': self._width.to(self._unit, self._dpi),
+            'height': self._height.to(self._unit, self._dpi),
             'dpi': self._dpi,
+            'unit': self._unit,
             'background_image_path': self.background_image_path,
-            'elements': [e.to_dict() for e in self.elements]  # 🔄 save only references
+            'elements': [e.to_dict() for e in self.elements]
         }
-  
+        return data
+
     @classmethod
-    def from_dict(cls, data: Dict[str, Any], parent: QObject = None) -> 'ComponentTemplate':
+    def from_dict(cls, data: Dict[str, Any]) -> 'ComponentTemplate':
         template = cls(
             pid=data['pid'],
+            dpi=data.get('dpi', 300),
             width=data.get('width', "2.5 in"),
             height=data.get('height', "3.5 in"),
-            dpi=data.get('dpi', 300),
-            unit = 300,
-            parent=parent,
-            name=data.get('name', "Component Template")
+            name=data.get('name', None),
         )
-        elements = data.get("elements")
-        self.elments = [e.from_dict() for e in elements]
+
+        template.elements = []
+        template._unit = data.get("unit", template._width.unit)
         template.background_image_path = data.get('background_image_path')
+
         return template
+
+
+    # def set_merge_data(self, merge_data):
+    #     self.merge_data = merge_data
+    #     # Update child elements to use new data
+    #     for element in self.childItems():
+    #         if hasattr(element, "content",):
+    #             element.update_from_merge_data(merge_data)
+    #     self.update()
+
+    # def load_csv(self, filepath: str):
+    #     try:
+    #         with open(filepath, newline='', encoding='utf-8') as csvfile:
+    #             reader = csv.DictReader(csvfile)
+    #             data_rows = list(reader)
+    #             if not data_rows:
+    #                 QMessageBox.warning(None, "CSV Load Error", "The CSV file is empty or has no data rows.")
+    #                 return
+
+    #             data_row = data_rows[0]
+    #             for element in self.elements:
+    #                 if element.name in data_row:
+    #                     element.set_content(data_row[element.name])
+    #         self.template_changed.emit() # Re-add signal emission
+    #     except FileNotFoundError:
+    #         QMessageBox.warning(None, "CSV Load Error", f"File not found: {filepath}")
+    #     except Exception as e:
+    #         QMessageBox.critical(None, "CSV Load Error", f"An error occurred: {str(e)}")
+    #         print(f"CSV Load Error: {str(e)}")

@@ -47,6 +47,14 @@ class ComponentElement(QGraphicsObject):
 
 
     # --- Property Getters and Setters --- #
+    @property
+    def pid(self):
+        return self._template_pid 
+
+    @pid.setter
+    def pid(self, pid_val):
+        if self._pid != pid_val:
+            self._pid = pid_val
 
     @property
     def template_pid(self):
@@ -426,6 +434,13 @@ class ComponentElement(QGraphicsObject):
         # Handle subclass-specific fields (see below)
         return obj
 
+    def clone(self):
+        data = self.to_dict()
+        prefix = get_prefix(data.get("pid"))
+        data["pid"] = issue_pid(prefix)
+        data["name"] = f"{data.get('name', 'element')}_copy"
+        return type(self).from_dict(data)
+        
     @property
     def handles_visible(self) -> bool:
         return any(handle.isVisible() for handle in self._handles.values())
@@ -539,11 +554,11 @@ class ComponentElement(QGraphicsObject):
     #     self.element_changed.emit()
 
 
-    def clone(self):
-        """Clone the element via its serialized dictionary structure."""
-        data = self.to_dict()
-        data["name"] = None
-        return type(self).from_dict(data)
+    # def clone(self):
+    #     """Clone the element via its serialized dictionary structure."""
+    #     data = self.to_dict()
+    #     data["name"] = None
+    #     return type(self).from_dict(data)
 
 
 

@@ -34,6 +34,7 @@ class UnitManager:
 
     def new(self, unit_str):
         return UnitStr(raw, self.unit, self.dpi)
+        
 class UnitStr:
     __slots__ = ("_raw", "_value", "_unit", "_dpi", "_unit_cache")
     def __init__(self, raw: Union[str, float, int], unit: str = None, dpi: int = 300, parent=None):
@@ -65,7 +66,7 @@ class UnitStr:
 
     @property
     def inch(self):
-        return self.to("in")
+        return self.to("in", dpi=self._dpi)
 
     @property
     def px(self):

@@ -3,7 +3,7 @@ from PySide6.QtWidgets import (QWidget, QVBoxLayout, QLineEdit, QPushButton, QCo
 from PySide6.QtCore import Qt, Signal, QRectF
 from PySide6.QtGui import QColor, QPalette
 from prototypyside.widgets.unit_field import UnitField
-from prototypyside.widgets.font_toolbar import FontToolbar
+from prototypyside.views.toolbars.font_toolbar import FontToolbar
 from prototypyside.widgets.color_picker import ColorPickerWidget
 from prototypyside.utils.unit_converter import parse_dimension, to_px
 from prototypyside.utils.unit_str import UnitStr 

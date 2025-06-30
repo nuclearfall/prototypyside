@@ -5,7 +5,7 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Qt, Signal, QRectF, QTimer
 from PySide6.QtGui import QColor, QPalette # Import QColor
 from prototypyside.widgets.unit_field import UnitField
-from prototypyside.widgets.font_toolbar import FontToolbar
+from prototypyside.views.toolbars.font_toolbar import FontToolbar
 
 # --- NEW WIDGET: ColorPickerWidget ---
 class ColorPickerWidget(QPushButton):

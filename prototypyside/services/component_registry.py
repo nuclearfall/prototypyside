@@ -12,7 +12,7 @@ from prototypyside.services.component_factory import ComponentFactory
 from prototypyside.models.component_template import ComponentTemplate
 from prototypyside.models.component_elements import TextElement, ImageElement
 from prototypyside.models.layout_template import LayoutSlot, LayoutTemplate
-from prototypyside.models.component_instance import ComponentInstance
+from prototypyside.models.component import Component
 
 # Import helper functions related to PIDs
 from prototypyside.utils.proto_helpers import (
@@ -28,7 +28,7 @@ from prototypyside.utils.proto_helpers import (
 # These are REGISTRY-SPECIFIC concerns, not factory concerns.
 ELEMENT_PID_PREFIXES = {"te", "ie"}
 TEMPLATE_PID_PREFIXES = {"ct", "lt"}
-INSTANCE_PID_PREFIX = "ci" # Assuming 'ci' for ComponentInstance
+INSTANCE_PID_PREFIX = "ci" # Assuming 'ci' for Component
 
 ### All Proto Objects Must be Created Through the Registry ###
 class ComponentRegistry(QObject):
@@ -45,7 +45,7 @@ class ComponentRegistry(QObject):
             'ie': [1, 'Image'],
             'te': [1, 'Text'],
             'ct': [1, 'Template'],
-            'ci': [1, 'Component'] # Consistent with 'ci' prefix for ComponentInstance
+            'ci': [1, 'Component'] # Consistent with 'ci' prefix for Component
         }
         self._orphans: dict[str, object] = {}
         self._unique_names: set[str] = set() # For faster name lookup and validation
@@ -76,11 +76,11 @@ class ComponentRegistry(QObject):
             raise TypeError(f"PID '{pid}' (prefix: '{prefix}') is not a Template PID.")
         return self._get_object_by_pid(pid)
 
-    def get_instance(self, pid: str) -> ComponentInstance:
-        """Retrieves a ComponentInstance object by its PID."""
+    def get_instance(self, pid: str) -> Component:
+        """Retrieves a Component object by its PID."""
         prefix = get_prefix(pid)
         if prefix != INSTANCE_PID_PREFIX:
-            raise TypeError(f"PID '{pid}' (prefix: '{prefix}') is not a ComponentInstance PID.")
+            raise TypeError(f"PID '{pid}' (prefix: '{prefix}') is not a Component PID.")
         return self._get_object_by_pid(pid)
 
     def get_last(self):

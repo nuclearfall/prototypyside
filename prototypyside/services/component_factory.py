@@ -8,7 +8,7 @@ from pathlib import Path
 from prototypyside.models.component_template import ComponentTemplate
 from prototypyside.models.component_elements import TextElement, ImageElement
 from prototypyside.models.layout_template import LayoutSlot, LayoutTemplate
-from prototypyside.models.component_instance import ComponentInstance
+from prototypyside.models.component import Component
 
 # Import helper functions related to PIDs
 from prototypyside.utils.proto_helpers import (
@@ -29,7 +29,7 @@ class ComponentFactory:
         "te": TextElement,
         "ie": ImageElement,
         "ct": ComponentTemplate,
-        "ci": ComponentInstance,
+        "ci": Component,
         "lt": LayoutTemplate,
         "ls": LayoutSlot,
     }

@@ -107,16 +107,6 @@ class LayoutSlot(QGraphicsObject):
         # If you want to draw anything *over* the content, you could do it here.
 
 
-    def bring_to_front(self, element: 'ComponentElement'):
-        if element not in self.elements:
-            return
-        
-        # Set to max + increment
-        max_z = max(e.zValue() for e in self.elements)
-        element.setZValue(max_z + 100)
-        self._normalize_z_values()
-        self.element_z_order_changed.emit()
-
 
 class LayoutTemplate(QGraphicsObject):
     marginsChanged = Signal()

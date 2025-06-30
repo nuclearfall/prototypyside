@@ -12,17 +12,16 @@ from PySide6.QtCore import Qt, Signal, Slot, QPointF, QRectF, QSizeF, QObject, Q
 from PySide6.QtGui import (QPainter, QColor, QIcon, 
                                 QKeySequence, QShortcut, QUndoStack)
 
-# Import views components
-from prototypyside.views.palettes import ComponentListWidget
-from prototypyside.views.layers_panel import LayersListWidget
 from prototypyside.views.graphics_scene import ComponentGraphicsScene
 from prototypyside.views.graphics_view import DesignerGraphicsView
-
+from prototypyside.views.panels.property_panel import PropertyPanel
+from prototypyside.views.panels.layers_panel import LayersListWidget
+from prototypyside.views.palettes.palettes import ComponentListWidget
 # Import widgets
 from prototypyside.widgets.unit_field import UnitField
 # from prototypyside.widgets.font_toolbar import FontToolbar
 from prototypyside.widgets.pdf_export_dialog import PDFExportDialog
-from prototypyside.widgets.property_panel import PropertyPanel
+
 
 from prototypyside.models.component_elements import (ComponentElement, TextElement, ImageElement)
 from prototypyside.services.app_settings import AppSettings
