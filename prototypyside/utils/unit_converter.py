@@ -181,17 +181,17 @@ def from_px(pixels: int, unit: str, dpi: int) -> float:
     else:
         raise ValueError("Unsupported unit. Use 'in' for inches or 'cm' for centimeters.")
 
-def to_px(value, dpi=300):
+def to_px(value, dpi=144):
     return parse_dimension(value, dpi=dpi, to_unit="px")
 
-def to_px_pos(x, y, dpi=300):
+def to_px_pos(x, y, dpi=144):
     # Return as QPointF instead of tuple to work with setPos
     return QPointF(
         parse_dimension(x, dpi=dpi, to_unit="px"),
         parse_dimension(y, dpi=dpi, to_unit="px")
     )
 
-def to_px_qrectf(x, y, w, h, dpi=300):
+def to_px_qrectf(x, y, w, h, dpi=144):
     return QRectF(
         parse_dimension(x, dpi=dpi, to_unit="px"),
         parse_dimension(y, dpi=dpi, to_unit="px"),

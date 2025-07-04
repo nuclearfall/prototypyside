@@ -1,8 +1,10 @@
 from PySide6.QtGui import QPixmap, QImage, QPainter
 from PySide6.QtCore import QRectF, QSize
 
-def render_scene_to_pixmap(scene, dpi=300, margin=0) -> QPixmap:
+def render_scene_to_pixmap(scene=None, dpi=144, margin=0) -> QPixmap:
     # Determine scene content size
+    if not scene:
+        scene = QGraphicsScrene
     rect = scene.itemsBoundingRect().adjusted(-margin, -margin, margin, margin)
 
     # Convert scene units (assume pt) to pixels based on DPI

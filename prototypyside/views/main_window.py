@@ -46,12 +46,12 @@ class MainDesignerWindow(QMainWindow):
     def __init__(self):
         super().__init__()
         self.undo_group = QUndoGroup(self)
-        self.setWindowTitle("Professional Game Component Designer")
+        self.setWindowTitle("ProtoTypySide")
         self.resize(1400, 900)
         self.setMinimumSize(800, 600)
 
         # Main application settings, might be shared or passed to tabs
-        self.settings = AppSettings(unit='px', display_dpi=96, print_dpi=300)
+        self.settings = AppSettings()
         self.registry = RootRegistry(settings=self.settings)
 
         self._tab_map = {}  # pid: tab
@@ -75,7 +75,7 @@ class MainDesignerWindow(QMainWindow):
 
         # Add initial tabs
         self.add_new_component_tab()
-        self.add_new_layout_tab()
+        # self.add_new_layout_tab()
 
     ### GUI Setup ###
     def setup_ui(self):
@@ -379,7 +379,7 @@ class MainDesignerWindow(QMainWindow):
     @Slot()
     def add_new_layout_tab(self):
         new_registry = self.registry.create_child_registry()
-        new_template = new_registry.create("lt", registry=new_registry, parent=None)
+        new_template = new_registry.create("lt")
         new_tab = LayoutTab(parent=self, main_window=self, template=new_template, registry=new_registry)
         self.undo_group.addStack(new_tab.undo_stack)
         # Connect the tab's status message signal to the main window's slot
@@ -394,7 +394,7 @@ class MainDesignerWindow(QMainWindow):
     @Slot()
     def add_new_component_tab(self):
         new_registry = self.registry.create_child_registry()
-        new_template = new_registry.create("ct", registry=new_registry)
+        new_template = new_registry.create("ct")
         new_tab = ComponentTab(parent=self, template=new_template, registry=new_registry)
         self.undo_group.addStack(new_tab.undo_stack)
         # Connect the tab's status message signal to the main window's slot

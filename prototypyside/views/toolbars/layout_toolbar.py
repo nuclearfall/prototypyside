@@ -1,5 +1,5 @@
 from PySide6.QtWidgets import (
-    QWidget, QHBoxLayout, QComboBox, QLabel, QCheckBox, QSpinBox
+    QWidget, QHBoxLayout, QComboBox, QLabel, QCheckBox, QSpinBox, QPushButton
 )
 from PySide6.QtCore import Qt, Signal, Slot
 from PySide6.QtGui import QPageSize
@@ -7,6 +7,7 @@ from prototypyside.widgets.unit_field import UnitField
 from prototypyside.config import PAGE_SIZES
 from prototypyside.utils.unit_converter import to_px
 from prototypyside.config import DISPLAY_MODE_FLAGS
+from prototypyside.services.pagination.pagination_manager import PaginationPolicyFactory
 
 
 class LayoutToolbar(QWidget):
@@ -24,6 +25,7 @@ class LayoutToolbar(QWidget):
     spacing_changed = Signal(str, int)
     autofill_changed = Signal(bool)
     display_flag_changed = Signal(object)
+    pagination_policy_changed = Signal(object)
 
     def __init__(self, settings, parent=None):
         super().__init__(parent)
@@ -80,6 +82,24 @@ class LayoutToolbar(QWidget):
         self.fitting_combo.currentTextChanged.connect(self._on_display_flag_changed)
         layout.addStretch(1)
 
+
+        # ── Pagination Policy selector ─────────────────────────────
+        self.policy_combo = QComboBox(self)
+        self.policy_combo.setToolTip("Pagination mode")
+        for name in PaginationPolicyFactory._registry:
+            self.policy_combo.addItem(name)
+        layout.addWidget(self.policy_combo)
+
+        self.policy_settings_btn = QPushButton("Policy Settings…", self)
+        layout.addWidget(self.policy_settings_btn)
+
+        # Signals
+        self.policy_combo.currentTextChanged.connect(self._emit_policy_changed)
+        self.policy_settings_btn.clicked.connect(self._open_policy_settings)
+
+        # Internal
+        self._policy_params: dict = {}
+
     @Slot(str)
     def _on_page_size_changed(self, name: str):
         """Handle page size selection and emit (display_string, QPageSize or None for custom)."""
@@ -118,3 +138,24 @@ class LayoutToolbar(QWidget):
         template.rows = self.rows_spin.value()
         template.cols = self.cols_spin.value()
         template.auto_fill = self.autofill_checkbox.isChecked()
+
+
+    # ------------------------------------------------------------------
+    # Private helpers
+    # ------------------------------------------------------------------
+    def _emit_policy_changed(self):
+        self.pagination_policy_changed.emit(
+            self.policy_combo.currentText(), self._policy_params
+        )
+
+    def _open_policy_settings(self):
+        # For now only InterleaveDatasets exposes *stride*
+        # You can swap in a proper QDialog later.
+        from PySide6.QtWidgets import QInputDialog
+        stride, ok = QInputDialog.getInt(
+            self, "InterleaveDatasets", "Stride (page offset):", 
+            self._policy_params.get("stride", 1), 1, 10, 1
+        )
+        if ok:
+            self._policy_params = {"stride": stride}
+            self._emit_policy_changed()

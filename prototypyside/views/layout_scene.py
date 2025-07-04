@@ -29,7 +29,7 @@ class LayoutScene(QGraphicsScene):
         self.tab = tab 
         self._template = tab.template
         self._scene_rect = scene_rect
-        print(f"Template Item boundingRect set to {self._scene_rect}")
+        print(f"SceneRect set to {self._scene_rect}")
         self.setSceneRect(self._scene_rect)
 
 

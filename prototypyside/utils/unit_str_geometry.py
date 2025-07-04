@@ -1,0 +1,197 @@
+# prototypyside/utils/unit_str_geometry.py
+
+from __future__ import annotations
+from decimal import Decimal
+from typing import Optional, Union
+
+from PySide6.QtCore import QRectF, QPointF, QSizeF
+from prototypyside.utils.unit_str import UnitStr
+
+Number = Union[int, float, str, Decimal, UnitStr]
+
+class UnitStrGeometry:
+    """
+    Stores a *local* QRectF (rect_x, rect_y, width, height) and an independent
+    *scene* position (pos_x, pos_y). All components are UnitStr objects stored
+    internally as inches.
+
+    Accessors (`.rect`, `.pos`, `.size`) return Qt types with values in the
+    `display_unit` (defaults to 'in'). Pixel values can be accessed via the
+    `.px` property or `.to("px")`.
+    """
+    __slots__ = (
+        "_pos_x", "_pos_y",
+        "_rect_x", "_rect_y",
+        "_w", "_h",
+        "_display_unit", "_dpi",
+    )
+
+    def __init__(
+        self,
+        *,
+        rect: Optional[QRectF] = None,
+        pos:  Optional[QPointF] = None,
+        size: Optional[QSizeF]  = None,
+        x:      Number | None   = None,
+        y:      Number | None   = None,
+        rect_x: Number | None   = None,
+        rect_y: Number | None   = None,
+        width:  Number | None   = None,
+        height: Number | None   = None,
+        dpi:    int             = 144,
+        display_unit: Optional[str] = None,
+    ):
+        self._dpi = dpi
+        self._display_unit = (display_unit or "in").lower().replace('"', "in")
+
+        # Unpack Qt types. These values are assumed to be in pixels unless they
+        # are already UnitStr objects.
+        raw_rx, raw_ry = (rect.x(), rect.y()) if rect else (rect_x or 0, rect_y or 0)
+        raw_w, raw_h = (rect.width(), rect.height()) if rect else (width or 0, height or 0)
+        if size is not None:
+            raw_w, raw_h = size.width(), size.height()
+
+        raw_x, raw_y = (pos.x(), pos.y()) if pos else (x or 0, y or 0)
+
+        # Ensure all components become UnitStr objects.
+        # Numeric inputs are treated as 'px' by default in UnitStr constructor.
+        mk = lambda v: v if isinstance(v, UnitStr) else UnitStr(v, dpi=self._dpi)
+
+        self._rect_x = mk(raw_rx)
+        self._rect_y = mk(raw_ry)
+        self._w      = mk(raw_w)
+        self._h      = mk(raw_h)
+        self._pos_x  = mk(raw_x)
+        self._pos_y  = mk(raw_y)
+
+    @property
+    def unit(self) -> str:
+        """Canonical storage unit: always 'in'."""
+        return "in"
+
+    @property
+    def display_unit(self) -> str:
+        return self._display_unit
+
+    @property
+    def dpi(self) -> int:
+        return self._dpi
+
+    @property
+    def round(self) -> UnitStrGeometry:
+        """Returns a new geometry with all internal UnitStr values rounded."""
+        g = object.__new__(UnitStrGeometry)
+        g._rect_x = self._rect_x.round()
+        g._rect_y = self._rect_y.round()
+        g._w      = self._w.round()
+        g._h      = self._h.round()
+        g._pos_x  = self._pos_x.round()
+        g._pos_y  = self._pos_y.round()
+        g._dpi = self._dpi
+        g._display_unit = self._display_unit
+        return g
+
+    # Individual UnitStr accessors
+    @property
+    def rect_x(self) -> UnitStr: return self._rect_x
+    @property
+    def rect_y(self) -> UnitStr: return self._rect_y
+    @property
+    def width(self)  -> UnitStr: return self._w
+    @property
+    def height(self) -> UnitStr: return self._h
+    @property
+    def pos_x(self)  -> UnitStr: return self._pos_x
+    @property
+    def pos_y(self)  -> UnitStr: return self._pos_y
+
+    # Qt-friendly composite accessors
+    def _val(self, u: UnitStr) -> float:
+        return u.to(self._display_unit, self._dpi)
+
+    @property
+    def rect(self) -> QRectF:
+        return QRectF(self._val(self._rect_x), self._val(self._rect_y), self._val(self._w), self._val(self._h))
+
+    @property
+    def pos(self) -> QPointF:
+        return QPointF(self._val(self._pos_x), self._val(self._pos_y))
+
+    @property
+    def size(self) -> QSizeF:
+        return QSizeF(self._val(self._w), self._val(self._h))
+
+    def to(self, display_unit: str, dpi: int | None = None) -> UnitStrGeometry:
+        """Returns a new UnitStrGeometry that emits values in the target unit."""
+        dpi = dpi or self._dpi
+        du = display_unit.lower().replace('"', "in")
+        if du not in {"in", "cm", "mm", "pt", "px"}:
+            raise ValueError(f"Unsupported display unit: {du!r}")
+
+        g = object.__new__(UnitStrGeometry)
+        g._rect_x, g._rect_y = self._rect_x, self._rect_y
+        g._w, g._h = self._w, self._h
+        g._pos_x, g._pos_y = self._pos_x, self._pos_y
+        g._dpi = dpi
+        g._display_unit = du
+        return g
+
+    # Shorthand views
+    @property
+    def px(self)   -> UnitStrGeometry: return self.to("px")
+    @property
+    def inch(self) -> UnitStrGeometry: return self.to("in")
+    @property
+    def mm(self)   -> UnitStrGeometry: return self.to("mm")
+    @property
+    def pt(self)   -> UnitStrGeometry: return self.to("pt")
+
+    @classmethod
+    def from_px(cls, rect: QRectF, pos: QPointF, dpi: int = 144) -> UnitStrGeometry:
+        """Build a UnitStrGeometry by interpreting the given QRectF and QPointF as pixels."""
+        return cls(
+            x=pos.x(), y=pos.y(),
+            rect_x=rect.x(), rect_y=rect.y(),
+            width=rect.width(), height=rect.height(),
+            dpi=dpi,
+        )
+
+    def dict(self) -> dict:
+        """JSON-friendly dump of the geometry."""
+        return {
+            "display_unit": self.display_unit,
+            "dpi": self.dpi,
+            "pos": {"x": self._pos_x.dict(), "y": self._pos_y.dict()},
+            "rect": {
+                "x": self._rect_x.dict(),
+                "y": self._rect_y.dict(),
+                "width": self._w.dict(),
+                "height": self._h.dict(),
+            },
+        }
+
+    @classmethod
+    def from_dict(cls, blob: dict) -> UnitStrGeometry:
+        """Reconstructs a UnitStrGeometry from its dictionary representation."""
+        dpi = blob.get("dpi", 144)
+        pos_data = blob.get("pos", {})
+        rect_data = blob.get("rect", {})
+
+        return cls(
+            x=UnitStr.from_dict(pos_data.get("x", {}), dpi=dpi),
+            y=UnitStr.from_dict(pos_data.get("y", {}), dpi=dpi),
+            rect_x=UnitStr.from_dict(rect_data.get("x", {}), dpi=dpi),
+            rect_y=UnitStr.from_dict(rect_data.get("y", {}), dpi=dpi),
+            width=UnitStr.from_dict(rect_data.get("width", {}), dpi=dpi),
+            height=UnitStr.from_dict(rect_data.get("height", {}), dpi=dpi),
+            dpi=dpi,
+            display_unit=blob.get("display_unit", "in"),
+        )
+
+    def __repr__(self) -> str:
+        pos_str = f"x={self._pos_x.to(self.display_unit):.2f}, y={self._pos_y.to(self.display_unit):.2f}"
+        rect_str = f"w={self._w.to(self.display_unit):.2f}, h={self._h.to(self.display_unit):.2f}"
+        return (
+            f"UnitStrGeometry({pos_str}, {rect_str}, "
+            f"display_unit='{self.display_unit}', dpi={self.dpi})"
+        )

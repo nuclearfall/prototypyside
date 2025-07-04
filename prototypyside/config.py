@@ -27,6 +27,11 @@ PAGE_SIZES = {
     "Custom...": None  # Placeholder if user wants to enter their own dimensions
 }
 
+PAGE_MEASURE = {
+    "in": QPageSize.Letter,
+
+}
+
 DISPLAY_MODE_FLAGS = {
     "stretch":      {"aspect": Qt.IgnoreAspectRatio,         "desc": "Stretch to Fit"},
     "aspect_fit":   {"aspect": Qt.KeepAspectRatio,           "desc": "Keep Aspect Ratio"},
@@ -41,10 +46,15 @@ MEASURE_INCREMENT = {
     "cm": {
         3: 0.25, 
         2: .50,
-        1: 1,
+        1: 2.0,
+    },
+    "mm": {
+        3: 5, 
+        2: 10,
+        1: 20,
     },
     "in": {
-        3: 0.0625,
+        3: 0.125,
         2: 0.25,
         1: 1.0
     },

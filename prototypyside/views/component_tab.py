@@ -19,6 +19,8 @@ from prototypyside.views.panels.layers_panel import LayersListWidget
 from prototypyside.views.palettes.palettes import ComponentListWidget
 # Import widgets
 from prototypyside.widgets.unit_field import UnitField
+from prototypyside.utils.ustr_helpers import with_pos
+from prototypyside.utils.unit_str_geometry import UnitStrGeometry
 # from prototypyside.widgets.font_toolbar import FontToolbar
 from prototypyside.widgets.pdf_export_dialog import PDFExportDialog
 
@@ -40,17 +42,14 @@ class ComponentTab(QWidget):
         self.undo_stack = QUndoStack(self)
         self.registry = registry
         self._template = template
-
-        unit = template.width.unit
-        print_dpi = template.dpi
-        display_dpi = parent.settings.dpi
-        self.settings = AppSettings(unit=unit, print_dpi=print_dpi, display_dpi=display_dpi)
-
+        self.settings = AppSettings()
+        self._unit = self.settings.display_unit
+        self._dpi = self.settings.display_dpi
         self.geometry_setter = GeometrySetter(self.undo_stack)
         self.property_setter = PropertySetter(self.undo_stack)
 
         # Setup scene and view
-        scene_rect = QRectF(0, 0, template.width_px, template.height_px)
+        scene_rect = template.geometry.px.rect
         self.scene = ComponentGraphicsScene(scene_rect=scene_rect, parent=self, tab=self) # Parent is self (ComponentTab)
         self.view = DesignerGraphicsView(self.scene)
         self.view.setRenderHints(QPainter.Antialiasing | QPainter.TextAntialiasing | QPainter.SmoothPixmapTransform)
@@ -64,10 +63,15 @@ class ComponentTab(QWidget):
         self._current_drawing_color = QColor(0, 0, 0) # For drawing tools
 
         self.setup_ui()
-        #self.setup_shortcuts()
-
         self._refresh_scene()
 
+    @property
+    def dpi(self): return self._dpi
+
+    @property
+    def unit(self):
+        return self._unit
+    
     @property
     def template(self):
         return self._template
@@ -75,7 +79,6 @@ class ComponentTab(QWidget):
     @property
     def template_pid(self):
         return self._template.pid
-    
     
     def focusInEvent(self, event):
         super().focusInEvent(event)
@@ -129,10 +132,10 @@ class ComponentTab(QWidget):
         if not self.scene or not self.template:
             return
 
-        new_rect = QRectF(0, 0, self.template.width_px, self.template.height_px)
-        self.scene.scene_from_template_dimensions(self.template.width_px, self.template.height_px)
+        tw, th = self.template.geometry.width.px, self.template.geometry.height.px
+        self.scene.scene_from_template_dimensions(tw, th)
 
-        self.view.setSceneRect(new_rect)
+        self.view.setSceneRect(self._template.geometry.px.rect)
 
         self.scene.update()
 
@@ -188,7 +191,7 @@ class ComponentTab(QWidget):
         # Unit Selector
         self.unit_selector = QComboBox()
         self.unit_selector.addItems(["in", "cm", "mm", "pt", "px"])
-        self.unit_selector.setCurrentText(self.settings.unit)
+        self.unit_selector.setCurrentText(self._unit)
         self.unit_selector.currentTextChanged.connect(self.on_unit_change)
 
         # Snap to Grid
@@ -209,26 +212,19 @@ class ComponentTab(QWidget):
         self.template_name_field.setMaximumWidth(150)
 
         self.template_width_field = UnitField(
-            initial=self.template.width,
-            unit=self.settings.unit,
-            dpi=self.template.dpi
+            initial=self.template.geometry.width,
+            unit=self._unit,
+            dpi=self._dpi
         )
         self.template_width_field.setMaximumWidth(100)
         self.template_width_field.editingFinishedWithValue.connect(partial(self.on_template_dimension_changed, "width_px"))
 
         self.template_height_field = UnitField(
-            initial=self.template.height,
-            unit=self.settings.unit,
-            dpi=self.template.dpi
+            initial=self._template.geometry.height,
+            unit=self._unit, dpi=self._dpi
         )
         self.template_height_field.editingFinishedWithValue.connect(partial(self.on_template_dimension_changed, "height_px"))
         self.template_height_field.setMaximumWidth(100)
-
-        # DPI SpinBox
-        self.component_dpi_spin = QSpinBox()
-        self.component_dpi_spin.setRange(36, 1200)
-        self.component_dpi_spin.setValue(self.template.dpi)
-        self.component_dpi_spin.valueChanged.connect(self.on_template_dpi_changed)
 
         self.measure_toolbar.addWidget(QLabel("Template:"))
         self.measure_toolbar.addWidget(self.template_name_field)
@@ -236,8 +232,6 @@ class ComponentTab(QWidget):
         self.measure_toolbar.addWidget(self.template_width_field)
         self.measure_toolbar.addWidget(QLabel("Height:"))
         self.measure_toolbar.addWidget(self.template_height_field)
-        self.measure_toolbar.addWidget(QLabel("DPI:"))
-        self.measure_toolbar.addWidget(self.component_dpi_spin)
         self.measure_toolbar.addSeparator()
         self.measure_toolbar.addWidget(QLabel("Unit:"))
         self.measure_toolbar.addWidget(self.unit_selector)
@@ -274,65 +268,36 @@ class ComponentTab(QWidget):
 
     @Slot(str, object)  # The value is a UnitStr
     def on_template_dimension_changed(self, dimension, value):
-        old_width = self.template.width
-        old_height = self.template.height
-        new_width = value if dimension == "width_px" else old_width
-        new_height = value if dimension == "height_px" else old_height
-        command = ResizeTemplateCommand(self.template, new_width, new_height)
+        new_width = value if dimension == "width" else old_width
+        new_height = value if dimension == "height" else old_height
+        new_geometry = UnitStrGeometry(width=new_width, height=new_height)
+        command = ResizeTemplateCommand(self.template, new_geometry)
         self.undo_stack.push(command)
         self._refresh_scene()
 
     def update_template_scene_rect(self):
-        self.scene.scene_from_template_dimensions(
-            self.template.width_px,
-            self.template.height_px
-        )
+        trect = self.template.boundingRect()
+        w, h = trect.width(), trect.height()
+        self.scene.scene_from_template_dimensions(w, h)
         self.scene.update()
         self.view.update()
-        self.template.template_changed.emit()
         self.tab_title_changed.emit(self.template.name if self.template.name else "Unnamed Template")
 
     def _refresh_scene(self):
         # Clear old items (grid/background is drawn in drawBackground, not as items)
         self.scene.clear()
-
-        # Make sure scene rect matches template (in case width/height changed)
-        self.scene.setSceneRect(0, 0,
-                                self.template.width_px,
-                                self.template.height_px)
-
+        self.scene.setSceneRect(self.template.geometry.px.rect)
         # Add every element back into the QGraphicsScene
+        self.scene.addItem(self.template)
         for element in self.template.elements:
             self.scene.addItem(element)
             element.hide_handles()
 
-
-    @Slot()
-    def on_template_dpi_changed(self):
-        new_dpi = self.component_dpi_spin.value()
-        self.settings.dpi = new_dpi
-        self.template.dpi = new_dpi
-
-        self.template_width_field.set_dpi(new_dpi)
-        self.template_height_field.set_dpi(new_dpi)
-        self.template_c
-        if self.selected_element:
-            self.property_panel.set_target(self.selected_element)
-            self.property_panel.refresh()
-
-        self.view.viewport().update()
-        self.view.update()
-        self.scene.update()
-
-        self.template.template_changed.emit()
-        self.show_status_message(f"DPI updated to {new_dpi}.", "info")
-
-    @Slot(tuple, tuple)
+    @Slot(UnitStrGeometry, UnitStrGeometry)
     def on_geometry_changed(self, new_values, old_values):
         element = self.selected_element
         command = ResizeAndMoveElementCommand(element, new_values, old_values)
         self.undo_stack.push(command)
-      
 
     @Slot()
     def on_property_changed(self, change):
@@ -490,10 +455,12 @@ class ComponentTab(QWidget):
 
     def add_element_from_drop(self, scene_pos: QPointF, element_type: str):
         self.scene.clearSelection()
-
-        command = AddElementCommand(element_type, scene_pos, self)
+        rect = UnitStrGeometry(width="0.5in", height="0.25in", dpi=self.template.dpi)
+        new_geometry = with_pos(rect, scene_pos)
+        command = AddElementCommand(element_type, self, new_geometry)
         self.undo_stack.push(command)
         self.selected_element = self.registry.get_last()
+        self.property_panel.refresh()
 
     @Slot(ComponentElement, QPointF)
     def clone_element(self, original, press_scene_pos):

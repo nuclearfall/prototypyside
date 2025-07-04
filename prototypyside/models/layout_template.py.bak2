@@ -114,7 +114,7 @@ class LayoutTemplate(QGraphicsObject):
     export_quantity: Optional[int] = None     # Override for copies per slot
     def __init__(self, pid, registry, parent=None, 
                 page_size="Letter (8.5 × 11 in)", 
-                rows=3, columns=3, dpi=300, unit="in", 
+                rows=3, columns=3, dpi=144, unit="in", 
                 name=None, margin_top="0.5in", margin_bottom = "0.5in",
                 margin_left = "0.25in", margin_right = "0.25in",
                 spacing_x = "0.0in", spacing_y  = "0.0in", landscape=False, auto_fill=True):
@@ -277,7 +277,7 @@ class LayoutTemplate(QGraphicsObject):
     def get_page_dim_px(self):
         return self._width.to("px"), self._height.to("px")
 
-    def get_margins_and_spacing_px(self):
+    def get_whitespace(self):
         return [
             self.margin_top.to("px"),
             self.margin_bottom.to("px"),
@@ -388,7 +388,7 @@ class LayoutTemplate(QGraphicsObject):
         Returns slot_width, slot_height in **pixels** for the given grid position.
         Slot sizes are based on page size, margins, spacing, and grid size.
         """
-        t, b, l, r, sx, sy = self.get_margins_and_spacing_px()  # Each is a float (pixels)
+        t, b, l, r, sx, sy = self.get_whitespace()  # Each is a float (pixels)
         w, h = self.get_page_dim_px()  # floats (pixels)
 
         cols = self.columns
@@ -413,7 +413,7 @@ class LayoutTemplate(QGraphicsObject):
         """
         Returns x, y in **pixels** for the given grid position.
         """
-        t, b, l, r, sx, sy = self.get_margins_and_spacing_px()  # px
+        t, b, l, r, sx, sy = self.get_whitespace()  # px
         slot_width_px, slot_height_px = self.compute_slot_size(row, col)
 
         x_px = l + col * (sx + slot_width_px)
@@ -425,7 +425,7 @@ class LayoutTemplate(QGraphicsObject):
 
         return x_px, y_px
 
-    def get_px_margins(self):
+    def get_margins(self):
         return (self.margin_top.to("px", dpi=self.dpi), self.margin_bottom.to("px", dpi=self.dpi), 
                 self.margin_left.to("px", dpi=self.dpi), self.margin_right.to("px", dpi=self.dpi))
 
@@ -447,7 +447,7 @@ class LayoutTemplate(QGraphicsObject):
         cell_w, cell_h = self.get_cell_size_px()
         spacing_x = to_px(self.spacing_x)
         spacing_y = to_px(self.spacing_y)
-        top, bottom, left, right = self.get_px_margins()
+        top, bottom, left, right = self.get_margins()
 
         x = rect.left() + left + col * (cell_w + spacing_x)
         y = rect.top() + top + row * (cell_h + spacing_y)
@@ -458,7 +458,7 @@ class LayoutTemplate(QGraphicsObject):
         """
         Returns the uniform cell size (width, height) in pixels for all slots in the grid.
         """
-        t, b, l, r, sx, sy = self.get_margins_and_spacing_px()
+        t, b, l, r, sx, sy = self.get_whitespace()
         w, h = self.get_page_dim_px()
         
         cols = self.columns
@@ -480,7 +480,7 @@ class LayoutTemplate(QGraphicsObject):
         Returns the QRectF for a specific slot at (row, col) in page coordinates (pixels).
         """
         cell_w, cell_h = self.get_cell_size_px()
-        t, b, l, r, sx, sy = self.get_margins_and_spacing_px()
+        t, b, l, r, sx, sy = self.get_whitespace()
         
         # Calculate position
         x = l + col * (sx + cell_w)
@@ -556,7 +556,7 @@ class LayoutTemplate(QGraphicsObject):
         painter.drawRect(rect)
 
         # Optionally: draw grid lines for visual aid
-        top_margin_px, bottom_margin_px, left_margin_px, right_margin_px = self.get_px_margins()
+        top_margin_px, bottom_margin_px, left_margin_px, right_margin_px = self.get_margins()
         spacing_x_px = to_px(self.spacing_x)
         spacing_y_px = to_px(self.spacing_y)
         rows = self.rows

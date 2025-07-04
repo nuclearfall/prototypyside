@@ -6,27 +6,40 @@ from prototypyside.utils.unit_converter import from_px
 from prototypyside.models.component_template import ComponentTemplate
 from prototypyside.models.component_elements import TextElement, ImageElement
 from prototypyside.utils.unit_str import UnitStr
+from prototypyside.utils.unit_str_geometry import UnitStrGeometry
+from prototypyside.utils.ustr_helpers import with_rect, with_pos
 
 class Component(ComponentTemplate):
     update_cache = Signal()
-    def __init__(self, pid, slot, template, parent=None, static=False, row_data=None):
+    def __init__(self, pid, slot, template, parent=None, is_static=False, row_data=None):
         super().__init__(parent)
         self._pid = pid
         self._cache_image = None
         self._slot = slot
-        self._template = template
-        self._dpi = self._template.dpi
-        self._unit = self._template.unit
-        self._width = self._template.width
-        self._height = self._template.height
-        self.static = static
-        self._rect = self.boundingRect()
-        self._cache_image = None 
+        self._content = template
+        self._dpi = template.dpi
+        self._unit = template.unit
+        self._geometry = template._geometry
+        self.is_static = is_static
+        self._cache_image = None
         # Listen to the template's update signal
-        self._template.template_changed.connect(self.invalidate_cache)
+        self._content.template_changed.connect(self.invalidate_cache)
 
-    def boundingRect(self):
-        return QRectF(0, 0, self.width_px, self.height_px)
+    # These three methods must be defined for each object.
+    def boundingRect(self) -> QRectF:
+        return self._geometry.to("px", dpi=self._dpi).rect
+
+    def setRect(self, new_rect: QRectF):
+        self.prepareGeometryChange()
+        self._geometry = with_rect(self._geometry, new_rect)
+        self.template_changed.emit()
+        self.update()
+
+    def itemChange(self, change: QGraphicsItem.GraphicsItemChange, value):
+        if change == QGraphicsItem.ItemPositionChange:
+            self._geometry = with_pos(self._geometry, value)
+            self.template_changed.emit()
+        return super().itemChange(change, value)
 
     @property
     def pid(self) -> str:
@@ -35,91 +48,47 @@ class Component(ComponentTemplate):
     @pid.setter
     def pid(self, value):
         self._pid = value
-        self._template_changed.emit()
+        self._content_changed.emit()
 
     @property
-    def width_px(self) -> float:
-        return self.width.to("px", dpi=self._dpi)
-
-    @property
-    def height_px(self) -> float:
-        return self.height.to("px", dpi=self._dpi)
-
-    @property
-    def width(self) -> UnitStr:
-        return self._width
-
-    @width.setter
-    def width(self, value):
-        if isinstance(value, UnitStr):
-            self._width = value
-        else:
-            self._width = UnitStr(value, dpi=self._dpi)
-        self._template_changed.emit()
-
-    @property
-    def height(self) -> UnitStr:
-        return self._height
-
-    @height.setter
-    def height(self, value):
-        if isinstance(value, UnitStr):
-            self._height = value
-        else:
-            self._height = UnitStr(value, dpi=self._dpi)
-        self._template_changed.emit()
-
-    @property
-    def content(self) -> Optional[str]:
+    def content(self):
         return self._content
 
     @content.setter
-    def content(self, content: str):
-        self._content = content
-        # self.element_changed.emit()
-        self.update()
-
-    @property
-    def unit(self):
-        return self._unit
-
-    @property
-    def rect(self):
-        # Always returns rect in px, local coordinates (0,0)
-        return QRectF(
-            0, 0,
-            self._width.to("px", self._dpi),
-            self._height.to("px", self._dpi)
-        )
-
-    @rect.setter
-    def rect(self, qrectf: QRectF):
-        # Accepts a QRectF in px; updates logical size, but never position!
-        self.prepareGeometryChange()
-        self._width = UnitStr(qrectf.width() / self._dpi, unit="in", dpi=self._dpi)
-        self._height = UnitStr(qrectf.height() / self._dpi, unit="in", dpi=self._dpi)
-        self.element_changed.emit()
-        self.update() 
+    def content(self, template):
+        self._content = template
+        self.render_to_image(dpi=self._dpi)
 
     def paint(self, painter, option, widget=None):
-        print("Time to start painting")
         if self._cache_image is None:
             self._cache_image = self._render_to_image(dpi=self._dpi)
 
-        # self.rect is QRectF(x, y, width, height) in logical units (e.g., inches)
-        painter.drawImage(self.rect, self._cache_image)
-            
+        painter.drawImage(self.boundingRect(), self._cache_image)
+
     def _render_to_image(self, dpi):
-        w = self._width.to("px", dpi)
-        h = self._height.to("px", dpi)
-        image = QImage(int(w), int(h), QImage.Format_ARGB32_Premultiplied)
+        rect = self.boundingRect()
+        w, h = int(rect.width()), int(rect.height())
+
+        option = QStyleOptionGraphicsItem()
+        image = QImage(w, h, QImage.Format_ARGB32_Premultiplied)
         image.fill(Qt.transparent)
 
         img_painter = QPainter(image)
-        img_painter.scale(dpi, dpi)  # So child items also use logical units
-        self._render_elements(img_painter)  # All done in logical units
-        img_painter.end()
+        img_painter.setRenderHints(QPainter.Antialiasing | QPainter.SmoothPixmapTransform)
 
+        # Set coordinate system so 1 px in logical unit equals 1 px in image
+        img_painter.translate(-rect.topLeft())  # Align drawing to image origin
+
+        # 1. Render the template background + border
+        self.content.paint(img_painter, option, widget=None)
+
+        # 2. Render all elements (manual call since they’re not in a scene)
+        for element in sorted(self.content.elements, key=lambda e: e.zValue()):
+            img_painter.save()
+            element.paint(img_painter, option, widget=None)
+            img_painter.restore()
+
+        img_painter.end()
         return image
 
 
@@ -150,7 +119,8 @@ class Component(ComponentTemplate):
         option = QStyleOptionGraphicsItem()
 
         # 1.  Render back-to-front, exactly like the scene does.
-        for element in sorted(self.template.elements, key=lambda e: e.zValue()):
+        self.content.paint(painter, option, widget=None)
+        for element in sorted(self.content.elements, key=lambda e: e.zValue()):
             painter.save()
 
             # 2.  Position & orientation (both expressed in logical units).
@@ -166,6 +136,23 @@ class Component(ComponentTemplate):
 
             painter.restore()
 
+    def _render_background(self, painter: QPainter):
+        """
+        Draw the template background color or image.
+        This assumes the template may define a background_color or background_image.
+        """
+        rect = QRectF(0, 0, self._width.to("float"), self._height.to("float"))
+
+        bg_color = getattr(self._content, "background_color", None)
+        bg_image_path = getattr(self._content, "background_image", None)
+
+        if bg_color:
+            painter.fillRect(rect, QColor(bg_color))
+
+        if bg_image_path:
+            pixmap = QPixmap(bg_image_path)
+            painter.drawPixmap(rect, pixmap, pixmap.rect())
+
     def invalidate_cache(self):
         self._cache_image = None
         self.update()
@@ -175,12 +162,16 @@ class Component(ComponentTemplate):
         Updates elements with values from csv_row, only if their name is a data binding.
         If the element already has static content, it is left unchanged unless overridden by csv data.
         """
-        for element in self._template.elements:
+        for element in self._content.elements:
             if element.name.startswith("@"):
                 col = element.name
                 if col in csv_row:
                     value = csv_row[col]
                     setattr(element, "content", value)
 
-
-    
+    def apply_data(row):
+        # Update child elements to use new data
+        for element in self.content.elements():
+            if hasattr(element, "content",):
+                element.update_from_merge_data(merge_data)
+        self.update()

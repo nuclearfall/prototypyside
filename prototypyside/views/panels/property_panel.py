@@ -122,7 +122,7 @@ class PropertyPanel(QWidget):
         geometry_layout.addRow("Y:", self.element_y_field)
         geometry_layout.addRow("Width:", self.element_width_field)
         geometry_layout.addRow("Height:", self.element_height_field)
-
+    
         geometry_group.setLayout(geometry_layout)
         self._main_layout.addWidget(geometry_group)
 
@@ -331,7 +331,7 @@ class PropertyPanel(QWidget):
             self.aspect_checkbox.setChecked(False)
         self.aspect_checkbox.blockSignals(False)
 
-    def on_unit_changed(self):
+    def on_unit_changed(self, unit, dpi):
         unit_fields = [self.element_x_field, self.element_y_field, 
                 self.element_width_field, self.element_height_field, 
                 self.border_width_field]

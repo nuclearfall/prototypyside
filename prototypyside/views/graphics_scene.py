@@ -8,9 +8,10 @@ from PySide6.QtGui import QColor, QPen, QPainter, QPixmap, QTransform
 from prototypyside.config import MEASURE_INCREMENT, LIGHTEST_GRAY, DARKEST_GRAY
 from prototypyside.utils.unit_converter import parse_dimension
 from prototypyside.utils.unit_str import UnitStr
+from prototypyside.utils.unit_str_geometry import UnitStrGeometry
 from prototypyside.utils.graphics_item_helpers import is_movable
 from prototypyside.views.graphics_items import ResizeHandle
-from prototypyside.services.undo_commands import MoveElementCommand, ResizeElementCommand, ResizeAndMoveElementCommand
+from prototypyside.services.undo_commands import MoveElementCommand, ResizeAndMoveElementCommand
 
 from typing import Optional, TYPE_CHECKING
 import math
@@ -39,12 +40,12 @@ class ComponentGraphicsScene(QGraphicsScene):
         self._template_width_px = int(scene_rect.width())
         self._template_height_px = int(scene_rect.height())
         self.setBackgroundBrush(QColor(240, 240, 240))
-
+        self.dpi = self.tab.template.dpi
         self._resizing = False
         self._dragging_item = None
         self.resize_handle = None
         self.resizing_element = None
-        self.resize_start_item_pos = None
+        self.resize_start_item_geometry = None
         self.resize_start_item_rect = None
         self._drag_offset = None
         self._dragging_start_pos = None
@@ -107,8 +108,8 @@ class ComponentGraphicsScene(QGraphicsScene):
             return
 
         # Always use canonical unit string (not UnitStr instance)
-        unit = self.tab.settings.unit
-        dpi = self.tab.settings.dpi
+        unit = self.tab.unit
+        dpi = self.tab.dpi
         levels = sorted(MEASURE_INCREMENT[unit].keys(), reverse=True)
         num_levels = len(levels)
 
@@ -137,13 +138,13 @@ class ComponentGraphicsScene(QGraphicsScene):
                 y += spacing
 
     def get_grid_spacing(self, level: int) -> float:
-        unit = self.tab.settings.unit
-        dpi = self.tab.settings.dpi
+        unit = self.tab.unit
+        dpi = self.tab.template.dpi
         increment = MEASURE_INCREMENT[unit].get(level)
         if increment is None:
             raise ValueError(f"Invalid grid level {level} for unit '{unit}'")
         # This is the physical size of the grid interval in unit, convert to px:
-        spacing_px = UnitStr(increment, unit=unit, dpi=dpi).to("px", dpi=dpi)
+        spacing_px = UnitStr(increment, dpi=dpi).to("px", dpi=dpi)
         return spacing_px
 
     def snap_to_grid(self, pos: QPointF) -> QPointF:
@@ -166,8 +167,8 @@ class ComponentGraphicsScene(QGraphicsScene):
             self.resize_handle = item
             self.resizing_element = item.parentItem()
             # Save local position and rect at drag start (not sceneBoundingRect)
-            self.resize_start_item_pos = self.resizing_element.pos()
-            self.resize_start_item_rect = self.resizing_element.rect
+            self.resize_start_item_geometry = self.resizing_element.geometry
+            # self.resize_start_item_rect = self.resizing_element.geometry.rect
             event.accept()
             return
 
@@ -191,6 +192,7 @@ class ComponentGraphicsScene(QGraphicsScene):
             self._drag_offset = snapped_mouse_press_pos - snapped_item_pos_at_press
             self._dragging_start_pos = QPointF(item.x(), item.y()) # Store the item's position before drag
             item.setPos(snapped_item_pos_at_press) # Snap item to grid immediately
+            print(f"Item {item} is being moved or resized.")
             event.accept()
             return
 
@@ -202,9 +204,8 @@ class ComponentGraphicsScene(QGraphicsScene):
             snapped_scene_pos = self.snap_to_grid(event.scenePos())
             starting_scene_pos = self.resizing_element.mapToScene(self.resize_handle.pos())
             delta_scene = snapped_scene_pos - starting_scene_pos
-
-            scene_rect = self.resizing_element.mapRectToScene(self.resizing_element.rect)
-
+            scene_rect = self.resizing_element.mapRectToScene(self.resizing_element.geometry.px.rect)
+            print(f"In mouseMoveEvent, resizing at {self.resizing_element.geometry}")
             self.resizing_element.resize_from_handle(
                 self.resize_handle.handle_type,
                 delta_scene,
@@ -223,30 +224,40 @@ class ComponentGraphicsScene(QGraphicsScene):
             return
 
         super().mouseMoveEvent(event)
+
+
     def mouseReleaseEvent(self, event: QGraphicsSceneMouseEvent):
         # Commit move to undo stack (if needed)
         if self._dragging_item and self._dragging_start_pos is not None:
-            # Use the stored start position (already snapped by mousePressEvent)
             old_pos = self._dragging_start_pos
-            new_pos = self._dragging_item.pos() # This should already be snapped due to mouseMoveEvent logic
-            command = MoveElementCommand(self._dragging_item, new_pos, old_pos)
-            self.tab.undo_stack.push(command)
-        elif self._resizing and self.resizing_element and self.resize_start_item_rect is not None:
-            old_values = (self.resize_start_item_pos, self.resize_start_item_rect)
-            new_values = (self.resizing_element.pos(), self.resizing_element.rect)
+            new_pos = self._dragging_item.pos()
+            if old_pos != new_pos:
+                command = MoveElementCommand(self._dragging_item, new_pos, old_pos)
+                self.tab.undo_stack.push(command)
+                
+        elif self._resizing and self.resizing_element and self.resize_start_item_geometry:
+            # The new geometry is the current geometry of the element after resizing
+            new_geometry = self.resizing_element.geometry
+            # The old geometry was saved when the mouse press began
+            old_geometry = self.resize_start_item_geometry
+
+            # Create the command with the CORRECT new_geometry and old_geometry order
             command = ResizeAndMoveElementCommand(
-                 self.resizing_element, new_values, old_values)
+                self.resizing_element,
+                new_geometry,
+                old_geometry
+            )
             self.tab.undo_stack.push(command)
-            pass  # Implement your undo/redo integration
 
         # Reset state
         self._resizing = False
         self.resize_handle = None
         self.resizing_element = None
-        self.resize_start_item_pos = None
+        self.resize_start_item_geometry = None
         self.resize_start_item_rect = None
         self._dragging_item = None
         self._drag_offset = None
+        self._dragging_start_pos = None
 
         super().mouseReleaseEvent(event)
 

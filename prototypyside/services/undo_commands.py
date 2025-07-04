@@ -5,6 +5,7 @@ from prototypyside.models.component_template import ComponentTemplate
 from prototypyside.utils.unit_converter import pos_to_unit_str
 from prototypyside.utils.proto_helpers import issue_pid, get_prefix 
 from prototypyside.utils.unit_str import UnitStr
+from prototypyside.utils.unit_str_geometry import UnitStrGeometry
 
 class AddSlotCommand(QUndoCommand):
     def __init__(self, registry, template):
@@ -22,8 +23,10 @@ class AddSlotCommand(QUndoCommand):
             self.registry.reinsert(self.slot)
 
 
-
-class CloneComponentCommand(QUndoCommand):
+# This method doesn't require adding the template to the scene.
+# Instead when dropped, it also creates a ComponentInstance which will Render
+# and adds that to the scene. The ComponentInstance renders the Template.
+class CreateComponentCommand(QUndoCommand):
     def __init__(self, component, tab, slot, description="Clone Element"):
         super().__init__(description)
         self.tab = tab
@@ -46,6 +49,10 @@ class CloneComponentCommand(QUndoCommand):
                 self.clone.add_element(ce)
                 ce.setParentItem(self.clone)
                 self.scene.addItem(ce)
+        else:
+            self.registry.reinsert(self.clone.pid)
+            for element in self.clone_elemnts:
+                self.registry.reinsert(element.pid)
 
     def undo(self):
         for ce in self.clone_elements:
@@ -58,51 +65,26 @@ class CloneComponentCommand(QUndoCommand):
 
 
 class AddElementCommand(QUndoCommand):
-    def __init__(self, prefix, scene_pos, tab, description="Add Element"):
+    def __init__(self, prefix, tab, geometry, description="Add Element"):
         super().__init__(description)
+        print(f"Command received geometry {geometry}")
         self.prefix = prefix
+        self.registry = tab.registry
         self.tab = tab
-        self.scene_pos = scene_pos
-
+        self.geometry = geometry
         self.element = None
 
     def redo(self):
         if self.element is None:
-            unit = self.tab.settings.unit or "in"
-            dpi = self.tab.settings.dpi or 300
-            logical_x, logical_y = pos_to_unit_str(self.scene_pos, unit, dpi)
-            
-
             # Convert default width/height (in inches) to the current logical unit
-            default_w_in = 0.5
-            default_h_in = 0.5
-
-            if unit == "in":
-                w_physical = default_w_in
-                h_physical = default_h_in
-            elif unit == "mm":
-                w_physical = default_w_in * 25.4
-                h_physical = default_h_in * 25.4
-            elif unit == "cm":
-                w_physical = default_w_in * 2.54
-                h_physical = default_h_in * 2.54
-            elif unit == "pt":
-                w_physical = default_w_in * 72.0
-                h_physical = default_h_in * 72.0
-            else:
-                w_physical = default_w_in
-                h_physical = default_h_in
-
-            # Build the QRectF in logical units
-            new_rect = QRectF(0, 0, w_physical, h_physical)
             self.element = self.tab.registry.create(
                 self.prefix,
-                rect=new_rect,
-                pos = self.scene_pos,
-                template_pid = self.tab.template_pid,
+                geometry=self.geometry,
+                template_pid = self.tab.template.pid,
                 parent=self.tab.template,
                 name=None
             )
+            self.element.setRect(self.geometry.px.rect)
             self.tab.template.add_element(self.element)
 
         elif self.element is not None and self.tab.registry.is_orphan(self.element.pid):
@@ -111,13 +93,14 @@ class AddElementCommand(QUndoCommand):
         if self.element.scene() is None:
             self.tab.scene.addItem(self.element)
 
+        scene_pos = self.element.pos()
         # Snap to grid if enabled (in px, so reconvert)
         if self.tab.snap_to_grid:
-            self.scene_pos = self.tab.scene.snap_to_grid(self.scene_pos)
+            self.element.setPos(self.tab.scene.snap_to_grid(scene_pos))
 
         # For QGraphicsItem, setPos always uses px
-        visual_offset = self.element.boundingRect().topLeft()
-        self.element.setPos(self.scene_pos - visual_offset)
+        visual_offset = self.element.geometry.px.rect.topLeft()
+        self.element.setPos(scene_pos - visual_offset)
         self.element.setSelected(True)
         self.tab.update_layers_panel()
 
@@ -188,26 +171,24 @@ class ResizeElementCommand(QUndoCommand):
         self.new_rect = new_rect
 
     def undo(self):
-        self.element.rect = self.old_rect
+        self.element.setRect(self.old_rect)
 
     def redo(self):
-        self.element.rect = self.new_rect
+        self.element.setRect(self.new_rect)
 
 class ResizeAndMoveElementCommand(QUndoCommand):
-    def __init__(self, element, new_values, old_values, description="Resize/Move Element"):
+    def __init__(self, element, new_geometry, old_geometry, description="Resize/Move Element"):
         super().__init__(description)
         self.element = element
-        self.new_pos, self.new_rect = new_values
-        self.old_pos, self.old_rect = old_values
+        self.new_geometry = new_geometry
+        self.old_geometry = old_geometry
 
     def undo(self):
-        self.element.rect = self.old_rect
-        self.element.setPos(self.old_pos)
+        self.element._geometry = self.old_geometry
 
     def redo(self):
-        print(f"Placing rect in undo stack with dimensions {self.new_rect} at position {self.new_pos}")
-        self.element.rect = self.new_rect
-        self.element.setPos(self.new_pos)
+        print(f"Preparing to resize and move in Command. New Geometry: {self.new_geometry}")
+        self.element._geometry = self.new_geometry
 
 class ChangeElementPropertyCommand(QUndoCommand):
     def __init__(self, element, change, description="Change Element Property"):
@@ -225,19 +206,14 @@ class ChangeElementPropertyCommand(QUndoCommand):
         setattr(self.element, self.prop, self.new_value)
 
 class ResizeTemplateCommand(QUndoCommand):
-    def __init__(self, template, new_width: 'UnitStr', new_height: 'UnitStr', description="Resize Template"):
+    def __init__(self, template, new_geometry, description="Resize Template"):
         super().__init__(description)
         self.template = template
-        # Defensive copy of the old values
-        self.old_width = template.width
-        self.old_height = template.height
-        self.new_width = new_width
-        self.new_height = new_height
+        self.old_geometry = copy(self.template.geometry)
+        self.new_geometry = new_geometry
 
     def redo(self):
-        self.template.width = self.new_width
-        self.template.height = self.new_height
+        self.template._geometry = self.new_geometry
 
     def undo(self):
-        self.template.width = self.old_width
-        self.template.height = self.old_height
+        self.template._geometry = self.old_geometry

@@ -29,11 +29,11 @@ class GeometrySetter:
             self.undo_stack.push(command)
 
     def set_pos_and_rect(self, element, new_pos, new_rect):
-        old_pos = element.pos
-        old_rect = element.rect
-        old_values = [old_pos, old_rect]
-        new_values = [new_pos, new_rect]
-        command = ResizeAndMoveElementCommand(element, new_values, old_values)
+        old_geo = element.geometry
+        unit = old_geo.unit
+        dpi = old_geo.dpi
+        new_geo = UnitStrGeometry(rect=new_rect, pos=new_pos, unit=old_geo.unit, dpi=old_geo.dpi)
+        command = ResizeAndMoveElementCommand(element, new_geo, old_geo)
         self.undo_stack.push(command)
             # The command's redo() method will call element.setPos(new_pos)
             # which correctly handles emitting element_changed and calling update().

@@ -1,32 +1,51 @@
 from dataclasses import dataclass, field
 from typing import List, Optional, Dict, Tuple
+from enum import Enum, auto
 import json
-from PySide6.QtWidgets import QGraphicsObject
-from PySide6.QtCore import Qt, QRectF, QPointF, Signal
+from PySide6.QtWidgets import QGraphicsObject, QGraphicsItem
+from PySide6.QtCore import Qt, QRectF, QPointF, QSizeF, Signal
 from PySide6.QtGui import QPageSize, QPainter, QPixmap, QColor, QImage, QPen, QBrush
 from prototypyside.utils.unit_converter import to_px, page_in_px, page_in_units, compute_scale_factor
 from prototypyside.utils.unit_str import UnitStr
+from prototypyside.utils.unit_str_geometry import UnitStrGeometry
+from prototypyside.utils.ustr_helpers import with_rect, with_pos
 from prototypyside.config import PAGE_SIZES, DISPLAY_MODE_FLAGS, PAGE_UNITS
 
 
 
 class LayoutSlot(QGraphicsObject):
-    def __init__(self, pid, width, height, x=0, y=0, parent=None):
+    def __init__(self, pid, geometry=None, parent=None):
         super().__init__(parent)
-        self.setAcceptHoverEvents(True)
         self._pid = pid
         self._hovered = False
-        # If any of these are UnitStr, convert to float px
-        self._width = float(width.to("px")) if hasattr(width, "to") else float(width)
-        self._height = float(height.to("px")) if hasattr(height, "to") else float(height)
-        self._x = float(x.to("px")) if hasattr(x, "to") else float(x)
-        self._y = float(y.to("px")) if hasattr(y, "to") else float(y)
-        self.unit = getattr(parent, "unit", None)
-        self.dpi = getattr(parent, "dpi", None)
+        self._geometry = geometry
+        self._dpi = geometry.dpi
+        self._geometry = geometry
         self._content = None
         self._display_flag = DISPLAY_MODE_FLAGS.get("stretch").get("aspect")
-        self.setRect(self.getRect())
-        self.setPos(self._x, self._y)
+        self.setPos(geometry.pos_x.px, geometry.pos_y.px)
+        self.setAcceptHoverEvents(True)
+
+
+    # These three methods must be defined for each object.
+    @property
+    def dpi(self): return self._dpi
+
+    @property
+    def geometry(self): return self._geometry
+
+    def boundingRect(self) -> QRectF:
+        return self._geometry.px.rect
+
+    def setRect(self, new_rect: QRectF):
+        self.prepareGeometryChange()
+        self._geometry = with_rect(self._geometry, new_rect)
+        self.update()
+
+    def itemChange(self, change: QGraphicsItem.GraphicsItemChange, value):
+        if change == QGraphicsItem.ItemPositionChange:
+            self._geometry = with_pos(self._geometry, value)
+        return super().itemChange(change, value)
 
     @property
     def pid(self) -> str:
@@ -55,26 +74,6 @@ class LayoutSlot(QGraphicsObject):
         if qflag != self._display_flag:
             self._display_flag = qflag
 
-    def boundingRect(self) -> QRectF:
-        # Use pixel floats directly!
-        return QRectF(0, 0, self._width, self._height)
-
-    def getRect(self):
-        # Returns a QRectF in scene (pixel) coordinates.
-        return QRectF(
-            self._x,
-            self._y,
-            self._width,
-            self._height,
-        )
-
-    def setRect(self, rect: QRectF):
-        # Updates pixel float fields based on the given QRectF (in px).
-        self._x = rect.x()
-        self._y = rect.y()
-        self._width = rect.width()
-        self._height = rect.height()
-
     def hoverEnterEvent(self, event):
         self._hovered = True
         self.update()
@@ -84,7 +83,7 @@ class LayoutSlot(QGraphicsObject):
         self.update()
 
     def paint(self, painter, option, widget=None):
-        rect = self.boundingRect()
+        rect = self._geometry.px.rect        
         # Draw slot fill and border
         fill = QBrush(QColor(230, 230, 230, 80))
         border = QPen(QColor(80, 80, 80), 1)
@@ -107,52 +106,64 @@ class LayoutSlot(QGraphicsObject):
         # If you want to draw anything *over* the content, you could do it here.
 
 
-    def bring_to_front(self, element: 'ComponentElement'):
-        if element not in self.elements:
-            return
-        
-        # Set to max + increment
-        max_z = max(e.zValue() for e in self.elements)
-        element.setZValue(max_z + 100)
-        self._normalize_z_values()
-        self.element_z_order_changed.emit()
-
-
 class LayoutTemplate(QGraphicsObject):
+    template_changed = Signal()
     marginsChanged = Signal()
     spacingChanged = Signal()
     export_quantity: Optional[int] = None     # Override for copies per slot
-    def __init__(self, pid, registry, parent=None, 
-                page_size="Letter (8.5 × 11 in)", 
-                rows=3, columns=3, dpi=300, unit="in", 
+    def __init__(self, pid, parent=None, 
+                geometry=UnitStrGeometry(width="8.5in", height="11.5in", dpi=144),
+                page_size = "Letter (8.5 × 11 in)",
+                pagination_policy="InterleaveDatasets",
+                pagination_params={},
+                rows=3, columns=3, dpi=144,
                 name=None, margin_top="0.5in", margin_bottom = "0.5in",
                 margin_left = "0.25in", margin_right = "0.25in",
                 spacing_x = "0.0in", spacing_y  = "0.0in", landscape=False, auto_fill=True):
         super().__init__(parent)
         self._pid = pid
-        self.name = name
-        self.registry = registry
-        # Always store page_size as a display string
+        self._name = name
+        self._geometry = geometry
+        print(f"LayoutTemplate geometry {geometry.px.rect}")
+        self._dpi = geometry.dpi
+        # # Always store page_size as a display string
         if page_size in PAGE_SIZES:
             self.page_size = page_size
         else:
             # fallback: use default if page_size not recognized
             self.page_size = "Letter (8.5 × 11 in)"
-        self.unit = unit
-        self.dpi = dpi
-        self._margin_top = UnitStr(margin_top, unit=unit, dpi=dpi)
-        self._margin_bottom = UnitStr(margin_bottom, unit=unit, dpi=dpi)
-        self._margin_left = UnitStr(margin_left, unit=unit, dpi=dpi)
-        self._margin_right = UnitStr(margin_right, unit=unit, dpi=dpi)
-        self._spacing_x = UnitStr(spacing_x, unit=unit, dpi=dpi)
-        self._spacing_y = UnitStr(spacing_y, unit=unit, dpi=dpi)
-        self._width, self._height = self.get_page_size()
+
+        self.pagination_policy = pagination_policy or "InterleaveDatasets"
+        self.pagination_params = pagination_params or {}
+        self._dpi = dpi
+        self._margins = [UnitStr(m, dpi=self._dpi) for m in (margin_top, margin_bottom, margin_left, margin_right)]
+        self._spacing = [UnitStr(s, dpi=self._dpi) for s in (spacing_x, spacing_y)]
         self.landscape = landscape
         self.auto_fill = auto_fill
         self._rows = rows
         self._columns = columns 
         self.layout_slots: List[List[LayoutSlot]] = [[]]
 
+    # These three methods must be defined for each object. They maintain consistency.
+    @property
+    def dpi(self): return self._dpi
+
+    @property
+    def geometry(self): return self._geometry
+
+    def boundingRect(self) -> QRectF:
+        return self._geometry.px.rect
+
+    def setRect(self, new_rect: QRectF):
+        self.prepareGeometryChange()
+        self._geometry = with_rect(self._geometry, new_rect)
+        self.update()
+
+    def itemChange(self, change: QGraphicsItem.GraphicsItemChange, value):
+        if change == QGraphicsItem.ItemPositionChange:
+            self._geometry = with_pos(self._geometry, value)
+        return super().itemChange(change, value)
+        
     @property
     def pid(self) -> str:
         return self._pid
@@ -170,6 +181,8 @@ class LayoutTemplate(QGraphicsObject):
     def rows(self, value):
         if value != self._rows:
             self._rows = value
+            self.set_grid(self._rows, self._columns)
+
     @property
     def columns(self):
         return self._columns
@@ -178,6 +191,8 @@ class LayoutTemplate(QGraphicsObject):
     def columns(self, value):
         if value != self._columns:
             self._columns = value
+            self.set_grid(self._rows, self._columns)
+
     @property 
     def display_flag(self):
         return self._display_flag
@@ -187,139 +202,75 @@ class LayoutTemplate(QGraphicsObject):
         if qflag != self._display_flag:
             self._display_flag = qflag
 
-    def get_bounding_rect(self) -> QRectF:
-        w, h = self.get_page_size()
-        w_px = w.to("px")
-        h_px = h.to("px")
-        return QRectF(0, 0, w_px, h_px)
-
-    def get_page_size(self) -> tuple[UnitStr, UnitStr]:
-        """
-        Returns (page_width, page_height) as UnitStr in the template's current unit.
-        """
-        ps_enum = PAGE_SIZES.get(self.page_size, None)
-        if ps_enum is None:
-            ps_enum = QPageSize.Letter
-        qpagesize = QPageSize(ps_enum)
-        page_unit = PAGE_UNITS.get(self.unit) or QPageSize.Unit.Inch
-        size = qpagesize.size(page_unit)
-        w = UnitStr(size.width(), unit=self.unit, dpi=self.dpi)
-        h = UnitStr(size.height(), unit=self.unit, dpi=self.dpi)
-
-        return w, h
+    # ---- Margins and Grid Spacing ---- #
+    @property
+    def margins(self):
+        return self._margins
 
     @property
-    def page_width(self) -> UnitStr:
-        return self.get_page_size()[0]
-
-    @property
-    def page_height(self) -> UnitStr:
-        return self.get_page_size()[1]
-
-    def boundingRect(self):
-        return self.get_bounding_rect()
+    def margins(self, new_margins: List[UnitStr]):
+        self._margins = new_margins
+        self.marginsChanged.emit()
 
     @property
     def margin_top(self):
-        return self._margin_top
+        return self._margins[0]
 
     @margin_top.setter
-    def margin_top(self, value):
-        if isinstance(value, UnitStr):
-            self._margin_top = value
-        else:
-            self._margin_top = UnitStr(value, unit=self._margin_top.unit, dpi=self._margin_top.dpi)
-        # self.marginsChanged.emit()
-        # self.update()
+    def margin_top(self, ustr: UnitStr):
+        self._margins[0] = ustr
+        self.marginsChanged.emit()
 
     @property
     def margin_bottom(self):
-        return self._margin_bottom
+        return self._margins[1]
 
-    @margin_bottom.setter
-    def margin_bottom(self, value):
-        if isinstance(value, UnitStr):
-            self._margin_bottom = value
-        else:
-            self._margin_bottom = UnitStr(value, unit=self._margin_bottom.unit, dpi=self._margin_bottom.dpi)
-        # self.marginsChanged.emit()
-        # self.update()
+    @margin_bottom.setter 
+    def margin_bottom(self, ustr: UnitStr):
+        self._margins[1] = ustr
+        self.marginsChanged.emit()
 
     @property
     def margin_left(self):
-        return self._margin_left
+        return self._margins[2]
 
     @margin_left.setter
-    def margin_left(self, value):
-        if isinstance(value, UnitStr):
-            self._margin_left = value
-        else:
-            self._margin_left = UnitStr(value, unit=self._margin_left.unit, dpi=self._margin_left.dpi)
-        # self.marginsChanged.emit()
-        # self.update()
+    def margin_left(self, ustr: UnitStr):
+        self._margins[2] = ustr
+        self.marginsChanged.emit()
 
     @property
     def margin_right(self):
-        return self._margin_right
+        return self._margins[3]
 
     @margin_right.setter
-    def margin_right(self, value):
-        if isinstance(value, UnitStr):
-            self._margin_right = value
-        else:
-            self._margin_right = UnitStr(value, unit=self._margin_right.unit, dpi=self._margin_right.dpi)
-        # self.marginsChanged.emit()
-        # self.update()
+    def margin_right(self, ustr: UnitStr):
+        self.margins[3] = ustr
+        self.marginsChanged.emit()
 
     @property
     def spacing_x(self):
-        return self._spacing_x
+        return self._spacing[0]
 
     @spacing_x.setter
-    def spacing_x(self, value):
-        print("spacing set")
-        if isinstance(value, UnitStr):
-            self._spacing_x = value
-        else:
-            self._spacing_x = UnitStr(value, unit=self._spacing_x.unit, dpi=self._spacing_x.dpi)
-        self.marginsChanged.emit()
-
-    def get_page_dim_px(self):
-        return self._width.to("px"), self._height.to("px")
-
-    def get_margins_and_spacing_px(self):
-        return [
-            self.margin_top.to("px"),
-            self.margin_bottom.to("px"),
-            self.margin_left.to("px"),
-            self.margin_right.to("px"),
-            self.spacing_x.to("px"),
-            self.spacing_y.to("px")
-        ]
+    def spacing_x(self, ustr: UnitStr):
+        self._spacing[0] = ustr
+        self.spacingChanged.emit()
 
     @property
     def spacing_y(self):
-        return self._spacing_y
+        return self._spacing[1]
 
-    @spacing_y.setter
-    def spacing_y(self, value):
-        if isinstance(value, UnitStr):
-            self._spacing_y = value
-        else:
-            self._spacing_y = UnitStr(value, unit=self._spacing_y.unit, dpi=self._spacing_y.dpi)
+    @spacing_x.setter
+    def spacing_y(self, ustr: UnitStr):
+        self._spacing[1] = ustr
         self.spacingChanged.emit()
-        # self.update()
 
-    def get_margins(self):
-        return self._margin_top, self._margin_bottom, self._margin_left, self._margin_right
-
-    @property
-    def rect(self):
-        return self.get_bounding_rect
+    def get_whitespace(self):
+        return [w.px for w in self._margins + self._spacing]
 
     ### Grid manipulation ###
-
-    def setGrid(self, rows=None, columns=None):
+    def setGrid(self, registry, rows=None, columns=None):
         """
         Expands or shrinks the layout_slots grid to match (rows, columns).
         Handles creation, updating, and deregistration of slots as needed.
@@ -339,7 +290,7 @@ class LayoutTemplate(QGraphicsObject):
             row = self.layout_slots.pop()
             for slot in row:
                 if slot is not None:
-                    self.registry.deregister(slot.pid)
+                    registry.deregister(slot.pid)
                     if slot.scene() is not None:
                         self.scene.removeItem(slot)
 
@@ -348,7 +299,7 @@ class LayoutTemplate(QGraphicsObject):
             while len(row) > target_cols:
                 slot = row.pop()
                 if slot is not None:
-                    self.registry.deregister(slot.pid)
+                    registry.deregister(slot.pid)
                     if slot.scene() is not None:
                         self.scene.removeItem(slot)
 
@@ -367,23 +318,17 @@ class LayoutTemplate(QGraphicsObject):
                 slot = self.layout_slots[r][c]
                 slot_width, slot_height = self.compute_slot_size(r, c)
                 x_pos, y_pos = self.compute_slot_position(r, c)
+                rect = QRectF(0, 0, slot_width, slot_height)
+                pos = QPosF(x_pos, y_pos)
                 if slot is not None:
                     # Update existing slot
-                    slot._width = float(slot_width)
-                    slot._height = float(slot_height)
-                    slot._x = float(x_pos)
-                    slot._y = float(y_pos)
-                    slot.setPos(x_pos, y_pos)
-                    slot.setRect(QRectF(0, 0, slot_width, slot_height))
+                    slot.geometry.from_px(rect=rect, pos=pos, dpi=self._dpi)
                     slot.update()
                 else:
                     # Create new slot and add to scene
-                    slot = self.registry.create(
+                    slot = registry.create(
                         "ls",
-                        width=slot_width,
-                        height=slot_height,
-                        x=x_pos,
-                        y=y_pos,
+                        geometry=UnitStrGeometry.from_px(rect, pos, dpi=self._dpi),
                         parent=self,
                     )
                     self.layout_slots[r][c] = slot
@@ -398,8 +343,8 @@ class LayoutTemplate(QGraphicsObject):
         Returns slot_width, slot_height in **pixels** for the given grid position.
         Slot sizes are based on page size, margins, spacing, and grid size.
         """
-        t, b, l, r, sx, sy = self.get_margins_and_spacing_px()  # Each is a float (pixels)
-        w, h = self.get_page_dim_px()  # floats (pixels)
+        t, b, l, r, sx, sy = self.get_whitespace()  # Each is a float (pixels)
+        w, h = self._geometry.px.size.width(), self._geometry.px.size.height()
 
         cols = self.columns
         rows = self.rows
@@ -423,7 +368,7 @@ class LayoutTemplate(QGraphicsObject):
         """
         Returns x, y in **pixels** for the given grid position.
         """
-        t, b, l, r, sx, sy = self.get_margins_and_spacing_px()  # px
+        t, b, l, r, sx, sy = self.get_whitespace()  # px
         slot_width_px, slot_height_px = self.compute_slot_size(row, col)
 
         x_px = l + col * (sx + slot_width_px)
@@ -435,93 +380,48 @@ class LayoutTemplate(QGraphicsObject):
 
         return x_px, y_px
 
-    def get_px_margins(self):
-        return (self.margin_top.to("px", dpi=self.dpi), self.margin_bottom.to("px", dpi=self.dpi), 
-                self.margin_left.to("px", dpi=self.dpi), self.margin_right.to("px", dpi=self.dpi))
+    def get_margins(self):
+        return [m for m in self._margins]
 
-    def slots_meet_minimum(self, min_width: float, min_height: float) -> bool:
+    def slots_meet_minimum(self, min_dims: UnitStrGeometry) -> bool:
         """
         Return True if each slot’s width ≥ min_width_in inches
         and height ≥ min_height_in inches; False otherwise.
         """
-        # convert required inches → pixels
-        min_w_px = parse_dimension(min_width, min_height)
-        min_h_px = to_px(f"{min_height_in}in")
+        slot_size = self.layout_slots[0][0]._geometry.inch.size
+        min_size = min_dims.inch.size
 
-        slot_w, slot_h = self.get_slot_dimensions_px()
+        return (
+            slot_size.width() >= min_size.width() and
+            slot_size.height() >= min_size.height()
+        )
+        
 
-        return slot_w >= min_w_px and slot_h >= min_h_px
+    def get_slot_position(self, row: int, col: int) -> tuple[float, float]:
+        slot = self.layout_slots[row][col]
+        return slot.geometry.px.pos
 
-    def get_slot_position_px(self, row: int, col: int) -> tuple[float, float]:
-        rect = self.boundingRect()
-        cell_w, cell_h = self.get_cell_size_px()
-        spacing_x = to_px(self.spacing_x)
-        spacing_y = to_px(self.spacing_y)
-        top, bottom, left, right = self.get_px_margins()
-
-        x = rect.left() + left + col * (cell_w + spacing_x)
-        y = rect.top() + top + row * (cell_h + spacing_y)
-
-        return x, y
-
-    def get_cell_size_px(self) -> Tuple[float, float]:
+    def get_slot_size(self) -> Tuple[float, float]:
         """
         Returns the uniform cell size (width, height) in pixels for all slots in the grid.
         """
-        t, b, l, r, sx, sy = self.get_margins_and_spacing_px()
-        w, h = self.get_page_dim_px()
-        
-        cols = self.columns
-        rows = self.rows
-        
-        if cols < 1 or rows < 1:
-            return 0.0, 0.0
-            
-        avail_width = w - l - r - (cols - 1) * sx
-        avail_height = h - t - b - (rows - 1) * sy
-        
-        cell_width_px = max(avail_width / cols, 0)
-        cell_height_px = max(avail_height / rows, 0)
-        
-        return cell_width_px, cell_height_px
+        slot_size = self.layout_slots[0][0]._geometry.to("px", self._dpi).size
 
-    def get_slot_rect_px(self, row: int, col: int) -> QRectF:
+    def get_slot_at_position(self, scene_pos: QPointF) -> Optional[LayoutSlot]:
         """
-        Returns the QRectF for a specific slot at (row, col) in page coordinates (pixels).
+        Given a scene-coordinate point, return the LayoutSlot whose rect contains it,
+        or None if no slot matches.
         """
-        cell_w, cell_h = self.get_cell_size_px()
-        t, b, l, r, sx, sy = self.get_margins_and_spacing_px()
-        
-        # Calculate position
-        x = l + col * (sx + cell_w)
-        y = t + row * (sy + cell_h)
-        
-        return QRectF(x, y, cell_w, cell_h)
-
-    def get_slot_at_position(self, scene_pos: QPointF) -> Tuple[Optional[str], Optional[QPointF]]:
-        """
-        Given a scene-coordinate point, return the (slot_pid, slot_origin)
-        whose rect contains it, or (None, None) if no slot matches.
-        """
-        # uniform slot size in pixels
         cell_w, cell_h = self.get_cell_size_px()
 
         for row in range(self.rows):
             for col in range(self.columns):
-                # slot’s top-left in px
                 x_px, y_px = self.get_slot_position_px(row, col)
                 slot_rect = QRectF(x_px, y_px, cell_w, cell_h)
-
                 if slot_rect.contains(scene_pos):
-                    # now index into the 2D list
-                    slot = None
-                    if self.layout_slots and len(self.layout_slots) > row:
-                        slot_row = self.layout_slots[row]
-                        if len(slot_row) > col:
-                            slot = slot_row[col]
-                    return slot, QPointF(x_px, y_px)
+                    return self.layout_slots[row][col]
 
-        return None, None
+        return None
 
     def iter_slot_geometry(self):
         """
@@ -535,15 +435,16 @@ class LayoutTemplate(QGraphicsObject):
 
     def to_dict(self) -> Dict:
         page_size_id = self.page_size.id()
-        return {
-            "pid": self.pid,
-            "name": self.name,
-            # Use the enum's value for serialization
-            "page_size_id": page_size_id,   # Convert ID to integer
-            "name": self.page_size.name(),
-            "units": self.page_size.size(QPageSize.Inch), # Convert units enum to int
-            "rows": self.rows,
-            "columns": self.columns,
+        data = {
+            "pid": self._pid,
+            "name": self._name,
+            "geometry": self._geometry,
+            # # Use the enum's value for serialization
+            # "page_size_id": page_size_id,   # Convert ID to integer
+            # "name": self.page_size.name(),
+            # "units": self.page_size.size(QPageSize.Inch),
+            "rows": self._rows,
+            "columns": self._columns,
             "margin_top": self.margin_top,
             "margin_bottom": self.margin_bottom,
             "margin_left": self.margin_left,
@@ -552,7 +453,36 @@ class LayoutTemplate(QGraphicsObject):
             "spacing_y": self.spacing_y,
             "layout_slots": self.layout_slots,
         }
-        # print(f"Page Size enum value {page_size_id}")   
+        data["paginationPolicy"] = {
+            "type": self.pagination_policy,
+            "params": self.pagination_params,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "LayoutTemplate":
+        pol = data.get("paginationPolicy", {})
+        page_size_id = data.get("page_size_id", QPageSize.Letter)
+        page_size = QPageSize(QPageSize.PageSizeId(page_size_id))
+
+        template = cls(
+            pid=data["pid"],
+            name=data.get("name", "Layout Template"),
+            geometry=UnitStrGeometry.from_dict(data.get("geometry")),
+            # page_size = QPageSize.PageSizeId(data.get("page_size_id", QPageSize.Letter)),
+            pagination_policy = pol.get("type"),
+            pagination_params = pol.get("params"),
+            rows=data.get("rows", 1),
+            columns=data.get("columns", 1),
+            margin_top=data.get("margin_top", "0.5in"),
+            margin_bottom=data.get("margin_bottom", "0.5in"),
+            margin_left=data.get("margin_left", "0.25in"),
+            margin_right=data.get("margin_left", "0.25in"),
+            spacing_x=data.get("spacing_x", "0"),
+            spacing_y=data.get("spacing_y", "0"),
+            layout_slots=data.get("layout_slots", [[]])
+        )
+
+        return template
 
     def paint(self, painter: QPainter, option, widget=None):
         rect = self.boundingRect()
@@ -566,9 +496,7 @@ class LayoutTemplate(QGraphicsObject):
         painter.drawRect(rect)
 
         # Optionally: draw grid lines for visual aid
-        top_margin_px, bottom_margin_px, left_margin_px, right_margin_px = self.get_px_margins()
-        spacing_x_px = to_px(self.spacing_x)
-        spacing_y_px = to_px(self.spacing_y)
+        top_margin_px, bottom_margin_px, left_margin_px, right_margin_px, spacing_x_px, spacing_y_px = self.get_whitespace()
         rows = self.rows
         cols = self.columns
 
@@ -590,28 +518,6 @@ class LayoutTemplate(QGraphicsObject):
             painter.drawLine(x, rect.top() + top_margin_px,
                              x, rect.top() + top_margin_px + total_h + spacing_y_px * (rows - 1))
 
-
-    @classmethod
-    def from_dict(cls, data: dict) -> "LayoutTemplate":
-
-        page_size_id = data.get("page_size_id", QPageSize.Letter)
-        page_size = QPageSize(QPageSize.PageSizeId(page_size_id))
-
-        template = cls(
-            pid=data["pid"],
-            name=data.get("name", "Layout Template"),
-            page_size = QPageSize.PageSizeId(data.get("page_size_id", QPageSize.Letter)),
-            rows=data.get("rows", 1),
-            columns=data.get("columns", 1),
-            margin_top=data.get("margin_top", "0.5in"),
-            margin_bottom=data.get("margin_bottom", "0.5in"),
-            margin_left=data.get("margin_left", "0.25in"),
-            margin_right=data.get("margin_left", "0.25in"),
-            spacing_x=data.get("spacing_x", "0"),
-            spacing_y=data.get("spacing_y", "0"),
-            layout_slots=data.get("layout_slots", [[]])
-        )
-        return template
 
     def save_to_file(self, path: str) -> None:
         with open(path, "w", encoding="utf-8") as f:
