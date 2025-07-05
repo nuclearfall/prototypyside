@@ -67,7 +67,6 @@ class CreateComponentCommand(QUndoCommand):
 class AddElementCommand(QUndoCommand):
     def __init__(self, prefix, tab, geometry, description="Add Element"):
         super().__init__(description)
-        print(f"Command received geometry {geometry}")
         self.prefix = prefix
         self.registry = tab.registry
         self.tab = tab
@@ -86,6 +85,7 @@ class AddElementCommand(QUndoCommand):
             )
             self.element.setRect(self.geometry.px.rect)
             self.tab.template.add_element(self.element)
+            self.element.setParentItem(self.tab.template)
 
         elif self.element is not None and self.tab.registry.is_orphan(self.element.pid):
             self.tab.registry.reinsert(self.element.pid)
@@ -171,45 +171,57 @@ class ResizeElementCommand(QUndoCommand):
         self.new_rect = new_rect
 
     def undo(self):
-        self.element.setRect(self.old_rect)
+        # Prevent re-entrancy when setting the element's geometry
+        self.element.blockSignals(True)
+        self.element.geometry = self.old_geometry
+        self.element.blockSignals(False)
 
     def redo(self):
-        self.element.setRect(self.new_rect)
+        # Prevent re-entrancy when setting the element's geometry
+        self.element.blockSignals(True)
+        self.element.geometry = self.new_geometry
+        self.element.blockSignals(False)
 
 class ResizeAndMoveElementCommand(QUndoCommand):
-    def __init__(self, element, new_geometry, old_geometry, description="Resize/Move Element"):
-        super().__init__(description)
-        self.element = element
-        self.new_geometry = new_geometry
-        self.old_geometry = old_geometry
+    pass
+    # def __init__(self, element, new_geometry, old_geometry, description="Resize/Move Element"):
+    #     super().__init__(description)
+    #     geom = element.geometry
+    #     print(f"Element rect and pos prior to move and resize: {geom.px.rect} at {geom.px.pos}.")
+    #     self.element = element
+    #     self.new_geometry = new_geometry
+    #     self.old_geometry = old_geometry
 
-    def undo(self):
-        self.element._geometry = self.old_geometry
+    # def undo(self):
+    #     # Prevent re-entrancy when setting the element's geometry
+    #     self.element.geometry = self.old_geometry
 
-    def redo(self):
-        print(f"Preparing to resize and move in Command. New Geometry: {self.new_geometry}")
-        self.element._geometry = self.new_geometry
+    # def redo(self):
+    #     # Prevent re-entrancy when setting the element's geometry
+    #     self.element.geometry = self.new_geometry
+
 
 class ChangeElementPropertyCommand(QUndoCommand):
-    def __init__(self, element, change, description="Change Element Property"):
+    def __init__(self, element, prop, new_value, old_value, description="Change Element Property"):
         super().__init__(description)
         self.element = element
-        self.prop, self.new_value = change
-        self.old_value = getattr(element, self.prop)
-
+        self.prop = prop 
+        self.new_value = new_value
+        self.old_value = old_value
 
     def undo(self):
         if self.new_value != self.old_value:
             setattr(self.element, self.prop, self.old_value)
 
     def redo(self):
+        print("Changing property")
         setattr(self.element, self.prop, self.new_value)
 
 class ResizeTemplateCommand(QUndoCommand):
-    def __init__(self, template, new_geometry, description="Resize Template"):
+    def __init__(self, template, new_geometry, old_geometry, description="Resize Template"):
         super().__init__(description)
         self.template = template
-        self.old_geometry = copy(self.template.geometry)
+        self.old_geometry = old_geometry
         self.new_geometry = new_geometry
 
     def redo(self):

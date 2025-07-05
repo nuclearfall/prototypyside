@@ -26,7 +26,7 @@ class AppSettings(QObject):
     def unit(self, unit):       
         if self._display_unit != unit:
             self._display_unit = unit
-            self.on_unit_changed.emit()
+            self.unit_changed.emit(unit, self._display_dpi)
 
     @Property(int)
     def dpi(self):
@@ -44,4 +44,4 @@ class AppSettings(QObject):
     def display_unit(self, unit):
         if self._display_unit != unit:
             self._display_unit = unit
-            self.on_unit_changed.emit()
+            self.unit_changed.emit(unit, self._display_dpi)

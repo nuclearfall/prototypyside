@@ -195,3 +195,24 @@ class UnitStrGeometry:
             f"UnitStrGeometry({pos_str}, {rect_str}, "
             f"display_unit='{self.display_unit}', dpi={self.dpi})"
         )
+
+    def __eq__(self, other: object) -> bool:
+        if not isinstance(other, UnitStr):
+            # Allow comparison with numbers if that's a desired behavior,
+            # converting the number to a UnitStr first for comparison.
+            # Otherwise, return NotImplemented.
+            try:
+                other_unit_str = UnitStr(other, unit=self.unit, dpi=self._dpi)
+                return self._value == other_unit_str._value and self._dpi == other_unit_str._dpi
+            except (ValueError, TypeError): # If conversion fails
+                return NotImplemented # Or False, if strict
+        
+        # Ensure comparison is based on canonical values and DPI
+        return self._value == other._value and self.unit == other.unit and self._dpi == other._dpi
+
+    def __ne__(self, other: object) -> bool:
+        return not (self == other)
+
+    def __hash__(self) -> int:
+        # Hash based on the canonical value and unit, and dpi
+        return hash((self._value, self._canonical_unit, self._dpi))

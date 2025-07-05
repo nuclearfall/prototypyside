@@ -7,7 +7,6 @@ from PySide6.QtGui import QColor, QPalette # Import QColor
 from prototypyside.widgets.unit_field import UnitField
 from prototypyside.views.toolbars.font_toolbar import FontToolbar
 
-# --- NEW WIDGET: ColorPickerWidget ---
 class ColorPickerWidget(QPushButton):
     """
     A custom widget that displays a color and opens a QColorDialog when clicked.
@@ -18,7 +17,7 @@ class ColorPickerWidget(QPushButton):
     def __init__(self, initial_color: QColor = QColor(0, 0, 0), parent: QWidget = None):
         super().__init__("", parent) # No text on the button
         self._current_color = initial_color
-        self.setFixedSize(50, 24) # Adjust size as needed for your layout
+        self.setFixedSize(24, 24) # Adjust size as needed for your layout
         self.setFlat(True) # Make it look less like a standard button
 
         self.clicked.connect(self._open_color_dialog)

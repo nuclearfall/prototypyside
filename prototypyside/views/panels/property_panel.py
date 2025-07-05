@@ -1,435 +1,500 @@
-from PySide6.QtWidgets import (QWidget, QVBoxLayout, QLineEdit, QPushButton, QComboBox,
-                                 QGroupBox, QFormLayout, QCheckBox, QColorDialog, QLabel)
-from PySide6.QtCore import Qt, Signal, QRectF
-from PySide6.QtGui import QColor, QPalette
-from prototypyside.widgets.unit_field import UnitField
+# file: property_panel.py
+
+from PySide6.QtWidgets import (
+    QWidget, QFormLayout, QLabel, QLineEdit, QComboBox, QCheckBox,
+    QVBoxLayout, QFrame, QTextEdit, QPushButton, QFileDialog, QColorDialog, QStackedWidget, QTextEdit)
+from PySide6.QtCore import Qt, Signal, Slot
+from PySide6.QtGui import QColor, QFont, QTextOption
+from typing import Optional, Any
+
+# Assuming these modules are in the same directory or accessible via python path
+from prototypyside.widgets.unit_field import UnitField, UnitStrGeometryField
+from prototypyside.models.component_elements import ComponentElement, TextElement, ImageElement
 from prototypyside.views.toolbars.font_toolbar import FontToolbar
 from prototypyside.widgets.color_picker import ColorPickerWidget
-from prototypyside.utils.unit_converter import parse_dimension, to_px
-from prototypyside.utils.unit_str import UnitStr 
+
+
+# --- Main Property Panel Widget ---
 
 class PropertyPanel(QWidget):
-    property_changed = Signal(tuple)  # (property_name, value)
-    geometry_changed = Signal(tuple)  # (property_name, value)
+    """
+    A panel to display and edit properties of a selected ComponentElement.
+    """
+    # Emits (target_object, property_name, old_value, new_value)
+    property_changed = Signal(object, str, object, object)
 
-    def __init__(self, settings, parent=None):
+    def __init__(self, parent: Optional[QWidget] = None):
         super().__init__(parent)
-        self.settings = settings
-        self._main_layout = QVBoxLayout(self)
-        self._main_layout.setAlignment(Qt.AlignTop)
-        self.setLayout(self._main_layout)
-        self._element = None
-        self._build_component_ui()
-        self.settings.unit_changed.connect(self.on_unit_changed)
+        self.target_item: Optional[ComponentElement] = None
+        self._display_unit = "in" # Default, can be changed
 
-    def _clear_layout(self):
-        while self._main_layout.count():
-            item = self._main_layout.takeAt(0)
-            widget = item.widget()
-            if widget:
-                widget.setParent(None)
+        # Main layout
+        self.main_layout = QVBoxLayout(self)
+        self.main_layout.setContentsMargins(0, 0, 0, 0)
+        self.setLayout(self.main_layout)
 
-    def refresh(self):
-        """Refresh UI from the current element, if any."""
-        if self._element is not None:
-            self.update_panel_from_element()
-        else:
-            self.clear()
+        # A frame to hold the properties
+        self.main_frame = QFrame()
+        self.main_frame.setObjectName("propertyFrame")
+        self.form_layout = QFormLayout(self.main_frame)
+        self.form_layout.setRowWrapPolicy(QFormLayout.WrapLongRows)
+        self.main_layout.addWidget(self.main_frame)
 
-    def clear(self):
-        """Clear and disable all fields in the property panel."""
-        for widget in self.findChildren(QWidget):
-            # Skip QLabel widgets - they should keep their text
-            if isinstance(widget, QLabel):
-                continue
-                
-            if isinstance(widget, UnitField):
-                widget.setValue(None)
-            elif isinstance(widget, QLineEdit): 
-                widget.setText("")
-            elif isinstance(widget, QComboBox):
-                if widget.count() > 0:
-                    widget.setCurrentIndex(0)
-            elif isinstance(widget, QCheckBox):
-                widget.setChecked(False)
-            elif isinstance(widget, ColorPickerWidget):
-                widget.set_color(QColor(0, 0, 0, 0))
-            elif hasattr(widget, 'setValue'):
-                widget.setValue(0)
-
-            widget.setEnabled(False)
-
-    def set_target(self, element):
-        """Bind the panel to the selected element, or clear if None."""
-        if self._element is not None:
-            try:
-                self._element.element_changed.disconnect(self.update_panel_from_element)
-            except TypeError:
-                pass  # Wasn't connected
-
-        self._element = element
-
-        if element is not None:
-            # Enable fields and set values from element
-            self.update_panel_from_element()
-            # No need to iterate and enable all, update_panel_from_element will enable relevant ones
-            # Or you can do it here if you want to enable *all* children regardless of data presence
-            for widget in self.findChildren(QWidget):
-                widget.setEnabled(True)
-            element.element_changed.connect(self.update_panel_from_element)
-        else:
-            self.clear()
-
-    def set_mode(self, mode="component"):
-        self._clear_layout()
-        if mode == "component":
-            self._build_component_ui()
-        elif mode == "layout":
-            self._build_layout_ui()
-
-    def _build_component_ui(self):
-        element_group = QGroupBox("Element Info")
-        element_layout = QFormLayout()
-
+        # --- Create all possible widgets ---
+        self.pid_label = QLabel()
+        self.template_pid_label = QLabel()
         self.name_edit = QLineEdit()
-        self.name_edit.editingFinished.connect(
-            lambda: self.emit_property_and_clear(self.name_edit, "name", self.name_edit.text()))
 
+        # Content widgets in a stacked layout
+        self.content_stack = QStackedWidget()
+        self.content_text_edit = QTextEdit()
+        self.content_text_edit.setWordWrapMode(QTextOption.WordWrap)
+        self.content_path_edit = QLineEdit() # For image path
+        self.content_stack.addWidget(self.content_text_edit)
+        self.content_stack.addWidget(self.content_path_edit)
 
-        element_layout.addRow("Name:", self.name_edit)
-
-        self.content_edit = QLineEdit()
-        self.content_edit.editingFinished.connect(
-            lambda: self.emit_property_and_clear(self.content_edit, "content", self.content_edit.text()))
-
-        element_layout.addRow("Content:", self.content_edit)
-
-        element_group.setLayout(element_layout)
-        self._main_layout.addWidget(element_group)
-
-        geometry_group = QGroupBox("Geometry")
-        geometry_layout = QFormLayout()
-
-        self.element_x_field = UnitField(None, self.settings.unit, self.settings.dpi)
-        self.element_y_field = UnitField(None, self.settings.unit, self.settings.dpi)
-        self.element_width_field = UnitField(None, self.settings.unit, self.settings.dpi)
-        self.element_height_field = UnitField(None, self.settings.unit, self.settings.dpi)
-
-        for field in [self.element_x_field, self.element_y_field, self.element_width_field, self.element_height_field]:
-            field.editingFinished.connect(self._on_geometry_changed)
-
-        geometry_layout.addRow("X:", self.element_x_field)
-        geometry_layout.addRow("Y:", self.element_y_field)
-        geometry_layout.addRow("Width:", self.element_width_field)
-        geometry_layout.addRow("Height:", self.element_height_field)
-    
-        geometry_group.setLayout(geometry_layout)
-        self._main_layout.addWidget(geometry_group)
-
-        appearance_group = QGroupBox("Appearance")
-        appearance_layout = QFormLayout()
-
-        # --- REPLACED BUTTONS WITH COLOR PICKER WIDGETS ---
-        self.text_color_picker = ColorPickerWidget(QColor(0,0,0)) # Default to black
-        self.bg_color_picker = ColorPickerWidget(QColor(255,255,255,0)) # Default to transparent white
-        self.border_color_picker = ColorPickerWidget(QColor(0,0,0)) # Default to black
-
-        # Connect signals: color_changed from picker emits property_changed
-
-        self.text_color_picker.color_changed.connect(
-            lambda color: self.property_changed.emit(("color", color))
-        )
-        self.bg_color_picker.color_changed.connect(
-            lambda color: self.property_changed.emit(("bg_color", color))
-        )
-        self.border_color_picker.color_changed.connect(
-            lambda color: self.property_changed.emit(("border_color", color))
-        )
-        self.border_width_field = UnitField(None, self.settings.unit, self.settings.dpi)
-
-        self.border_width_field.editingFinished.connect(
-            lambda: self.emit_property_and_clear(self.border_width_field, "border_width", self.border_width_field.text()))
-
-        self.alignment_combo = QComboBox()
+        self.geometry_field = UnitStrGeometryField()
+        self.color_picker = ColorPickerWidget()
+        self.bg_color_picker = ColorPickerWidget()
+        self.border_color_picker = ColorPickerWidget()
+        self.border_width_field = UnitField()
+        
+        # Alignment ComboBox
         self.alignment_map = {
-            "Top Left": Qt.AlignTop | Qt.AlignLeft,
-            "Top Center": Qt.AlignTop | Qt.AlignHCenter,
-            "Top Right": Qt.AlignTop | Qt.AlignRight,
-            "Center Left": Qt.AlignVCenter | Qt.AlignLeft,
-            "Center": Qt.AlignCenter,
-            "Center Right": Qt.AlignVCenter | Qt.AlignRight,
-            "Bottom Left": Qt.AlignBottom | Qt.AlignLeft,
-            "Bottom Center": Qt.AlignBottom | Qt.AlignHCenter,
+            "Top Left": Qt.AlignTop | Qt.AlignLeft, "Top Center": Qt.AlignTop | Qt.AlignHCenter,
+            "Top Right": Qt.AlignTop | Qt.AlignRight, "Center Left": Qt.AlignVCenter | Qt.AlignLeft,
+            "Center": Qt.AlignCenter, "Center Right": Qt.AlignVCenter | Qt.AlignRight,
+            "Bottom Left": Qt.AlignBottom | Qt.AlignLeft, "Bottom Center": Qt.AlignBottom | Qt.AlignHCenter,
             "Bottom Right": Qt.AlignBottom | Qt.AlignRight,
         }
-        self.reverse_alignment_map = {v: k for k, v in self.alignment_map.items()}
-        self.alignment_combo.addItems(list(self.alignment_map.keys()))
-        self.alignment_combo.currentTextChanged.connect(
-            lambda: self.property_changed.emit(("alignment", self.alignment_map.get(self.alignment_combo.currentText(), Qt.AlignLeft))))
+        self.alignment_combo = QComboBox()
+        self.alignment_combo.addItems(self.alignment_map.keys())
+        self.alignment_rev_map = {v: k for k, v in self.alignment_map.items()}
 
-        
-        # Add a label and the color picker widget to the form layout
-        appearance_layout.addRow("Text Color:", self.text_color_picker)
-        appearance_layout.addRow("Background:", self.bg_color_picker)
-        appearance_layout.addRow("Border Color:", self.border_color_picker)
-        appearance_layout.addRow("Border Width:", self.border_width_field)
-        appearance_layout.addRow("Alignment:", self.alignment_combo)
-
-        appearance_group.setLayout(appearance_layout)
-        self._main_layout.addWidget(appearance_group)
-
+        # Conditional widgets
         self.font_toolbar = FontToolbar()
-        self.font_toolbar.font_changed.connect(
-                lambda font: self.property_changed.emit(("font", font)))
-        self._main_layout.addWidget(self.font_toolbar)
+        self.keep_aspect_checkbox = QCheckBox("Keep Aspect Ratio")
 
-        self.aspect_checkbox = QCheckBox("Maintain Aspect Ratio")
-        self.aspect_checkbox.stateChanged.connect(lambda state: self.property_changed.emit(("aspect_ratio", bool(state))))
-        self._main_layout.addWidget(self.aspect_checkbox)
+        # Add widgets to layout
+        self.form_layout.addRow("PID:", self.pid_label)
+        self.form_layout.addRow("Template PID:", self.template_pid_label)
+        self.form_layout.addRow("Name:", self.name_edit)
+        self.form_layout.addRow("Content:", self.content_stack)
+        self.form_layout.addRow("Geometry:", self.geometry_field)
+        self.form_layout.addRow("Color:", self.color_picker)
+        self.form_layout.addRow("Background Color:", self.bg_color_picker)
+        self.form_layout.addRow("Border Color:", self.border_color_picker)
+        self.form_layout.addRow("Border Width:", self.border_width_field)
+        self.form_layout.addRow("Alignment:", self.alignment_combo)
+        self.form_layout.addRow(self.font_toolbar)
+        self.form_layout.addRow(self.keep_aspect_checkbox)
 
-    def _build_layout_ui(self):
-        placeholder = QGroupBox("Layout Builder Mode (Placeholder)")
-        layout = QVBoxLayout()
-        layout.addWidget(QPushButton("Layout-specific control"))
-        placeholder.setLayout(layout)
-        self._main_layout.addWidget(placeholder)
+        # Connect signals
+        self._connect_signals()
 
-    def _on_geometry_changed(self):
-        field = self.sender()
-        if field:
-            field.clearFocus()
-        # All fields return a UnitStr or None
-        values = [
-            self.element_x_field.getValue(),
-            self.element_y_field.getValue(),
-            self.element_width_field.getValue(),
-            self.element_height_field.getValue()
-        ]
-        self.geometry_changed.emit(("geometry", values))
+        # Initially hide everything
+        self.clear_target()
 
-    # def _on_geometry_changed(self):
-    #     field = self.sender()
-    #     if field:
-    #         field.clearFocus()
+    def _connect_signals(self):
+        self.name_edit.editingFinished.connect(lambda: self._handle_property_change("name", self.name_edit.text()))
+        self.content_text_edit.textChanged.connect(lambda: self._handle_property_change("content", self.content_text_edit.toPlainText()))
+        self.content_path_edit.editingFinished.connect(lambda: self._handle_property_change("content", self.content_path_edit.text()))
+        self.geometry_field.valueChanged.connect(self.property_changed.emit)
+        self.color_picker.color_changed.connect(lambda c: self._handle_property_change("color", c))
+        self.bg_color_picker.color_changed.connect(lambda c: self._handle_property_change("bg_color", c))
+        self.border_color_picker.color_changed.connect(lambda c: self._handle_property_change("border_color", c))
+        self.border_width_field.valueChanged.connect(self.property_changed.emit)
+        self.alignment_combo.currentIndexChanged.connect(self._on_alignment_changed)
+        self.font_toolbar.font_changed.connect(self.property_changed.emit)
+        self.keep_aspect_checkbox.toggled.connect(lambda t: self._handle_property_change("keep_aspect", t))
 
-    #     values = [
-    #         self.element_x_field.text(),
-    #         self.element_y_field.text(),
-    #         self.element_width_field.text(),
-    #         self.element_height_field.text()
-    #     ]
-    #     self.geometry_changed.emit(("geometry", values))
-
-    def emit_property_and_clear(self, field, prop_name, value):
-        field.clearFocus()
-        self.property_changed.emit((prop_name, value))
-
-    def update_panel_from_element(self):
-        element = self._element
-        if element is None:
-            self.clear()
+    def set_target(self, element: Optional[ComponentElement]):
+        self.target_item = element
+        if not element:
+            self.clear_target()
             return
 
-        # Enable all controls
-        for widget in self.findChildren(QWidget):
-            widget.setEnabled(True)
+        # Block signals to prevent firing while populating
+        for widget in self.main_frame.findChildren(QWidget):
+            widget.blockSignals(True)
 
-        # --- BASIC FIELDS ---
-        self.name_edit.blockSignals(True)
-        self.name_edit.setText(getattr(element, "name", ""))
-        self.name_edit.blockSignals(False)
-
-        # Content
-        self.content_edit.blockSignals(True)
-        if hasattr(element, "text"):
-            self.content_edit.setText(element.content)
-        else:
-            self.content_edit.setText("")
-            self.content_edit.setEnabled(False)
-        self.content_edit.blockSignals(False)
-
-        # --- GEOMETRY ---
-        # Assume element has _x, _y, _width, _height as UnitStr
-        self.element_x_field.blockSignals(True)
-        self.element_y_field.blockSignals(True)
-        self.element_width_field.blockSignals(True)
-        self.element_height_field.blockSignals(True)
-
-        # Always pass UnitStr to the field
-        if hasattr(element, "_x"):
-            self.element_x_field.setValue(element._x)
-        if hasattr(element, "_y"):
-            self.element_y_field.setValue(element._y)
-        if hasattr(element, "_width"):
-            self.element_width_field.setValue(element._width)
-        if hasattr(element, "_height"):
-            self.element_height_field.setValue(element._height)
-
-        self.element_x_field.blockSignals(False)
-        self.element_y_field.blockSignals(False)
-        self.element_width_field.blockSignals(False)
-        self.element_height_field.blockSignals(False)
-
-        # --- APPEARANCE ---
-        self.text_color_picker.blockSignals(True)
-        if hasattr(element, "color") and element.color is not None:
-            self.text_color_picker.set_color(QColor(element.color))
-        else:
-            self.text_color_picker.set_color(QColor(0,0,0,0))
-        self.text_color_picker.blockSignals(False)
-
-        self.bg_color_picker.blockSignals(True)
-        if hasattr(element, "bg_color") and element.bg_color is not None:
-            self.bg_color_picker.set_color(QColor(element.bg_color))
-        else:
-            self.bg_color_picker.set_color(QColor(0,0,0,0))
-        self.bg_color_picker.blockSignals(False)
-
-        self.border_color_picker.blockSignals(True)
-        if hasattr(element, "border_color") and element.border_color is not None:
-            self.border_color_picker.set_color(QColor(element.border_color))
-        else:
-            self.border_color_picker.set_color(QColor(0,0,0,0))
-        self.border_color_picker.blockSignals(False)
-
-        # Border width (store as UnitStr, e.g. "1 pt", "0.5 mm")
-        self.border_width_field.blockSignals(True)
-        if hasattr(element, "border_width"):
-            bw = getattr(element, "border_width", "1 pt")
-            # If already UnitStr, use as-is. If string, convert.
-            if isinstance(bw, UnitStr):
-                self.border_width_field.setValue(bw)
-            else:
-                self.border_width_field.setValue(UnitStr(str(bw), unit=self.settings.unit, dpi=self.settings.dpi))
-        self.border_width_field.blockSignals(False)
-
-        # --- ALIGNMENT ---
-        self.alignment_combo.blockSignals(True)
-        alignment = getattr(element, "alignment", None)
-        if alignment is not None and alignment in self.reverse_alignment_map:
-            index = self.alignment_combo.findText(self.reverse_alignment_map[alignment])
-            self.alignment_combo.setCurrentIndex(index)
-        else:
-            index = self.alignment_combo.findText("Center")
-            self.alignment_combo.setCurrentIndex(index)
-        self.alignment_combo.blockSignals(False)
-
-        # --- FONT ---
-        self.font_toolbar.blockSignals(True)
-        if hasattr(element, "font"):
-            self.font_toolbar.setEnabled(True)
-            self.font_toolbar.set_font(element.font)
-        else:
-            self.font_toolbar.setEnabled(False)
-        self.font_toolbar.blockSignals(False)
-
-        # --- ASPECT RATIO ---
-        self.aspect_checkbox.blockSignals(True)
-        if hasattr(element, "aspect_ratio"):
-            self.aspect_checkbox.setChecked(bool(element.aspect_ratio))
-        else:
-            self.aspect_checkbox.setChecked(False)
-        self.aspect_checkbox.blockSignals(False)
-
-    def on_unit_changed(self, unit, dpi):
-        unit_fields = [self.element_x_field, self.element_y_field, 
-                self.element_width_field, self.element_height_field, 
-                self.border_width_field]
-        for field in unit_fields:
-            field.on_unit_changed(self.settings.unit)
-
-    # def update_panel_from_element(self):
-    #     element = self._element
-    #     if element is None:
-    #         self.clear()
-    #         return
-
-    #     # Enable all controls
-    #     for widget in self.findChildren(QWidget):
-    #         widget.setEnabled(True)
-
-    #     # --- BASIC FIELDS ---
-    #     self.name_edit.blockSignals(True)
-    #     self.name_edit.setText(getattr(element, "name", ""))
-    #     self.name_edit.blockSignals(False)
+        # Populate common fields
+        self.pid_label.setText(element.pid)
+        self.template_pid_label.setText(element.template_pid or "N/A")
+        self.name_edit.setText(element.name)
         
-    #     # Content
-    #     self.content_edit.blockSignals(True)
-    #     if hasattr(element, "text"):
-    #         self.content_edit.setText(element.content)
-    #     else:
-    #         self.content_edit.setText("")
-    #         self.content_edit.setEnabled(False)
-    #     self.content_edit.blockSignals(False)
+        self.geometry_field.setTarget(element, "geometry")
+        self.color_picker.set_color(element.color)
+        self.bg_color_picker.set_color(element.bg_color)
+        self.border_color_picker.set_color(element.border_color)
+        self.border_width_field.setTarget(element, "border_width")
+        
+        alignment_text = self.alignment_rev_map.get(element.alignment, "Center")
+        self.alignment_combo.setCurrentText(alignment_text)
 
-    #     # --- GEOMETRY ---
-    #     self.element_x_field.blockSignals(True)
-    #     self.element_y_field.blockSignals(True)
-    #     self.element_width_field.blockSignals(True)
-    #     self.element_height_field.blockSignals(True)
-    #     pos = element.pos()
-    #     rect = getattr(element, "_rect", QRectF())
-    #     self.element_x_field.setValue(pos.x())
-    #     self.element_y_field.setValue(pos.y())
-    #     self.element_width_field.setValue(rect.width())
-    #     self.element_height_field.setValue(rect.height())
-    #     self.element_x_field.blockSignals(False)
-    #     self.element_y_field.blockSignals(False)
-    #     self.element_width_field.blockSignals(False)
-    #     self.element_height_field.blockSignals(False)
+        # Handle conditional widgets
+        self.font_toolbar.setVisible(hasattr(element, 'font'))
+        if hasattr(element, 'font'):
+            self.font_toolbar.setTarget(element)
 
-    #     # --- APPEARANCE ---
-    #     self.text_color_picker.blockSignals(True)
-    #     if hasattr(element, "color") and element.color is not None:
-    #         self.text_color_picker.set_color(QColor(element.color))
-    #     else:
-    #         self.text_color_picker.set_color(QColor(0,0,0,0))
-    #     self.text_color_picker.blockSignals(False)
+        self.keep_aspect_checkbox.setVisible(hasattr(element, 'keep_aspect'))
+        if hasattr(element, 'keep_aspect'):
+            self.keep_aspect_checkbox.setChecked(element.keep_aspect)
+        
+        # Handle content widget type
+        if isinstance(element, TextElement):
+            self.content_text_edit.setText(element.content or "")
+            self.content_stack.setCurrentWidget(self.content_text_edit)
+        elif isinstance(element, ImageElement):
+            self.content_path_edit.setText(element.content or "")
+            self.content_stack.setCurrentWidget(self.content_path_edit)
+        else:
+             self.form_layout.labelForField(self.content_stack).hide()
+             self.content_stack.hide()
 
-    #     self.bg_color_picker.blockSignals(True)
-    #     if hasattr(element, "bg_color") and element.bg_color is not None:
-    #         self.bg_color_picker.set_color(QColor(element.bg_color))
-    #     else:
-    #         self.bg_color_picker.set_color(QColor(0,0,0,0))
-    #     self.bg_color_picker.blockSignals(False)
+        # Unblock signals and show the panel
+        for widget in self.main_frame.findChildren(QWidget):
+            widget.blockSignals(False)
+        self.main_frame.setVisible(True)
 
-    #     self.border_color_picker.blockSignals(True)
-    #     if hasattr(element, "border_color") and element.border_color is not None:
-    #         self.border_color_picker.set_color(QColor(element.border_color))
-    #     else:
-    #         self.border_color_picker.set_color(QColor(0,0,0,0))
-    #     self.border_color_picker.blockSignals(False)
+    def clear_target(self):
+        self.target_item = None
+        self.main_frame.setVisible(False)
 
-    #     # Border width
-    #     self.border_width_field.blockSignals(True)
-    #     self.border_width_field.setValue(to_px(getattr(element, "border_width", "1 px")))
-    #     self.border_width_field.blockSignals(False)
+    def _handle_property_change(self, prop_name: str, new_value: Any):
+        if not self.target_item:
+            return
 
-    #     # --- ALIGNMENT ---
-    #     self.alignment_combo.blockSignals(True)
-    #     alignment = getattr(element, "alignment", None)
-    #     if alignment is not None and alignment in self.reverse_alignment_map:
-    #         index = self.alignment_combo.findText(self.reverse_alignment_map[alignment])
-    #         self.alignment_combo.setCurrentIndex(index)
-    #     else:
-    #         index = self.alignment_combo.findText("Center")
-    #         self.alignment_combo.setCurrentIndex(index)
-    #     self.alignment_combo.blockSignals(False)
+        old_value = getattr(self.target_item, prop_name)
+        
+        # For QColor, direct comparison works. For others, it should be fine.
+        if old_value != new_value:
+            setattr(self.target_item, prop_name, new_value)
+            self.property_changed.emit(self.target_item, prop_name, old_value, new_value)
 
-    #     # --- FONT ---
-    #     self.font_toolbar.blockSignals(True)
-    #     if hasattr(element, "font"):
-    #         self.font_toolbar.setEnabled(True)
-    #         self.font_toolbar.set_font(element.font)
-    #     else:
-    #         self.font_toolbar.setEnabled(False)
-    #     self.font_toolbar.blockSignals(False)
+    @Slot(int)
+    def _on_alignment_changed(self, index: int):
+        if not self.target_item:
+            return
+        
+        text = self.alignment_combo.itemText(index)
+        new_value = self.alignment_map.get(text)
+        self._handle_property_change("alignment", new_value)
 
-    #     # --- ASPECT RATIO ---
-    #     self.aspect_checkbox.blockSignals(True)
-    #     if hasattr(element, "aspect_ratio"):
-    #         self.aspect_checkbox.setChecked(bool(element.aspect_ratio))
-    #     else:
-    #         self.aspect_checkbox.setChecked(False)
-    #     self.aspect_checkbox.blockSignals(False)
+# from PySide6.QtWidgets import (QWidget, QVBoxLayout, QLineEdit, QPushButton, QComboBox,
+#                                  QGroupBox, QFormLayout, QCheckBox, QColorDialog, QLabel)
+# from PySide6.QtCore import Qt, Signal, QRectF, Slot
+# from PySide6.QtGui import QColor, QPalette
+# from prototypyside.widgets.unit_field import UnitField
+# from prototypyside.views.toolbars.font_toolbar import FontToolbar
+# from prototypyside.widgets.color_picker import ColorPickerWidget
+# from prototypyside.utils.unit_converter import parse_dimension, to_px
+# from prototypyside.utils.unit_str import UnitStr 
+# from prototypyside.utils.unit_str_geometry import UnitStrGeometry
+
+# class PropertyPanel(QWidget):
+#     property_changed = Signal(tuple)  # (property_name, value)
+#     geometry_changed = Signal(UnitStrGeometry, UnitStrGeometry)  # (property_name, value)
+
+#     def __init__(self, settings, parent=None):
+#         super().__init__(parent)
+#         self.settings = settings
+#         self._unit = settings.unit
+#         self._dpi = settings.dpi
+#         self._main_layout = QVBoxLayout(self)
+#         self._main_layout.setAlignment(Qt.AlignTop)
+#         self.setLayout(self._main_layout)
+#         self._element = None
+#         self.debug_count = 1
+#         self._build_component_ui()
+#         self.settings.unit_changed.connect(self.on_unit_changed)
+
+#     def _clear_layout(self):
+#         while self._main_layout.count():
+#             item = self._main_layout.takeAt(0)
+#             widget = item.widget()
+#             if widget:
+#                 widget.setParent(None)
+
+#     def refresh(self):
+#         """Refresh UI from the current element, if any."""
+#         pass
+#         # if self._element is not None:
+#         #     self._update_ui_from_element()
+#         # else:
+#         #     self.clear()
+
+#     def clear(self):
+#         """Clear and disable all fields in the property panel."""
+#         for widget in self.findChildren(QWidget):
+#             # Skip QLabel widgets - they should keep their text
+#             if isinstance(widget, QLabel):
+#                 continue
+                
+#             if isinstance(widget, UnitField):
+#                 widget.setValue(None)
+#             elif isinstance(widget, QLineEdit): 
+#                 widget.setText("")
+#             elif isinstance(widget, QComboBox):
+#                 if widget.count() > 0:
+#                     widget.setCurrentIndex(0)
+#             elif isinstance(widget, QCheckBox):
+#                 widget.setChecked(False)
+#             elif isinstance(widget, ColorPickerWidget):
+#                 widget.set_color(QColor(0, 0, 0, 0))
+#             elif hasattr(widget, 'setValue'):
+#                 widget.setValue(0)
+
+#             widget.setEnabled(False)
+
+#     # Connect the element_changed signal properly in set_target:
+#     def set_target(self, element):
+#         """Bind the panel to the selected element, or clear if None."""
+#         if self._element is not None:
+#             try:
+#                 # Disconnect the OLD element's signal from the new _update_ui_from_element slot
+#                 self._element.element_changed.disconnect(self._update_ui_from_element)
+#             except TypeError:
+#                 pass  # Wasn't connected
+
+#         self._element = element
+
+#         if element is not None:
+#             # Connect the NEW element's signal to _update_ui_from_element
+#             element.element_changed.connect(self._update_ui_from_element)
+            
+#             # Now, trigger the update manually for the newly selected element
+#             # This will call _update_ui_from_element, which properly blocks signals.
+#             self._update_ui_from_element() 
+            
+#             # Enable all children (if you want to enable ALL, even if no data for them)
+#             for widget in self.findChildren(QWidget):
+#                 widget.setEnabled(True)
+#         else:
+#             self.clear() # Clears and disables fields if no element is selected
+
+
+#     def _build_component_ui(self):
+#         element_group = QGroupBox("Element Info")
+#         element_layout = QFormLayout()
+
+#         self.name_edit = QLineEdit()
+#         self.name_edit.editingFinished.connect(
+#             lambda: self.emit_property_and_clear(self.name_edit, "name", self.name_edit.text()))
+
+
+#         element_layout.addRow("Name:", self.name_edit)
+
+#         self.content_edit = QLineEdit()
+#         self.content_edit.editingFinished.connect(
+#             lambda: self.emit_property_and_clear(self.content_edit, "content", self.content_edit.text()))
+
+#         element_layout.addRow("Content:", self.content_edit)
+
+#         element_group.setLayout(element_layout)
+#         self._main_layout.addWidget(element_group)
+
+#         geometry_group = QGroupBox("Geometry")
+#         geometry_layout = QFormLayout()
+
+#         self.element_x_field = UnitField(None, self.settings.unit, self.settings.dpi)
+#         self.element_y_field = UnitField(None, self.settings.unit, self.settings.dpi)
+#         self.element_width_field = UnitField(None, self.settings.unit, self.settings.dpi)
+#         self.element_height_field = UnitField(None, self.settings.unit, self.settings.dpi)
+
+#         for field in [self.element_x_field, self.element_y_field, self.element_width_field, self.element_height_field]:
+#             field.editingFinishedWithValue.connect(self._on_geometry_changed)
+
+#         geometry_layout.addRow("X:", self.element_x_field)
+#         geometry_layout.addRow("Y:", self.element_y_field)
+#         geometry_layout.addRow("Width:", self.element_width_field)
+#         geometry_layout.addRow("Height:", self.element_height_field)
+    
+#         geometry_group.setLayout(geometry_layout)
+#         self._main_layout.addWidget(geometry_group)
+
+#         appearance_group = QGroupBox("Appearance")
+#         appearance_layout = QFormLayout()
+
+#         # --- REPLACED BUTTONS WITH COLOR PICKER WIDGETS ---
+#         self.text_color_picker = ColorPickerWidget(QColor(0,0,0)) # Default to black
+#         self.bg_color_picker = ColorPickerWidget(QColor(255,255,255,0)) # Default to transparent white
+#         self.border_color_picker = ColorPickerWidget(QColor(0,0,0)) # Default to black
+
+#         # Connect signals: color_changed from picker emits property_changed
+
+#         self.text_color_picker.color_changed.connect(
+#             lambda color: self.property_changed.emit(("color", color))
+#         )
+#         self.bg_color_picker.color_changed.connect(
+#             lambda color: self.property_changed.emit(("bg_color", color))
+#         )
+#         self.border_color_picker.color_changed.connect(
+#             lambda color: self.property_changed.emit(("border_color", color))
+#         )
+#         self.border_width_field = UnitField(None, unit=self.settings.unit, dpi=self.settings.dpi)
+
+#         self.border_width_field.editingFinishedWithValue.connect(
+#             lambda: self.emit_property_and_clear(self.border_width_field, "border_width", self.border_width_field.text()))
+
+#         self.alignment_combo = QComboBox()
+#         self.alignment_map = {
+#             "Top Left": Qt.AlignTop | Qt.AlignLeft,
+#             "Top Center": Qt.AlignTop | Qt.AlignHCenter,
+#             "Top Right": Qt.AlignTop | Qt.AlignRight,
+#             "Center Left": Qt.AlignVCenter | Qt.AlignLeft,
+#             "Center": Qt.AlignCenter,
+#             "Center Right": Qt.AlignVCenter | Qt.AlignRight,
+#             "Bottom Left": Qt.AlignBottom | Qt.AlignLeft,
+#             "Bottom Center": Qt.AlignBottom | Qt.AlignHCenter,
+#             "Bottom Right": Qt.AlignBottom | Qt.AlignRight,
+#         }
+#         self.reverse_alignment_map = {v: k for k, v in self.alignment_map.items()}
+#         self.alignment_combo.addItems(list(self.alignment_map.keys()))
+#         self.alignment_combo.currentTextChanged.connect(
+#             lambda: self.property_changed.emit(("alignment", self.alignment_map.get(self.alignment_combo.currentText(), Qt.AlignLeft))))
+
+        
+#         # Add a label and the color picker widget to the form layout
+#         appearance_layout.addRow("Text Color:", self.text_color_picker)
+#         appearance_layout.addRow("Background:", self.bg_color_picker)
+#         appearance_layout.addRow("Border Color:", self.border_color_picker)
+#         appearance_layout.addRow("Border Width:", self.border_width_field)
+#         appearance_layout.addRow("Alignment:", self.alignment_combo)
+
+#         appearance_group.setLayout(appearance_layout)
+#         self._main_layout.addWidget(appearance_group)
+
+#         self.font_toolbar = FontToolbar()
+#         self.font_toolbar.font_changed.connect(
+#                 lambda font: self.property_changed.emit(("font", font)))
+#         self._main_layout.addWidget(self.font_toolbar)
+
+#         self.aspect_checkbox = QCheckBox("Maintain Aspect Ratio")
+#         self.aspect_checkbox.stateChanged.connect(lambda state: self.property_changed.emit(("aspect_ratio", bool(state))))
+#         self._main_layout.addWidget(self.aspect_checkbox)
+
+#     def _on_geometry_changed(self):
+#         field = self.sender()
+#         if field:
+#             field.clearFocus()
+        
+#         # Only emit if we have a valid element
+#         if not self._element:
+#             return
+
+#         # Get current values
+#         pos_x = self.element_x_field.getValue()
+#         pos_y = self.element_y_field.getValue()
+#         width = self.element_width_field.getValue()
+#         height = self.element_height_field.getValue()
+        
+#         # Create new geometry
+#         new_geometry = UnitStrGeometry(width=width, height=height, x=pos_x, y=pos_y)
+#         old_geometry = UnitStrGeometry.from_dict(self._element.geometry.dict())
+
+#         print(f"Call to tab to resize and move: {self.debug_count}")
+#         self.debug_count += 1
+#         self._element.geometry = new_geometry
+#         # if new_geometry != self._element.geometry:
+#         #     self.geometry_changed.emit(new_geometry, old_geometry)
+
+
+#     def emit_property_and_clear(self, field, prop_name, value):
+#         field.clearFocus()
+#         self.property_changed.emit((prop_name, value))
+
+
+#     def on_unit_changed(self, unit, dpi):
+#         unit_fields = [self.element_x_field, self.element_y_field, 
+#                 self.element_width_field, self.element_height_field, 
+#                 self.border_width_field]
+#         for field in unit_fields:
+#             field.on_unit_changed(self.settings.unit)
+
+#     @Slot()
+#     def _update_ui_from_element(self): # Renamed for clarity
+#         # This method is designed to be connected to element.element_changed
+#         # and called whenever the element's data changes.
+#         if self._element is None:
+#             self.clear()
+#             return
+
+#         elem_geom = self._element.geometry
+#         current_geom = UnitStrGeometry.from_dict(elem_geom.dict())
+        
+#         # Block signals for ALL relevant input fields before updating
+#         # This list should ideally be gathered once, e.g., in __init__
+#         fields_to_block = [
+#             self.name_edit, self.content_edit,
+#             self.element_x_field, self.element_y_field,
+#             self.element_width_field, self.element_height_field,
+#             self.text_color_picker, self.bg_color_picker, self.border_color_picker,
+#             self.border_width_field, self.alignment_combo,
+#             self.font_toolbar, self.aspect_checkbox
+#         ]
+        
+#         for field in fields_to_block:
+#             if hasattr(field, 'blockSignals'):
+#                 field.blockSignals(True)
+
+#         # --- Update fields with element's current data ---
+#         # BASIC FIELDS
+#         self.name_edit.setText(getattr(self._element, "name", ""))
+        
+#         if hasattr(self._element, "content"):
+#             self.content_edit.setText(self._element.content)
+#             self.content_edit.setEnabled(True) # Ensure enabled if it has content
+#         else:
+#             self.content_edit.setText("")
+#             self.content_edit.setEnabled(False)
+
+#         if hasattr(self._element, "geometry"):
+#             self.element_x_field.setValue(current_geom.pos_x)
+#             self.element_y_field.setValue(current_geom.pos_y)
+#             self.element_width_field.setValue(current_geom.width)
+#             self.element_height_field.setValue(current_geom.height)
+#         else:
+#             # Handle elements without geometry (disable fields, clear values)
+#             self.element_x_field.setValue(None)
+#             self.element_y_field.setValue(None)
+#             self.element_width_field.setValue(None)
+#             self.element_height_field.setValue(None)
+#             self.element_x_field.setEnabled(False)
+#             self.element_y_field.setEnabled(False)
+#             self.element_width_field.setEnabled(False)
+#             self.element_height_field.setEnabled(False)
+
+
+#         # APPEARANCE (similar pattern as geometry, but for colors/widths/alignment)
+#         self.text_color_picker.set_color(getattr(self._element, "color", QColor(0,0,0,0)))
+#         self.bg_color_picker.set_color(getattr(self._element, "bg_color", QColor(0,0,0,0)))
+#         self.border_color_picker.set_color(getattr(self._element, "border_color", QColor(0,0,0,0)))
+        
+#         bw = getattr(self._element, "border_width", "1 pt")
+#         self.border_width_field.setValue(bw)
+        
+#         alignment = getattr(self._element, "alignment", None)
+#         if alignment is not None and alignment in self.reverse_alignment_map:
+#             index = self.alignment_combo.findText(self.reverse_alignment_map[alignment])
+#             self.alignment_combo.setCurrentIndex(index)
+#         else:
+#             index = self.alignment_combo.findText("Center")
+#             self.alignment_combo.setCurrentIndex(index)
+
+#         # FONT
+#         if hasattr(self._element, "font"):
+#             self.font_toolbar.setEnabled(True)
+#             self.font_toolbar.set_font(self._element.font)
+#         else:
+#             self.font_toolbar.setEnabled(False)
+
+#         # ASPECT RATIO
+#         self.aspect_checkbox.setChecked(bool(getattr(self._element, "aspect_ratio", False)))
+
+
+#         # Unblock signals for all fields
+#         for field in fields_to_block:
+#             if hasattr(field, 'blockSignals'):
+#                 field.blockSignals(False)
 

@@ -45,12 +45,27 @@ class ComponentElement(QGraphicsObject):
 
     # This property and three methods must be defined for each object.
     # These three methods must be defined for each object.
+
     @property
     def dpi(self): return self._dpi
 
     @property
     def geometry(self):
         return self._geometry
+
+    @geometry.setter
+    def geometry(self, new_geom: UnitStrGeometry):
+        if self._geometry == new_geom:
+            return
+
+        # Block signals to prevent partial update
+        
+        self.prepareGeometryChange()
+        self._geometry = new_geom
+        self.setPos(self._geometry.px.pos)
+        
+        self.element_changed.emit()  # Single emission after full update
+        self.update()
 
     def boundingRect(self) -> QRectF:
         return self._geometry.px.rect
@@ -78,6 +93,10 @@ class ComponentElement(QGraphicsObject):
             self._pid = pid_str
             self.element_changed.emit()
             self.update()
+
+    @property
+    def template_pid(self):
+        return self._template_pid
 
     @property
     def name(self):
@@ -252,97 +271,7 @@ class ComponentElement(QGraphicsObject):
         self.update_handles()
         self.element_changed.emit()
         self.update()
-    # def resize_from_handle(self, handle_type: HandleType, delta: QPointF, start_scene_rect: QRectF):
-    #     """Resize by handle: supports all 8 directions with proper boundary constraints."""
-    #     self.prepareGeometryChange()
-    #     dpi = self._dpi
-    #     scene = self.scene()
-    #     scene_rect = scene.sceneRect() if scene else QRectF()
 
-    #     # 1. Convert starting rect and delta to local coordinates
-    #     local_start_rect = self.mapRectFromScene(start_scene_rect)
-    #     new_rect = QRectF(local_start_rect)
-    #     delta_local = self.mapFromScene(delta) - self.mapFromScene(QPointF(0, 0))
-
-    #     # 2. Update rect based on handle type
-    #     if handle_type == HandleType.TOP_LEFT:
-    #         new_rect.setTopLeft(new_rect.topLeft() + delta_local)
-    #     elif handle_type == HandleType.TOP_CENTER:
-    #         new_rect.setTop(new_rect.top() + delta_local.y())
-    #     elif handle_type == HandleType.TOP_RIGHT:
-    #         new_rect.setTopRight(new_rect.topRight() + delta_local)
-    #     elif handle_type == HandleType.RIGHT_CENTER:
-    #         new_rect.setRight(new_rect.right() + delta_local.x())
-    #     elif handle_type == HandleType.BOTTOM_RIGHT:
-    #         new_rect.setBottomRight(new_rect.bottomRight() + delta_local)
-    #     elif handle_type == HandleType.BOTTOM_CENTER:
-    #         new_rect.setBottom(new_rect.bottom() + delta_local.y())
-    #     elif handle_type == HandleType.BOTTOM_LEFT:
-    #         new_rect.setBottomLeft(new_rect.bottomLeft() + delta_local)
-    #     elif handle_type == HandleType.LEFT_CENTER:
-    #         new_rect.setLeft(new_rect.left() + delta_local.x())
-
-    #     # 3. Enforce minimum size (10x10 pixels)
-    #     min_size = 10
-    #     if new_rect.width() < min_size:
-    #         if handle_type in (HandleType.LEFT_CENTER, HandleType.TOP_LEFT, HandleType.BOTTOM_LEFT):
-    #             new_rect.setLeft(new_rect.right() - min_size)
-    #         else:
-    #             new_rect.setRight(new_rect.left() + min_size)
-    #     if new_rect.height() < min_size:
-    #         if handle_type in (HandleType.TOP_CENTER, HandleType.TOP_LEFT, HandleType.TOP_RIGHT):
-    #             new_rect.setTop(new_rect.bottom() - min_size)
-    #         else:
-    #             new_rect.setBottom(new_rect.top() + min_size)
-
-    #     # 4. Constrain to scene boundaries
-    #     new_scene_rect = self.mapRectToScene(new_rect)
-
-    #     # Left boundary
-    #     if new_scene_rect.left() < scene_rect.left():
-    #         offset = scene_rect.left() - new_scene_rect.left()
-    #         if handle_type in (HandleType.LEFT_CENTER, HandleType.TOP_LEFT, HandleType.BOTTOM_LEFT):
-    #             new_rect.setLeft(new_rect.left() + offset)
-    #         else:
-    #             new_rect.setRight(new_rect.right() - offset)
-
-    #     # Top boundary
-    #     if new_scene_rect.top() < scene_rect.top():
-    #         offset = scene_rect.top() - new_scene_rect.top()
-    #         if handle_type in (HandleType.TOP_CENTER, HandleType.TOP_LEFT, HandleType.TOP_RIGHT):
-    #             new_rect.setTop(new_rect.top() + offset)
-    #         else:
-    #             new_rect.setBottom(new_rect.bottom() - offset)
-
-    #     # Right boundary
-    #     if new_scene_rect.right() > scene_rect.right():
-    #         offset = new_scene_rect.right() - scene_rect.right()
-    #         new_rect.setRight(new_rect.right() - offset)
-
-    #     # Bottom boundary
-    #     if new_scene_rect.bottom() > scene_rect.bottom():
-    #         offset = new_scene_rect.bottom() - scene_rect.bottom()
-    #         new_rect.setBottom(new_rect.bottom() - offset)
-
-    #     # 5. Snap to grid if enabled
-    #     if hasattr(scene, "is_snap_to_grid") and scene.is_snap_to_grid:
-    #         snapped_tl = scene.snap_to_grid(self.mapToScene(new_rect.topLeft()))
-    #         snapped_br = scene.snap_to_grid(self.mapToScene(new_rect.bottomRight()))
-    #         new_rect = self.mapRectFromScene(QRectF(snapped_tl, snapped_br))
-
-    #     # 6. Update position and geometry
-    #     new_scene_pos = self.mapToScene(new_rect.topLeft())
-    #     self.setPos(new_scene_pos)
-
-    #     # Apply conforming helpers for UnitStrGeometry
-    #     self._geometry = UnitStrGeometry.from_px(rect=new_rect, pos=new_scene_pos, dpi=self._dpi)
-
-    #     # Final updates
-    #     self.update_handles()
-    #     self.element_changed.emit()
-    #     self.update()
-
-    
     def update_from_merge_data(merge_data):
         self.content = merge_data
         self.elment_changed.emit()
@@ -388,11 +317,10 @@ class ComponentElement(QGraphicsObject):
             "border_width": self._border_width.dict(),
             "alignment": int(self._alignment) if self._alignment is not None else None,
             "content": self._content if self._content is not None else "",
-            # Add subclass/extra fields as needed.
         }
 
     @classmethod
-    def from_dict(cls, data, parent=None):
+    def from_dict(cls, data):
         pid = data.get("pid")
         geometry = UnitStrGeometry.from_dict(data.get("geometry"))
         template_pid = data.get("template_pid")
@@ -401,7 +329,7 @@ class ComponentElement(QGraphicsObject):
             pid=pid,
             geometry=geometry,
             template_pid=template_pid,
-            parent=parent,
+            parent=None,
             name=name
         )
         # Restore style and other fields
@@ -472,7 +400,6 @@ class ComponentElement(QGraphicsObject):
                 handle.setPos(pos)
 
 
-
 class TextElement(ComponentElement):
     def __init__(self, pid, geometry: UnitStrGeometry, template_pid = None, 
             parent: Optional[QGraphicsObject] = None, name: str = None):
@@ -510,8 +437,8 @@ class TextElement(ComponentElement):
         return data
 
     @classmethod
-    def from_dict(cls, data, parent=None, dpi=144):
-        element = super().from_dict(data, parent=parent, dpi=dpi)
+    def from_dict(cls, data):
+        element = super().from_dict(data)
         font_string = data.get("font", "Arial,12")
         font = QFont()
         font.fromString(font_string)
@@ -563,6 +490,7 @@ class ImageElement(ComponentElement):
             self._keep_aspect = value
             self.element_changed.emit()
             self.update()
+
     # --- End Image-specific Property Getters and Setters ---
     def to_dict(self):
         data = super().to_dict()
@@ -570,8 +498,8 @@ class ImageElement(ComponentElement):
         return data
 
     @classmethod
-    def from_dict(cls, data, parent=None, dpi=144):
-        element = super().from_dict(data, parent=parent, dpi=dpi)
+    def from_dict(cls, data):
+        element = super().from_dict(data)
         element.keep_aspect = data.get("keep_aspect", True)
         return element
 
