@@ -16,14 +16,14 @@ class UnitStrGeometry:
     internally as inches.
 
     Accessors (`.rect`, `.pos`, `.size`) return Qt types with values in the
-    `display_unit` (defaults to 'in'). Pixel values can be accessed via the
+    `unit` (defaults to 'in'). Pixel values can be accessed via the
     `.px` property or `.to("px")`.
     """
     __slots__ = (
         "_pos_x", "_pos_y",
         "_rect_x", "_rect_y",
         "_w", "_h",
-        "_display_unit", "_dpi",
+        "_unit", "_dpi",
     )
 
     def __init__(
@@ -39,10 +39,10 @@ class UnitStrGeometry:
         width:  Number | None   = None,
         height: Number | None   = None,
         dpi:    int             = 144,
-        display_unit: Optional[str] = None,
+        unit: Optional[str] = None,
     ):
         self._dpi = dpi
-        self._display_unit = (display_unit or "in").lower().replace('"', "in")
+        self._unit = (unit or "in").lower().replace('"', "in")
 
         # Unpack Qt types. These values are assumed to be in pixels unless they
         # are already UnitStr objects.
@@ -70,8 +70,8 @@ class UnitStrGeometry:
         return "in"
 
     @property
-    def display_unit(self) -> str:
-        return self._display_unit
+    def unit(self) -> str:
+        return self._unit
 
     @property
     def dpi(self) -> int:
@@ -88,7 +88,7 @@ class UnitStrGeometry:
         g._pos_x  = self._pos_x.round()
         g._pos_y  = self._pos_y.round()
         g._dpi = self._dpi
-        g._display_unit = self._display_unit
+        g._unit = self._unit
         return g
 
     # Individual UnitStr accessors
@@ -107,7 +107,7 @@ class UnitStrGeometry:
 
     # Qt-friendly composite accessors
     def _val(self, u: UnitStr) -> float:
-        return u.to(self._display_unit, self._dpi)
+        return u.to(self._unit, self._dpi)
 
     @property
     def rect(self) -> QRectF:
@@ -121,10 +121,10 @@ class UnitStrGeometry:
     def size(self) -> QSizeF:
         return QSizeF(self._val(self._w), self._val(self._h))
 
-    def to(self, display_unit: str, dpi: int | None = None) -> UnitStrGeometry:
+    def to(self, unit: str, dpi: int | None = None) -> UnitStrGeometry:
         """Returns a new UnitStrGeometry that emits values in the target unit."""
         dpi = dpi or self._dpi
-        du = display_unit.lower().replace('"', "in")
+        du = unit.lower().replace('"', "in")
         if du not in {"in", "cm", "mm", "pt", "px"}:
             raise ValueError(f"Unsupported display unit: {du!r}")
 
@@ -133,7 +133,7 @@ class UnitStrGeometry:
         g._w, g._h = self._w, self._h
         g._pos_x, g._pos_y = self._pos_x, self._pos_y
         g._dpi = dpi
-        g._display_unit = du
+        g._unit = du
         return g
 
     # Shorthand views
@@ -159,7 +159,7 @@ class UnitStrGeometry:
     def dict(self) -> dict:
         """JSON-friendly dump of the geometry."""
         return {
-            "display_unit": self.display_unit,
+            "unit": self.unit,
             "dpi": self.dpi,
             "pos": {"x": self._pos_x.dict(), "y": self._pos_y.dict()},
             "rect": {
@@ -185,15 +185,15 @@ class UnitStrGeometry:
             width=UnitStr.from_dict(rect_data.get("width", {}), dpi=dpi),
             height=UnitStr.from_dict(rect_data.get("height", {}), dpi=dpi),
             dpi=dpi,
-            display_unit=blob.get("display_unit", "in"),
+            unit=blob.get("unit", "in"),
         )
 
     def __repr__(self) -> str:
-        pos_str = f"x={self._pos_x.to(self.display_unit):.2f}, y={self._pos_y.to(self.display_unit):.2f}"
-        rect_str = f"w={self._w.to(self.display_unit):.2f}, h={self._h.to(self.display_unit):.2f}"
+        pos_str = f"x={self._pos_x.to(self.unit):.2f}, y={self._pos_y.to(self.unit):.2f}"
+        rect_str = f"w={self._w.to(self.unit):.2f}, h={self._h.to(self.unit):.2f}"
         return (
             f"UnitStrGeometry({pos_str}, {rect_str}, "
-            f"display_unit='{self.display_unit}', dpi={self.dpi})"
+            f"unit='{self.unit}', dpi={self.dpi})"
         )
 
     def __eq__(self, other: object) -> bool:

@@ -160,7 +160,7 @@ class ComponentTab(QWidget):
 
     def setup_property_editor(self):
         # This will be a widget that the QMainWindow will place in a DockWidget
-        self.property_panel = PropertyPanel(parent=self)
+        self.property_panel = PropertyPanel(display_unit=self.unit, parent=self)
         self.property_panel.property_changed.connect(self.on_property_changed)
         # self.property_panel.geometry_changed.connect(self.on_geometry_changed)
         self.remove_element_btn = QPushButton("Remove Selected Element")
@@ -210,7 +210,7 @@ class ComponentTab(QWidget):
         self.template_name_field.editingFinished.connect(self.on_template_name_changed)
         self.template_name_field.setMaximumWidth(150)
 
-        self.template_geometry = UnitStrGeometryField(self.template, "geometry")
+        self.template_geometry = UnitStrGeometryField(self.template, "geometry", display_unit=self.unit)
         self.template_geometry.setMaximumWidth(100)
         self.template_geometry.valueChanged.connect(self.on_template_geometry_changed)
         self.measure_toolbar.addWidget(QLabel("Template:"))
@@ -271,7 +271,10 @@ class ComponentTab(QWidget):
     @Slot()
     def on_property_changed(self, target, prop, new, old):
         command = ChangeElementPropertyCommand(target, prop, new, old)
+
         self.undo_stack.push(command)
+        print(f"[COMPONENT TAB] Target={target}, prop={prop}, old={old}, new={new}")
+        print(f"[UNDO STACK] Pushed: {command}")
         target.update()
         self.scene.update()
 

@@ -11,7 +11,7 @@ from prototypyside.utils.unit_str import UnitStr
 from prototypyside.utils.unit_str_geometry import UnitStrGeometry
 from prototypyside.utils.graphics_item_helpers import is_movable
 from prototypyside.views.graphics_items import ResizeHandle
-from prototypyside.services.undo_commands import MoveElementCommand, ResizeAndMoveElementCommand
+from prototypyside.services.undo_commands import MoveElementCommand, ChangeElementPropertyCommand, ResizeAndMoveElementCommand
 
 from typing import Optional, TYPE_CHECKING
 import math
@@ -242,8 +242,9 @@ class ComponentGraphicsScene(QGraphicsScene):
             old_geometry = self.resize_start_item_geometry
 
             # Create the command with the CORRECT new_geometry and old_geometry order
-            command = ResizeAndMoveElementCommand(
+            command = ChangeElementPropertyCommand(
                 self.resizing_element,
+                "geometry",
                 new_geometry,
                 old_geometry
             )

@@ -45,9 +45,9 @@ class ComponentElement(QGraphicsObject):
 
     # This property and three methods must be defined for each object.
     # These three methods must be defined for each object.
-
     @property
-    def dpi(self): return self._dpi
+    def dpi(self):
+        return self._dpi
 
     @property
     def geometry(self):
@@ -55,32 +55,49 @@ class ComponentElement(QGraphicsObject):
 
     @geometry.setter
     def geometry(self, new_geom: UnitStrGeometry):
+        print(f"[SETTER] geometry called with {new_geom}")
         if self._geometry == new_geom:
+            print("[SETTER] geometry unchanged")
             return
 
-        # Block signals to prevent partial update
-        
         self.prepareGeometryChange()
+        print(f"[SETTER] prepareGeometryChange called")
+        print(f"[SETTER] pos set to {self._geometry.px.pos}")
         self._geometry = new_geom
-        self.setPos(self._geometry.px.pos)
-        
-        self.element_changed.emit()  # Single emission after full update
+        super().setPos(self._geometry.px.pos)
+        self.element_changed.emit()
         self.update()
 
     def boundingRect(self) -> QRectF:
         return self._geometry.px.rect
 
-    # These are generally the only ways that these values should change:
+    # This method is for when ONLY the rectangle (size) changes,
+    # not the position.
     def setRect(self, new_rect: QRectF):
+        if self._geometry.px.rect == new_rect:
+            return
+            
         self.prepareGeometryChange()
         with_rect(self._geometry, new_rect)
         self.element_changed.emit()
         self.update()
 
     def itemChange(self, change: QGraphicsItem.GraphicsItemChange, value):
-        if change == QGraphicsItem.ItemPositionChange:
+        # This is called when the scene moves the item.
+        if change == QGraphicsItem.ItemPositionChange and value != self.pos():
+            # Block signals to prevent a recursive loop if a connected slot
+            # also tries to set the position.
+            signals_blocked = self.signalsBlocked()
+            self.blockSignals(True)
+
             with_pos(self._geometry, value)
+            print(f"[ITEMCHANGE] Called with change={change}, value={value}")
+            print(f"[ITEMCHANGE] Geometry.pos updated to: {self._geometry.px.pos}")
             self.element_changed.emit()
+
+            self.blockSignals(signals_blocked)
+
+        # It's crucial to call the base class implementation.
         return super().itemChange(change, value)
 
     @property
@@ -184,8 +201,6 @@ class ComponentElement(QGraphicsObject):
     @property
     def unit(self):
         return self._unit
-
-# In ComponentElement class in component_elements.py
 
     def resize_from_handle(self, handle_type: HandleType, delta: QPointF, start_scene_rect: QRectF):
         """Resize by handle: supports all 8 directions with proper boundary constraints."""

@@ -32,8 +32,8 @@ def with_pos(
 
     return UnitStrGeometry(
         # Preserve original rect components by passing the UnitStr objects
-        rect_x=geom.rect_x,
-        rect_y=geom.rect_y,
+        rect_x=0,
+        rect_y=0,
         width=geom.width,
         height=geom.height,
         # Set the new position
@@ -41,9 +41,8 @@ def with_pos(
         y=new_y,
         # Preserve settings
         dpi=geom.dpi,
-        display_unit=geom.display_unit
+        unit=geom.unit
     )
-
 
 def with_rect(
     geom: UnitStrGeometry,
@@ -55,6 +54,7 @@ def with_rect(
 
     The values in the new QRectF are interpreted as pixels.
     """
+    rect = QRectF(0, 0, rect.width(), rect.height())
     return UnitStrGeometry(
         # Preserve original position by passing the UnitStr objects
         x=geom.pos_x,
@@ -63,5 +63,5 @@ def with_rect(
         rect=rect,
         # Preserve settings
         dpi=geom.dpi,
-        display_unit=geom.display_unit
+        unit=geom.unit
     )

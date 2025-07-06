@@ -214,7 +214,7 @@ class ChangeElementPropertyCommand(QUndoCommand):
             setattr(self.element, self.prop, self.old_value)
 
     def redo(self):
-        print("Changing property")
+        print(f"[UNDO] Target ID: {id(self.element)}, Prop: {self.prop}, New: {self.new_value}")
         setattr(self.element, self.prop, self.new_value)
 
 class ResizeTemplateCommand(QUndoCommand):

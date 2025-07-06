@@ -5,6 +5,7 @@ from PySide6.QtCore import Signal, Slot
 from typing import Optional, Any
 
 # Assuming these are in a sibling directory or accessible via the python path
+from prototypyside.models.component_elements import ComponentElement
 from prototypyside.utils.unit_str import UnitStr
 from prototypyside.utils.unit_str_geometry import UnitStrGeometry
 
@@ -25,7 +26,7 @@ class UnitField(QLineEdit):
         self,
         target_item: Optional[Any] = None,
         property_name: Optional[str] = None,
-        display_unit: str = "in",
+        display_unit: str = None,
         parent: Optional[QWidget] = None
     ):
         """
@@ -41,7 +42,10 @@ class UnitField(QLineEdit):
         self.target_item = None
         self.property_name = None
         self.display_unit = display_unit
-        self._dpi = 144  # Default DPI, updated from target
+        self._dpi = None
+        if target_item:
+            self._old_value = self.target_item.geometry
+            self._dpi = self.target_item.geometry.dpi
         self._old_value: Optional[UnitStr] = None
 
         if target_item and property_name:
@@ -49,11 +53,11 @@ class UnitField(QLineEdit):
 
         self.editingFinished.connect(self._on_editing_finished)
 
-    def setTarget(self, target_item: Any, property_name: str):
+    def setTarget(self, target_item: Any, property_name: str, display_unit: str):
         """Sets or resets the target object and property for the field."""
         self.target_item = target_item
         self.property_name = property_name
-
+        self.display_unit = display_unit
         if self.target_item and self.property_name:
             initial_value = getattr(self.target_item, self.property_name, None)
             if isinstance(initial_value, UnitStr):
@@ -74,7 +78,8 @@ class UnitField(QLineEdit):
             self.clear()
             return
         # Display value formatted to the display_unit, without the unit suffix
-        formatted_value = f"{value.to(self.display_unit, self._dpi):.4f}".rstrip('0').rstrip('.')
+        formatted_value = value.fmt(".4f", unit=self.display_unit, dpi=self._dpi)
+        self._old_value = value
         self.setText(formatted_value)
 
     def value(self) -> UnitStr:
@@ -82,10 +87,11 @@ class UnitField(QLineEdit):
         Returns a new UnitStr object from the current text in the line edit.
         The text is interpreted as being in the widget's `display_unit`.
         """
+        unit = self.target_item.geometry.unit
         current_text = super().text()
         if not current_text.strip():
-            return UnitStr("0", unit=self.display_unit, dpi=self._dpi)
-        return UnitStr(current_text, unit=self.display_unit, dpi=self._dpi)
+            return UnitStr("0", unit=unit, dpi=self._dpi)
+        return UnitStr(current_text, unit=unit, dpi=self._dpi)
 
     @Slot()
     def _on_editing_finished(self):
@@ -128,7 +134,7 @@ class UnitStrGeometryField(QWidget):
         self,
         target_item: Optional[Any] = None,
         property_name: Optional[str] = None,
-        display_unit: str = "in",
+        display_unit: str = None,
         parent: Optional[QWidget] = None
     ):
         super().__init__(parent)
@@ -148,7 +154,7 @@ class UnitStrGeometryField(QWidget):
         self.h_field = self._create_sub_field("H", 1, 2, layout)
 
         if target_item and property_name:
-            self.setTarget(target_item, property_name)
+            self.setTarget(target_item, property_name, display_unit=display_unit)
 
     def _create_sub_field(self, label_text: str, row: int, col: int, layout: QGridLayout) -> QLineEdit:
         """Helper to create a label and a basic QLineEdit."""
@@ -161,10 +167,14 @@ class UnitStrGeometryField(QWidget):
         field.editingFinished.connect(self._on_editing_finished)
         return field
 
-    def setTarget(self, target_item: Any, property_name: str):
+    def setTarget(self, target_item: Any, property_name: str, display_unit: str):
         """Sets the target object and its UnitStrGeometry property to edit."""
         self.target_item = target_item
         self.property_name = property_name
+        self._display_unit = display_unit
+        if isinstance(self.target_item, ComponentElement):
+            print("We have an element")
+            self.target_item.element_changed.connect(self.update_from_element)
 
         if self.target_item and self.property_name:
             geom: Optional[UnitStrGeometry] = getattr(self.target_item, self.property_name, None)
@@ -176,10 +186,14 @@ class UnitStrGeometryField(QWidget):
         else:
             self._clear_fields()
 
+    def update_from_element(self):
+        if self.target_item:
+            self._update_display(self.target_item.geometry)
+
     def _update_display(self, geom: UnitStrGeometry):
         """Populates the four fields from a UnitStrGeometry object."""
         self.x_field.setText(geom.pos_x.fmt(".4g", self._display_unit, dpi=geom.dpi))
-        self.y_field.setText(geom.pos_x.fmt(".4g", self._display_unit, dpi=geom.dpi))
+        self.y_field.setText(geom.pos_y.fmt(".4g", self._display_unit, dpi=geom.dpi))
         self.w_field.setText(geom.width.fmt(".4g", self._display_unit, dpi=geom.dpi))
         self.h_field.setText(geom.height.fmt(".4g", self._display_unit, dpi=geom.dpi))
 
@@ -217,14 +231,11 @@ class UnitStrGeometryField(QWidget):
         # Construct the new geometry object
         new_geometry = UnitStrGeometry(
             x=x_val, y=y_val, width=w_val, height=h_val,
-            dpi=dpi, display_unit=self._old_geometry.display_unit
+            unit=self._old_geometry.unit, dpi=dpi, 
         )
 
-        # Update the target object's property
-        setattr(self.target_item, self.property_name, new_geometry)
-
         # Emit the signal with all necessary info for an undo command
-        self.valueChanged.emit(self.target_item, self.property_name, self._old_geometry, new_geometry)
+        self.valueChanged.emit(self.target_item, self.property_name, new_geometry, self._old_geometry)
 
         # The new geometry becomes the old one for the next edit
         self._old_geometry = new_geometry
