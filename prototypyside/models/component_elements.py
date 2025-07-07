@@ -1,6 +1,6 @@
-from PySide6.QtCore import Qt, QRectF, QPointF, Signal, QObject
-from PySide6.QtGui import (QColor, QFont, QPen, QBrush, QPainter, QPixmap, QImage, 
-            QTextDocument, QPainter, QAbstractTextDocumentLayout)
+from PySide6.QtCore import Qt, QRectF, QPointF, QSize, Signal, QObject
+from PySide6.QtGui import (QColor, QFont, QPen, QBrush, QTextDocument, QPainter, QPixmap,
+            QAbstractTextDocumentLayout)
 from PySide6.QtWidgets import QGraphicsItem, QGraphicsObject, QGraphicsSceneDragDropEvent
 from typing import Optional, Dict, Any
 from prototypyside.views.graphics_items import ResizeHandle
@@ -10,6 +10,7 @@ from prototypyside.utils.unit_str_geometry import UnitStrGeometry
 from prototypyside.utils.ustr_helpers import with_rect, with_pos
 from prototypyside.utils.style_serialization_helpers import save_style, load_style
 from prototypyside.config import HandleType
+
 
 class ComponentElement(QGraphicsObject):
     element_changed = Signal()
@@ -66,7 +67,7 @@ class ComponentElement(QGraphicsObject):
         print(f"[SETTER] pos set to {self._geometry.px.pos}")
         self._geometry = new_geom
         super().setPos(self._geometry.px.pos)
-        self.element_changed.emit()
+        # self.element_changed.emit()
         self.update()
 
     def boundingRect(self) -> QRectF:
@@ -77,11 +78,10 @@ class ComponentElement(QGraphicsObject):
     def setRect(self, new_rect: QRectF):
         if self._geometry.px.rect == new_rect:
             return
-            
         self.prepareGeometryChange()
         with_rect(self._geometry, new_rect)
-        self.element_changed.emit()
-        self.update()
+        # self.element_changed.emit()
+        # self.update()
 
     def itemChange(self, change: QGraphicsItem.GraphicsItemChange, value):
         # This is called when the scene moves the item.
@@ -90,15 +90,13 @@ class ComponentElement(QGraphicsObject):
             # also tries to set the position.
             signals_blocked = self.signalsBlocked()
             self.blockSignals(True)
-
             with_pos(self._geometry, value)
             print(f"[ITEMCHANGE] Called with change={change}, value={value}")
             print(f"[ITEMCHANGE] Geometry.pos updated to: {self._geometry.px.pos}")
-            self.element_changed.emit()
-
             self.blockSignals(signals_blocked)
 
-        # It's crucial to call the base class implementation.
+        # It's crucial to call the base class implementation. This will update geometry.
+        # If other signals are emitted or updates called for, it breaks the undo stack.
         return super().itemChange(change, value)
 
     @property
@@ -166,12 +164,9 @@ class ComponentElement(QGraphicsObject):
     @border_width.setter
     def border_width(self, value):
         # Accept a UnitStr, string, or number (as current unit)
-        if isinstance(value, UnitStr):
-            bw = value
-        elif isinstance(value, str):
-            bw = UnitStr(value, dpi=self._dpi)
-        else:
-            bw = Unistr(0)
+        self._border_width = value
+        self.element_changed.emit()
+        self.update()
         
         if getattr(self, "_border_width", None) != bw:
             self._border_width = bw
@@ -443,18 +438,10 @@ class TextElement(ComponentElement):
 
     # --- End Text-specific Property Getters and Setters ---
 
-    # def paint(self, painter: QPainter, option, widget=None):
-    #     super().paint(painter, option, widget)
-    #     rect = self.boundingRect()
-    #     painter.setFont(self._font)
-    #     painter.setPen(self._color)
-    #     if self._content:
-    #         painter.drawText(rect, self._alignment, self._content)
-
     def paint(self, painter: QPainter, option, widget=None):
         # Call base class paint to handle borders and basic styling first
         super().paint(painter, option, widget)
-        rect = self._geometry.px.rect
+        rect = self.boundingRect()
         painter.save()
 
         # Set up QTextDocument for automatic word wrapping within rect
@@ -475,6 +462,7 @@ class TextElement(ComponentElement):
         doc.drawContents(painter, QRectF(0, 0, rect.width(), rect.height()))
 
         painter.restore()
+
 
     def to_dict(self):
         data = super().to_dict()
@@ -549,9 +537,10 @@ class ImageElement(ComponentElement):
         return element
 
     def paint(self, painter: QPainter, option, widget=None):
+        super().paint(painter, option, widget)
         rect = self.boundingRect()
-        size = self.geometry.size
-
+        size = self.geometry.px.size
+        size = QSize(size.width(), size.height())
         if self._pixmap:
             if self._keep_aspect:
                 scaled = self._pixmap.scaled(

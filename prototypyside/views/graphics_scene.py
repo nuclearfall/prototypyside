@@ -238,15 +238,14 @@ class ComponentGraphicsScene(QGraphicsScene):
         elif self._resizing and self.resizing_element and self.resize_start_item_geometry:
             # The new geometry is the current geometry of the element after resizing
             new_geometry = self.resizing_element.geometry
+            old_geometry = self.resizing_element.geometry = self.resize_start_item_geometry
             # The old geometry was saved when the mouse press began
-            old_geometry = self.resize_start_item_geometry
-
             # Create the command with the CORRECT new_geometry and old_geometry order
             command = ChangeElementPropertyCommand(
                 self.resizing_element,
                 "geometry",
                 new_geometry,
-                old_geometry
+                old_geometry,
             )
             self.tab.undo_stack.push(command)
 

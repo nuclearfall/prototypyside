@@ -94,9 +94,11 @@ class ComponentTemplate(QGraphicsObject):
         if element in self.elements:
             return
         self.elements.append(element)
+
         self.element_pids.append(element.pid)
         max_z = max([e.zValue() for e in self.elements], default=0)
         element.setZValue(max_z + 100)
+        # element.element_changed.connect(self._on_element_changed)
         self.template_changed.emit()
         self.element_z_order_changed.emit()
 
@@ -189,10 +191,15 @@ class ComponentTemplate(QGraphicsObject):
             return True
         return False
 
+    def _on_element_changed(self):
+        # Trigger redraw of entire template and notify any listeners
+        self.template_changed.emit()
+        self.update()
+
     def paint(self, painter: QPainter, option, widget=None):
         rect = self.boundingRect()
         painter.setRenderHint(QPainter.Antialiasing)
-
+        painter.setClipRect(rect)
         # Draw background
         if self.background_image_path:
             bg_image = QImage(self.background_image_path)
@@ -229,7 +236,6 @@ class ComponentTemplate(QGraphicsObject):
             painter.setPen(QPen(Qt.black, thickness_px))
             painter.setBrush(Qt.NoBrush)
             painter.drawPath(path)
-
 
     def to_dict(self) -> Dict[str, Any]:
         data = {

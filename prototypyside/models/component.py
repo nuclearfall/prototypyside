@@ -9,7 +9,7 @@ from prototypyside.utils.unit_str import UnitStr
 from prototypyside.utils.unit_str_geometry import UnitStrGeometry
 from prototypyside.utils.ustr_helpers import with_rect, with_pos
 
-class Component(ComponentTemplate):
+class Component:
     update_cache = Signal()
     def __init__(self, pid, slot, template, parent=None, is_static=False, row_data=None):
         super().__init__(parent)

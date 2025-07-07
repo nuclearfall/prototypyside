@@ -110,11 +110,8 @@ class UnitField(QLineEdit):
             self.clearFocus()
             return
 
-        # Update the target object's property
-        setattr(self.target_item, self.property_name, new_value)
-
         # Emit the signal for undo/redo stack
-        self.valueChanged.emit(self.target_item, self.property_name, self._old_value, new_value)
+        self.valueChanged.emit(self.target_item, self.property_name, new_value, self._old_value)
 
         # The new value becomes the old one for the next edit
         self._old_value = new_value

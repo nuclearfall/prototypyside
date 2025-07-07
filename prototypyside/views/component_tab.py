@@ -271,12 +271,9 @@ class ComponentTab(QWidget):
     @Slot()
     def on_property_changed(self, target, prop, new, old):
         command = ChangeElementPropertyCommand(target, prop, new, old)
-
         self.undo_stack.push(command)
         print(f"[COMPONENT TAB] Target={target}, prop={prop}, old={old}, new={new}")
         print(f"[UNDO STACK] Pushed: {command}")
-        target.update()
-        self.scene.update()
 
     def get_selected_element(self) -> Optional['ComponentElement']:
         items = self.scene.selectedItems()
@@ -288,27 +285,33 @@ class ComponentTab(QWidget):
         old = self.selected_element
         if old is new:
             return
-        
+
         # Cleanup previous selection
         if old:
             old.hide_handles()
             try:
                 old.element_changed.disconnect(self.on_element_data_changed)
-            except TypeError:  # Not connected
-                pass
-        
-        # Setup new selection
+            except RuntimeError:
+                pass  # Signal wasn't connected
+
+        # Update selection
         self.selected_element = new
+
         if new:
             new.show_handles()
-            # new.element_changed.connect(self.on_element_data_changed)
+            try:
+                new.element_changed.connect(self.on_element_data_changed)
+            except RuntimeError:
+                pass  # Already connected, which shouldn't happen due to above logic
+
             self.property_panel.set_target(new)
             self._update_layers_selection(new)
         else:
             self.property_panel.clear_target()
             self._clear_layers_selection()
-        
+
         self.set_element_controls_enabled(bool(new))
+
 
     @Slot()
     def on_selection_changed(self):

@@ -90,7 +90,7 @@ class PropertyPanel(QWidget):
         super().__init__(parent)
         self.target_item: Optional[ComponentElement] = None
         self._display_unit = display_unit
-
+        self.undo_stack = getattr(parent, "undo_stack", None)
         # Main layout
         self.main_layout = QVBoxLayout(self)
         self.main_layout.setContentsMargins(0, 0, 0, 0)
@@ -111,9 +111,9 @@ class PropertyPanel(QWidget):
         # Content widgets in a stacked layout
         self.content_stack = QStackedWidget()
         self.content_text_edit = FocusTextEdit()
-        self.content_path_edit = QLineEdit() # For image path
+        self.content_path_button = QPushButton("Select Image...") # For image path
         self.content_stack.addWidget(self.content_text_edit)
-        self.content_stack.addWidget(self.content_path_edit)
+        self.content_stack.addWidget(self.content_path_button)
 
         self.geometry_field = UnitStrGeometryField()
         self.color_picker = ColorPickerWidget()
@@ -160,7 +160,7 @@ class PropertyPanel(QWidget):
     def _connect_signals(self):
         self.name_edit.editingFinished.connect(lambda: self._handle_property_change("name", self.name_edit.text()))
         self.content_text_edit.editingFinished.connect(self.property_changed.emit)
-        self.content_path_edit.editingFinished.connect(lambda: self._handle_property_change("content", self.content_path_edit.text()))
+        self.content_path_button.clicked.connect(self._choose_image_path)
         self.geometry_field.valueChanged.connect(self.property_changed.emit)
         self.color_picker.color_changed.connect(lambda c: self._handle_property_change("color", c))
         self.bg_color_picker.color_changed.connect(lambda c: self._handle_property_change("bg_color", c))
@@ -207,8 +207,7 @@ class PropertyPanel(QWidget):
             self.content_text_edit.setText(element.content or "")
             self.content_stack.setCurrentWidget(self.content_text_edit)
         elif isinstance(element, ImageElement):
-            self.content_path_edit.setText(element.content or "")
-            self.content_stack.setCurrentWidget(self.content_path_edit)
+            self.content_stack.setCurrentWidget(self.content_path_button)
         else:
              self.form_layout.labelForField(self.content_stack).hide()
              self.content_stack.hide()
@@ -235,6 +234,19 @@ class PropertyPanel(QWidget):
             self.property_changed.emit(self.target_item, prop_name, new_value, old_value)
         self.sender().clearFocus()
  
+    @Slot()
+    def _choose_image_path(self):
+        if not isinstance(self.target_item, ImageElement):
+            return
+        file_path, _ = QFileDialog.getOpenFileName(
+            self, "Select Image", "", "Images (*.png *.jpg *.jpeg *.bmp *.gif)"
+        )
+        if file_path:
+            old_value = self.target_item.content
+            new_value = file_path
+            if old_value != new_value:
+                self.property_changed.emit(self.target_item, "content", new_value, old_value)
+
 
     @Slot(int)
     def _on_alignment_changed(self, index: int):
