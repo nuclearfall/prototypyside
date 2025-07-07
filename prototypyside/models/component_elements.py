@@ -1,5 +1,6 @@
 from PySide6.QtCore import Qt, QRectF, QPointF, Signal, QObject
-from PySide6.QtGui import QColor, QFont, QPen, QBrush, QPainter, QPixmap, QImage
+from PySide6.QtGui import (QColor, QFont, QPen, QBrush, QPainter, QPixmap, QImage, 
+            QTextDocument, QPainter, QAbstractTextDocumentLayout)
 from PySide6.QtWidgets import QGraphicsItem, QGraphicsObject, QGraphicsSceneDragDropEvent
 from typing import Optional, Dict, Any
 from prototypyside.views.graphics_items import ResizeHandle
@@ -433,18 +434,47 @@ class TextElement(ComponentElement):
     @font.setter
     def font(self, value: QFont):
         if self._font != value:
+            self.prepareGeometryChange() # Font change might change layout/size
             self._font = value
+            self._text_document.setDefaultFont(self._font) # Update document's font
+            self.update_text_document_layout() # Recalculate layout based on new font
             self.element_changed.emit()
             self.update()
+
     # --- End Text-specific Property Getters and Setters ---
 
+    # def paint(self, painter: QPainter, option, widget=None):
+    #     super().paint(painter, option, widget)
+    #     rect = self.boundingRect()
+    #     painter.setFont(self._font)
+    #     painter.setPen(self._color)
+    #     if self._content:
+    #         painter.drawText(rect, self._alignment, self._content)
+
     def paint(self, painter: QPainter, option, widget=None):
+        # Call base class paint to handle borders and basic styling first
         super().paint(painter, option, widget)
-        rect = self.boundingRect()
-        painter.setFont(self._font)
-        painter.setPen(self._color)
-        if self._content:
-            painter.drawText(rect, self._alignment, self._content)
+        rect = self._geometry.px.rect
+        painter.save()
+
+        # Set up QTextDocument for automatic word wrapping within rect
+        doc = QTextDocument()
+        doc.setDefaultFont(self.font)
+        doc.setPlainText(self.content)
+        doc.setTextWidth(rect.width())
+
+        # Ensure content doesn't exceed rect height
+        layout = doc.documentLayout()
+        required_height = layout.documentSize().height()
+        if required_height > rect.height():
+            # Clip content to fit rect height if necessary
+            painter.setClipRect(rect)
+
+        # Position the text correctly within the rect
+        painter.translate(rect.topLeft())
+        doc.drawContents(painter, QRectF(0, 0, rect.width(), rect.height()))
+
+        painter.restore()
 
     def to_dict(self):
         data = super().to_dict()

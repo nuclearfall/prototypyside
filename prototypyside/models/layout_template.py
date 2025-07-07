@@ -103,6 +103,7 @@ class LayoutSlot(QGraphicsObject):
             painter.setPen(pen)
             painter.setBrush(Qt.NoBrush)
             painter.drawRect(rect)
+
         # If you want to draw anything *over* the content, you could do it here.
 
 

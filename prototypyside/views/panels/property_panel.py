@@ -39,7 +39,6 @@ class FocusTextEdit(QTextEdit):
     def __init__(self, target_item=None, content_key="content", parent=None):
         super().__init__(parent)
         self.setWordWrapMode(QTextOption.WordWrap)
-
         self._content_key = content_key
         self._target_item = None
         self._original_value = None
@@ -76,6 +75,7 @@ class FocusTextEdit(QTextEdit):
         self._content_key = content_key
         self._original_value = getattr(target_item, content_key, "")
         self.setText(self._original_value)
+
 
 # --- Main Property Panel Widget ---
 
@@ -229,7 +229,8 @@ class PropertyPanel(QWidget):
         
         # For QColor, direct comparison works. For others, it should be fine.
         if old_value != new_value:
-                
+            if prop_name == "font" or prop_name ==  "geometry":
+                self.text_edit.setCurrentFont(new_value)
             print(f"[PROP PANEL] Prop={prop_name}, old={old_value}, new={new_value}, equal={old_value == new_value}")
             self.property_changed.emit(self.target_item, prop_name, new_value, old_value)
         self.sender().clearFocus()

@@ -116,7 +116,7 @@ class FontToolbar(QWidget):
         # Only proceed and emit if the font has actually changed
         if old_font != new_font:
             self.target.font = new_font
-            self.font_changed.emit(self.target, "font", old_font, new_font)
+            self.font_changed.emit(self.target, "font", new_font, old_font)
 
     def set_font(self, font: QFont):
         """A helper method to update all UI controls from a given QFont."""
