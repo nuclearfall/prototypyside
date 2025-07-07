@@ -36,12 +36,17 @@ class ComponentTab(QWidget):
     status_message_signal = Signal(str, str, int)
     tab_title_changed = Signal(str)
 
-    def __init__(self, parent, registry, template):
+    def __init__(self, parent, main_window, template, registry):
         super().__init__(parent)
-        self.undo_stack = QUndoStack(self)
+        self.main_window = main_window
+        presets = self.main_window.settings
+        self.settings = AppSettings(display_dpi=template.geometry.dpi, display_unit=presets.unit, 
+                    physical_unit=template.geometry.unit, print_dpi=presets.print_dpi)
         self.registry = registry
+        self.registry.settings = self.settings
         self._template = template
-        self.settings = AppSettings()
+        self.undo_stack = QUndoStack()
+
         self._unit = self.settings.display_unit
         self._dpi = self.settings.display_dpi
 
@@ -54,7 +59,8 @@ class ComponentTab(QWidget):
         self.view.setRenderHints(QPainter.Antialiasing | QPainter.TextAntialiasing | QPainter.SmoothPixmapTransform)
         self.view.setViewportUpdateMode(QGraphicsView.FullViewportUpdate)
         self.view.setOptimizationFlag(QGraphicsView.DontSavePainterState)
-        self.view.setOptimizationFlag(QGraphicsView.DontAdjustForAntialiasing)        
+        self.view.setOptimizationFlag(QGraphicsView.DontAdjustForAntialiasing)
+        self.scene.addItem(self._template)      
         self.selected_element: Optional['ComponentElement'] = None
 
         self.export_manager = ExportManager()
@@ -62,7 +68,6 @@ class ComponentTab(QWidget):
         self._current_drawing_color = QColor(0, 0, 0) # For drawing tools
 
         self.setup_ui()
-        self._refresh_scene()
 
     @property
     def dpi(self): return self._dpi
@@ -75,6 +80,11 @@ class ComponentTab(QWidget):
     def template(self):
         return self._template
 
+    @template.setter
+    def template(self, new):
+        if new != self.template and isinstance(new, ComponentTemplate):
+            self._template = new
+
     @property
     def template_pid(self):
         return self._template.pid
@@ -82,7 +92,7 @@ class ComponentTab(QWidget):
     def focusInEvent(self, event):
         super().focusInEvent(event)
         # Assuming you have a way to get the main window, e.g., self.window()
-        main_window = self.window()
+        self.main_window = main_window
         if hasattr(main_window, "undo_group"):
             main_window.undo_group.setActiveStack(self.undo_stack)
 
@@ -113,7 +123,14 @@ class ComponentTab(QWidget):
         self.scene.selectionChanged.connect(self.on_selection_changed)
         self.scene.element_dropped.connect(self.add_element_from_drop)
         self.scene.element_cloned.connect(self.clone_element)
-
+        self.view.setRenderHints(QPainter.Antialiasing | QPainter.TextAntialiasing | QPainter.SmoothPixmapTransform)
+        self.view.setViewportUpdateMode(QGraphicsView.FullViewportUpdate)
+        self.view.setOptimizationFlag(QGraphicsView.DontSavePainterState)
+        self.view.setOptimizationFlag(QGraphicsView.DontAdjustForAntialiasing)
+        self.view.setScene(self.scene)
+        self.view.fitInView(self.scene.sceneRect(), Qt.KeepAspectRatio)
+        self.scene.addItem(self._template)
+        
         # Initialize the property panel and layers panel (their widgets will be placed in docks in QMainWindow)
         self.setup_property_editor()
         self.setup_component_palette()
@@ -133,7 +150,6 @@ class ComponentTab(QWidget):
 
         tw, th = self.template.geometry.width.px, self.template.geometry.height.px
         self.scene.scene_from_template_dimensions(tw, th)
-
         self.view.setSceneRect(self._template.geometry.px.rect)
 
         self.scene.update()
@@ -213,6 +229,13 @@ class ComponentTab(QWidget):
         self.template_geometry = UnitStrGeometryField(self.template, "geometry", display_unit=self.unit)
         self.template_geometry.setMaximumWidth(100)
         self.template_geometry.valueChanged.connect(self.on_template_geometry_changed)
+
+        self.rounded_checkbox = QCheckBox("Rounded Corners")
+        self.rounded_checkbox.setChecked(self.template.rounded_corners)
+        self.rounded_checkbox.stateChanged.connect(self.rounded_corners_toggle)
+        self.border_width_field = UnitField(self.template, "border", self.unit, self)
+        self.border_width_field.valueChanged.connect(self.set_template_border)
+        
         self.measure_toolbar.addWidget(QLabel("Template:"))
         self.measure_toolbar.addWidget(self.template_name_field)
         self.measure_toolbar.addSeparator()
@@ -220,6 +243,9 @@ class ComponentTab(QWidget):
         self.measure_toolbar.addWidget(self.unit_selector)
         self.measure_toolbar.addWidget(self.grid_checkbox)
         self.measure_toolbar.addWidget(self.snap_checkbox)
+        self.measure_toolbar.addWidget(self.border_width_field)
+        self.measure_toolbar.addWidget(self.rounded_checkbox)
+
         self.layout().addWidget(self.measure_toolbar)
 
     @Slot(str)
@@ -233,6 +259,10 @@ class ComponentTab(QWidget):
         self.scene.update()  # force grid redraw
 
     @Slot(int)
+    def rounded_corners_toggle(self, state: int):
+        self.template.rounded_corners = bool(state)
+
+    @Slot(int)
     def on_snap_toggle(self, state: int):
         self.snap_to_grid = bool(state)
         self.scene.is_snap_to_grid = self.snap_to_grid
@@ -242,6 +272,10 @@ class ComponentTab(QWidget):
         self.show_grid = bool(state)
         self.measure_toolbar.update()
         self.scene.update()
+
+    @Slot()
+    def set_template_border(self, t, p, new, old):
+        setattr(t, p, new)
 
     @Slot()
     def on_template_name_changed(self):

@@ -39,17 +39,17 @@ class UnitField(QLineEdit):
             parent: The parent widget.
         """
         super().__init__(parent)
-        self.target_item = None
-        self.property_name = None
+        self.target_item = target_item
+        self.property_name = property_name
         self.display_unit = display_unit
         self._dpi = None
         if target_item:
             self._old_value = self.target_item.geometry
-            self._dpi = self.target_item.geometry.dpi
+            self._dpi = self.target_item._geometry.dpi
         self._old_value: Optional[UnitStr] = None
 
         if target_item and property_name:
-            self.setTarget(target_item, property_name)
+            self.setTarget(target_item, property_name, display_unit = self.display_unit)
 
         self.editingFinished.connect(self._on_editing_finished)
 
@@ -87,7 +87,7 @@ class UnitField(QLineEdit):
         Returns a new UnitStr object from the current text in the line edit.
         The text is interpreted as being in the widget's `display_unit`.
         """
-        unit = self.target_item.geometry.unit
+        unit = self.target_item._geometry.unit
         current_text = super().text()
         if not current_text.strip():
             return UnitStr("0", unit=unit, dpi=self._dpi)

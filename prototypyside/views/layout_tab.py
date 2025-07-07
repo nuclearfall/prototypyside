@@ -9,6 +9,7 @@ from PySide6.QtGui import (QKeySequence, QShortcut, QUndoStack,
     QUndoGroup, QUndoCommand, QPainter, QPageSize, QPixmap, QImage, QPainter)
 
 from prototypyside.models.layout_template import LayoutTemplate, LayoutSlot
+from prototypyside.services.app_settings import AppSettings
 from prototypyside.views.panels.layout_property_panel import LayoutPropertyPanel, scene_to_pixmap
 from prototypyside.views.toolbars.layout_toolbar import LayoutToolbar
 from prototypyside.views.palettes.layout_palette import LayoutPalette
@@ -18,7 +19,7 @@ from prototypyside.views.layout_scene import LayoutScene
 from prototypyside.views.layout_view import LayoutView
 from prototypyside.utils.unit_converter import to_px
 from prototypyside.config import PAGE_SIZES
-from prototypyside.services.undo_commands import CreateComponentCommand
+from prototypyside.services.undo_commands import CloneComponentTemplateToSlotCommand
 
 
 class LayoutTab(QWidget):
@@ -33,9 +34,14 @@ class LayoutTab(QWidget):
     def __init__(self, parent, main_window, template, registry):
         super().__init__(parent)
         self.main_window = main_window
+        presets = self.main_window.settings
+        self.settings = AppSettings(display_dpi=template.geometry.dpi, display_unit=presets.unit, 
+                    physical_unit=template.geometry.unit, print_dpi=presets.print_dpi)
         self.registry = registry
-        self.template = template
-        self.settings = registry.settings
+        self.registry.settings = self.settings
+        self._template = template
+        print(self._template)
+        self._template.setGrid(self.registry)
         self.undo_stack = QUndoStack()
         # self.pagination_manager = PaginationManager(template, registry, merge_mgr)
         
@@ -52,9 +58,8 @@ class LayoutTab(QWidget):
         self.view.setScene(self.scene)
         self.view.fitInView(self.scene.sceneRect(), Qt.KeepAspectRatio)
         self.view.show()
+        self.scene.addItem(self._template)
 
-        self.scene.addItem(self.template)
-        self.template.setGrid(self.registry)
         self._create_layout_toolbar()
         self._create_layout_palette()
         self._create_import_panel()
@@ -67,8 +72,8 @@ class LayoutTab(QWidget):
         # Connect signals to handler methods
         self.scene.component_dropped.connect(self.on_component_dropped)
         self.layout_toolbar.display_flag_changed.connect(self.on_display_flag_changed)
-        self.template.marginsChanged.connect(self.on_template_margin_changed)
-        self.template.spacingChanged.connect(self.on_template_spacing_changed)
+        self._template.marginsChanged.connect(self.on_template_margin_changed)
+        self._template.spacingChanged.connect(self.on_template_spacing_changed)
         self.layout_palette.palette_selection_changed.connect(self.on_palette_selection_change)
         # --- 3. Set the simple, single layout for the tab itself ---
         main_layout = QHBoxLayout(self)
@@ -78,6 +83,29 @@ class LayoutTab(QWidget):
         #self.load_template(self.template) # Make sure this is called!
         self.update_grid() # This method currently does nothing in your provided code for LayoutTab
         self.refresh_panels()
+
+    @property
+    def dpi(self): return self._dpi
+
+    @property
+    def unit(self):
+        return self._unit
+    
+    @property
+    def template(self):
+        return self._template
+
+    @template.setter
+    def template(self, new):
+        if new != self.template and isinstance(new, ComponentTemplate):
+            self._template = new
+
+    def focusInEvent(self, event):
+        super().focusInEvent(event)
+        # Assuming you have a way to get the main window, e.g., self.window()
+        self.main_window = main_window
+        if hasattr(main_window, "undo_group"):
+            main_window.undo_group.setActiveStack(self.undo_stack)
 
     def show_status_message(self, message: str, message_type: str = "info", timeout_ms: int = 5000):
         self.status_message_signal.emit(message, message_type, timeout_ms)
@@ -116,22 +144,22 @@ class LayoutTab(QWidget):
         top, bottom, left, right = self.template.get_margins()
 
         # Top margin
-        self.margin_top = UnitField(top, unit=self.template.unit, dpi=self.template.dpi)
+        self.margin_top = UnitField(self.template, "margin_top", display_unit=self.template.geometry.unit, )
         margin_grid.addWidget(QLabel("Top:"), 0, 0)
         margin_grid.addWidget(self.margin_top, 0, 1)
         
         # Bottom margin
-        self.margin_bottom = UnitField(bottom, unit=self.template.unit, dpi=self.template.dpi)
+        self.margin_bottom = UnitField(self.template, "margin_bottom", display_unit=self.template.geometry.unit, )
         margin_grid.addWidget(QLabel("Bottom:"), 1, 0)
         margin_grid.addWidget(self.margin_bottom, 1, 1)
         
         # Left margin
-        self.margin_left = UnitField(left, unit=self.template.unit, dpi=self.template.dpi)
+        self.margin_left = UnitField(self.template, "margin_left", display_unit=self.template.geometry.unit, )
         margin_grid.addWidget(QLabel("Left:"), 2, 0)
         margin_grid.addWidget(self.margin_left, 2, 1)
         
         # Right margin
-        self.margin_right = UnitField(right, unit=self.template.unit, dpi=self.template.dpi)
+        self.margin_right = UnitField(self.template, "margin_right", display_unit=self.template.geometry.unit, )
         margin_grid.addWidget(QLabel("Right:"), 3, 0)
         margin_grid.addWidget(self.margin_right, 3, 1)
         
@@ -145,12 +173,12 @@ class LayoutTab(QWidget):
         spacing_grid.setSpacing(5)
         
         # Horizontal spacing
-        self.spacing_x = UnitField(self.template.spacing_x, unit=self.template.unit, dpi=self.template.dpi)
+        self.spacing_x = UnitField(self.template, "spacing_x", display_unit=self.template.geometry.unit, )
         spacing_grid.addWidget(QLabel("Horizontal:"), 0, 0)
         spacing_grid.addWidget(self.spacing_x, 0, 1)
         
         # Vertical spacing
-        self.spacing_y = UnitField(self.template.spacing_y, unit=self.template.unit, dpi=self.template.dpi)
+        self.spacing_y = UnitField(self.template, "spacing_y", display_unit=self.template.geometry.unit, )
         spacing_grid.addWidget(QLabel("Vertical:"), 1, 0)
         spacing_grid.addWidget(self.spacing_y, 1, 1)
         spacing_grid.sizeHint()
@@ -164,12 +192,12 @@ class LayoutTab(QWidget):
             ("margin_left", self.margin_left),
             ("margin_right", self.margin_right),
         ]:
-            field.editingFinishedWithValue.connect(
+            field.valueChanged.connect(
                 self.on_template_margin_changed)
 
         for name, field in [("spacing_x", self.spacing_x),
                             ("spacing_y", self.spacing_y)]:
-            field.editingFinishedWithValue.connect(
+            field.valueChanged.connect(
                 self.on_template_spacing_changed)           
         # print("MarginPanel sizeHint:", self.margin_panel.sizeHint())
         return self.margin_panel
@@ -322,18 +350,18 @@ class LayoutTab(QWidget):
         Called when the user drops a ComponentTemplate onto the layout scene.
         Delegates to the model to figure out which slot that corresponds to.
         """
-        slot, pos = self.template.get_slot_at_position(scene_pos)
-        component = self.registry.root.find(tpid)
+        slot = self.template.get_slot_at_position(scene_pos)
+        print(slot, scene_pos)
+        template = self.registry.root.find(tpid)
+        print(template.pid)
 
-        if slot is None or component is None:
+        if slot is None or template is None:
             print("Drop failed: no valid slot or component found")
             return
 
-        command = CreateComponentCommand(component, self, slot)
+        command = CloneComponentTemplateToSlotCommand(self.registry, template, slot)
         self.undo_stack.push(command)
-
-        clone = self.registry.get_last("ct")
-        slot.content = clone
+        clone = self.registry.get_last()
         print(f"Component Template clone {clone.name} being dropped into {slot.pid}")
         print(f"Verifying we're in {slot.name}: {slot.content.name}")
 

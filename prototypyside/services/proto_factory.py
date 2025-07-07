@@ -90,30 +90,25 @@ class ProtoFactory:
         return obj_type(pid=pid, **kwargs)
 
     def from_dict(self, data: dict, registry=None) -> object:
-        """
-        Reconstructs an object from its dictionary representation.
-        Assumes the dictionary contains a 'pid' key.
-        """
         pid = data.get("pid")
         if not pid:
             raise ValueError("Missing 'pid' in object data for factory reconstruction.")
 
         obj_type = self.get_object_type(pid)
-        if not obj_type:
-            raise ValueError(f"No object type mapped for PID prefix in data: {pid}")
+        if not obj_type or not hasattr(obj_type, "from_dict"):
+            raise TypeError(f"Cannot reconstruct type from PID '{pid}'")
 
-        if not hasattr(obj_type, "from_dict") or not callable(obj_type.from_dict):
-            raise TypeError(f"Object type {obj_type.__name__} (for PID '{pid}') does not have a callable 'from_dict' method.")
+        obj = obj_type.from_dict(data)  # Basic construction
 
-        try:
-            if registry:
-                return obj_type.from_dict(data, registry)
-            # Assumes the object's class has a static or class method `from_dict`
-            # that can reconstruct the object from the dictionary data.
-            return obj_type.from_dict(data)
-        except Exception as e:
-            raise RuntimeError(f"Failed to reconstruct object from dictionary for PID '{pid}': {e}")
+        # Post-process children using factory if needed
+        if isinstance(obj, ComponentTemplate) and "elements" in data:
+            obj.elements = [self.from_dict(ed, registry) for ed in data["elements"]]
+        elif isinstance(obj, LayoutTemplate) and "slots" in data:
+            obj.slots = [
+                [self.from_dict(sd, registry) for sd in row] for row in data["slots"]
+            ]
 
+        return obj
 
     def to_dict(self, obj: object) -> dict:
         """

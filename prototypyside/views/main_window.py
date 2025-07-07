@@ -51,9 +51,8 @@ class MainDesignerWindow(QMainWindow):
         self.setMinimumSize(800, 600)
 
         # Main application settings, might be shared or passed to tabs
-        self.settings = AppSettings()
+        self.settings = AppSettings(display_unit="px", print_dpi=300)
         self.registry = RootRegistry(settings=self.settings)
-
         self._tab_map = {}  # pid: tab
 
         self.tab_widget: Optional[QTabWidget] = None
@@ -395,7 +394,7 @@ class MainDesignerWindow(QMainWindow):
     def add_new_component_tab(self):
         new_registry = self.registry.create_child_registry()
         new_template = new_registry.create("ct")
-        new_tab = ComponentTab(parent=self, template=new_template, registry=new_registry)
+        new_tab = ComponentTab(parent=self, main_window=self, template=new_template, registry=new_registry)
         self.undo_group.addStack(new_tab.undo_stack)
         # Connect the tab's status message signal to the main window's slot
         new_tab.status_message_signal.connect(self.show_status_message)

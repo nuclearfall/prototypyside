@@ -322,6 +322,7 @@ class ComponentElement(QGraphicsObject):
             "template_pid": self._template_pid,
             "name": self._name,
             "geometry": self._geometry.dict(),
+            "z_order": self.zValue(),
             "color": self._color.rgba() if self._color else None,  # Modified for alpha
             "bg_color": self._bg_color.rgba() if self._bg_color else None, # Modified for alpha
             "border_color": self._border_color.rgba() if self._border_color else None, # Modified for alpha
@@ -343,6 +344,8 @@ class ComponentElement(QGraphicsObject):
             parent=None,
             name=name
         )
+        # Restore zValue
+        obj.setZValue(data.get("z", 0))
         # Restore style and other fields
         if "color" in data and data["color"] is not None:
             obj._color = QColor.fromRgba(data["color"])
@@ -499,18 +502,17 @@ class ImageElement(ComponentElement):
         return self._content
 
     @content.setter
-    def content(self, content: str):
+    def content(self, new_content: str):
         # Overriding to handle pixmap loading
-        if self._content != content:
-            self._content = content
-            try:
-                pixmap = QPixmap(content)
-                self._pixmap = pixmap if not pixmap.isNull() else None
-            except Exception as e:
-                print(f"Error loading image '{content}': {e}")
-                self._pixmap = None
-            self.element_changed.emit()
-            self.update()
+        self._content = new_content
+        try:
+            pixmap = QPixmap(new_content)
+            self._pixmap = pixmap if not pixmap.isNull() else None
+        except Exception as e:
+            print(f"Error loading image '{new_content}': {e}")
+            self._pixmap = None
+        self.element_changed.emit()
+        self.update()
 
     # --- Image-specific Property Getters and Setters ---
     @property
@@ -528,16 +530,19 @@ class ImageElement(ComponentElement):
     def to_dict(self):
         data = super().to_dict()
         data['keep_aspect'] = self.keep_aspect
+        data['content'] = self._content
         return data
 
     @classmethod
     def from_dict(cls, data):
         element = super().from_dict(data)
         element.keep_aspect = data.get("keep_aspect", True)
+        element.content = data.get("content", None)
         return element
 
     def paint(self, painter: QPainter, option, widget=None):
         super().paint(painter, option, widget)
+        print(f"Before drawing, the element's contents are {self._content}")
         rect = self.boundingRect()
         size = self.geometry.px.size
         size = QSize(size.width(), size.height())

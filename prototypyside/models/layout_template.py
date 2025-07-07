@@ -2,9 +2,11 @@ from dataclasses import dataclass, field
 from typing import List, Optional, Dict, Tuple
 from enum import Enum, auto
 import json
-from PySide6.QtWidgets import QGraphicsObject, QGraphicsItem
+from PySide6.QtWidgets import QGraphicsObject, QGraphicsItem, QStyleOptionGraphicsItem
 from PySide6.QtCore import Qt, QRectF, QPointF, QSizeF, Signal
 from PySide6.QtGui import QPageSize, QPainter, QPixmap, QColor, QImage, QPen, QBrush
+from prototypyside.models.component_template import ComponentTemplate
+from prototypyside.models.component_elements import ImageElement
 from prototypyside.utils.unit_converter import to_px, page_in_px, page_in_units, compute_scale_factor
 from prototypyside.utils.unit_str import UnitStr
 from prototypyside.utils.unit_str_geometry import UnitStrGeometry
@@ -14,37 +16,69 @@ from prototypyside.config import PAGE_SIZES, DISPLAY_MODE_FLAGS, PAGE_UNITS
 
 
 class LayoutSlot(QGraphicsObject):
-    def __init__(self, pid, geometry=None, parent=None):
+    def __init__(self, pid, geometry, row, column, parent=None):
         super().__init__(parent)
         self._pid = pid
         self._hovered = False
         self._geometry = geometry
         self._dpi = geometry.dpi
         self._geometry = geometry
+        self._row = row
+        self._column = column
         self._content = None
         self._display_flag = DISPLAY_MODE_FLAGS.get("stretch").get("aspect")
+        self._cache_image = None
         self.setPos(geometry.pos_x.px, geometry.pos_y.px)
         self.setAcceptHoverEvents(True)
-
+        print(f"Slot {pid} at positon {self._row}, {self._column} has geometry set to {geometry.rect.width()}x{geometry.rect.height()}")
 
     # These three methods must be defined for each object.
     @property
     def dpi(self): return self._dpi
 
     @property
-    def geometry(self): return self._geometry
+    def dpi(self):
+        return self._dpi
+
+    @property
+    def geometry(self):
+        return self._geometry
+
+    @geometry.setter
+    def geometry(self, new_geom: UnitStrGeometry):
+        if self._geometry == new_geom:
+            return
+        self.prepareGeometryChange()
+        self._geometry = new_geom
+        super().setPos(self._geometry.px.pos)
+        self.update()
 
     def boundingRect(self) -> QRectF:
         return self._geometry.px.rect
 
+    # This method is for when ONLY the rectangle (size) changes,
+    # not the position.
     def setRect(self, new_rect: QRectF):
+        if self._geometry.px.rect == new_rect:
+            return
         self.prepareGeometryChange()
-        self._geometry = with_rect(self._geometry, new_rect)
-        self.update()
+        with_rect(self._geometry, new_rect)
+        # self.update()
 
     def itemChange(self, change: QGraphicsItem.GraphicsItemChange, value):
-        if change == QGraphicsItem.ItemPositionChange:
-            self._geometry = with_pos(self._geometry, value)
+        # This is called when the scene moves the item.
+        if change == QGraphicsItem.ItemPositionChange and value != self.pos():
+            # Block signals to prevent a recursive loop if a connected slot
+            # also tries to set the position.
+            signals_blocked = self.signalsBlocked()
+            self.blockSignals(True)
+            with_pos(self._geometry, value)
+            print(f"[ITEMCHANGE] Called with change={change}, value={value}")
+            print(f"[ITEMCHANGE] Geometry.pos updated to: {self._geometry.px.pos}")
+            self.blockSignals(signals_blocked)
+
+        # It's crucial to call the base class implementation. This will update geometry.
+        # If other signals are emitted or updates called for, it breaks the undo stack.
         return super().itemChange(change, value)
 
     @property
@@ -63,6 +97,13 @@ class LayoutSlot(QGraphicsObject):
     @content.setter
     def content(self, obj):
         self._content = obj
+
+        ### Next 4 lines are DEBUGGING ONLY 
+        geometry = self._content.geometry if isinstance(self._content, ComponentTemplate) else None
+        if geometry:
+            print(f"Slot {self._pid} has content sized: {geometry.rect.width()}x{geometry.rect.height()}")
+        print(f"Slot content elements are {self._content.elements}")
+
         self.update()
 
     @property 
@@ -104,14 +145,15 @@ class LayoutSlot(QGraphicsObject):
             painter.setBrush(Qt.NoBrush)
             painter.drawRect(rect)
         if self._content is not None:
+            rect = self.boundingRect()
             if self._cache_image is None:
                 self._cache_image = self._render_to_image(dpi=self._dpi)
 
-            painter.drawImage(self.boundingRect(), self._cache_image)
+            painter.drawImage(rect, self._cache_image)
 
     def _render_to_image(self, dpi):
         rect = self.boundingRect()
-        w, h = int(rect.width()), int(rect.height())
+        w, h = max(1, int(rect.width())), max(1, int(rect.height()))
 
         option = QStyleOptionGraphicsItem()
         image = QImage(w, h, QImage.Format_ARGB32_Premultiplied)
@@ -128,6 +170,12 @@ class LayoutSlot(QGraphicsObject):
 
         # 2. Render all elements
         for element in sorted(self.content.elements, key=lambda e: e.zValue()):
+
+            if isinstance(element, ImageElement) and element._content:
+                # Force reload even if same path
+                element._pixmap = None
+                element.content = element._content
+
             img_painter.save()
 
             # Position & orientation
@@ -147,7 +195,7 @@ class LayoutSlot(QGraphicsObject):
             element.paint(img_painter, option, widget=None)
 
             img_painter.restore()
-
+        return image
 
     # ---------------------------------------------------------------------
     # private helpers
@@ -198,7 +246,7 @@ class LayoutSlot(QGraphicsObject):
         Draw the template background color or image.
         This assumes the template may define a background_color or background_image.
         """
-        rect = QRectF(0, 0, self._width.to("float"), self._height.to("float"))
+        rect = self.geometry.px.rect
 
         bg_color = getattr(self._content, "background_color", None)
         bg_image_path = getattr(self._content, "background_image", None)
@@ -226,14 +274,11 @@ class LayoutSlot(QGraphicsObject):
                     value = csv_row[col]
                     setattr(element, "content", value)
 
-    def apply_data(row):
-        # Update child elements to use new data
-        for element in self.content.elements():
-            if hasattr(element, "content",):
-                element.update_from_merge_data(merge_data)
-        self.update()
-        # If you want to draw anything *over* the content, you could do it here.
-
+    def apply_data(self, row):
+        for element in self._content.elements:
+            if hasattr(element, "update_from_merge_data"):
+                element.update_from_merge_data(row)
+        self.invalidate_cache()
 
 class LayoutTemplate(QGraphicsObject):
     template_changed = Signal()
@@ -247,7 +292,7 @@ class LayoutTemplate(QGraphicsObject):
                 pagination_params={},
                 rows=3, columns=3, dpi=144,
                 name=None, margin_top="0.5in", margin_bottom = "0.5in",
-                margin_left = "0.25in", margin_right = "0.25in",
+                margin_left = "0.5in", margin_right = "0.5in",
                 spacing_x = "0.0in", spacing_y  = "0.0in", landscape=False, auto_fill=True):
         super().__init__(parent)
         self._pid = pid
@@ -279,6 +324,15 @@ class LayoutTemplate(QGraphicsObject):
 
     @property
     def geometry(self): return self._geometry
+
+    @geometry.setter
+    def geometry(self, new_geom: UnitStrGeometry):
+        if self._geometry == new_geom:
+            return
+        self.prepareGeometryChange()
+        self._geometry = new_geom
+        super().setPos(self._geometry.px.pos)
+        self.update()
 
     def boundingRect(self) -> QRectF:
         return self._geometry.px.rect
@@ -336,7 +390,7 @@ class LayoutTemplate(QGraphicsObject):
     def margins(self):
         return self._margins
 
-    @property
+    @margins.setter
     def margins(self, new_margins: List[UnitStr]):
         self._margins = new_margins
         self.marginsChanged.emit()
@@ -448,7 +502,7 @@ class LayoutTemplate(QGraphicsObject):
                 slot_width, slot_height = self.compute_slot_size(r, c)
                 x_pos, y_pos = self.compute_slot_position(r, c)
                 rect = QRectF(0, 0, slot_width, slot_height)
-                pos = QPosF(x_pos, y_pos)
+                pos = QPointF(x_pos, y_pos)
                 if slot is not None:
                     # Update existing slot
                     slot.geometry.from_px(rect=rect, pos=pos, dpi=self._dpi)
@@ -458,6 +512,8 @@ class LayoutTemplate(QGraphicsObject):
                     slot = registry.create(
                         "ls",
                         geometry=UnitStrGeometry.from_px(rect, pos, dpi=self._dpi),
+                        row=r,
+                        column=c,
                         parent=self,
                     )
                     self.layout_slots[r][c] = slot
@@ -525,29 +581,32 @@ class LayoutTemplate(QGraphicsObject):
             slot_size.height() >= min_size.height()
         )
         
-
     def get_slot_position(self, row: int, col: int) -> tuple[float, float]:
         slot = self.layout_slots[row][col]
         return slot.geometry.px.pos
 
-    def get_slot_size(self) -> Tuple[float, float]:
+    def get_slot_size(self, row, col):
         """
         Returns the uniform cell size (width, height) in pixels for all slots in the grid.
         """
-        slot_size = self.layout_slots[0][0]._geometry.to("px", self._dpi).size
+        slot_size = self.layout_slots[row][col].geometry.px.size
 
     def get_slot_at_position(self, scene_pos: QPointF) -> Optional[LayoutSlot]:
         """
         Given a scene-coordinate point, return the LayoutSlot whose rect contains it,
         or None if no slot matches.
         """
-        cell_w, cell_h = self.get_cell_size_px()
 
         for row in range(self.rows):
             for col in range(self.columns):
-                x_px, y_px = self.get_slot_position_px(row, col)
-                slot_rect = QRectF(x_px, y_px, cell_w, cell_h)
+                slot = self.layout_slots[row][col]
+                rect = slot.geometry.px.rect
+                pos = slot.geometry.px.pos
+                x, y = pos.x(), pos.y()
+                w, h = rect.width(), rect.height()
+                slot_rect = QRectF(x, y, w, h)
                 if slot_rect.contains(scene_pos):
+                    print(f"Found layout slot {slot.pid} at {row},{col}")
                     return self.layout_slots[row][col]
 
         return None

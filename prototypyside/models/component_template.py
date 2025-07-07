@@ -47,28 +47,56 @@ class ComponentTemplate(QGraphicsObject):
         self._pid = value
         self.template_changed.emit()
 
-    # These three methods must be defined for each object.
     @property
-    def dpi(self): return self._dpi
+    def dpi(self):
+        return self._dpi
 
     @property
     def geometry(self):
         return self._geometry
 
+    @geometry.setter
+    def geometry(self, new_geom: UnitStrGeometry):
+        print(f"[SETTER] geometry called with {new_geom}")
+        if self._geometry == new_geom:
+            print("[SETTER] geometry unchanged")
+            return
+
+        self.prepareGeometryChange()
+        print(f"[SETTER] prepareGeometryChange called")
+        print(f"[SETTER] pos set to {self._geometry.px.pos}")
+        self._geometry = new_geom
+        super().setPos(self._geometry.px.pos)
+        # self.element_changed.emit()
+        self.update()
+
     def boundingRect(self) -> QRectF:
         return self._geometry.px.rect
 
-    # These are generally the only ways that these values should change:
+    # This method is for when ONLY the rectangle (size) changes,
+    # not the position.
     def setRect(self, new_rect: QRectF):
+        if self._geometry.px.rect == new_rect:
+            return
         self.prepareGeometryChange()
         with_rect(self._geometry, new_rect)
-        self.template_changed.emit()
-        self.update()
+        # self.element_changed.emit()
+        # self.update()
 
     def itemChange(self, change: QGraphicsItem.GraphicsItemChange, value):
-        if change == QGraphicsItem.ItemPositionChange:
+        # This is called when the scene moves the item.
+        if change == QGraphicsItem.ItemPositionChange and value != self.pos():
+            # Block signals to prevent a recursive loop if a connected slot
+            # also tries to set the position.
+            signals_blocked = self.signalsBlocked()
+            self.blockSignals(True)
             with_pos(self._geometry, value)
-            self.template_changed.emit()
+            print(f"[ITEMCHANGE] Called with change={change}, value={value}")
+            print(f"[ITEMCHANGE] Geometry.pos updated to: {self._geometry.px.pos}")
+            self.blockSignals(signals_blocked)
+
+        # It's crucial to call the base class implementation. This will update geometry.
+        # If other signals are emitted or updates called for, it breaks the undo stack.
         return super().itemChange(change, value)
 
     @property
@@ -191,10 +219,10 @@ class ComponentTemplate(QGraphicsObject):
             return True
         return False
 
-    def _on_element_changed(self):
-        # Trigger redraw of entire template and notify any listeners
-        self.template_changed.emit()
-        self.update()
+    # def _on_element_changed(self):
+    #     # Trigger redraw of entire template and notify any listeners
+    #     self.template_changed.emit()
+    #     self.update()
 
     def paint(self, painter: QPainter, option, widget=None):
         rect = self.boundingRect()
@@ -242,7 +270,6 @@ class ComponentTemplate(QGraphicsObject):
             'pid': self._pid,
             'name': self._name,
             'geometry': self._geometry.dict(),
-            'dpi': self._dpi,
             'background_image_path': self.background_image_path,
             'elements': [e.to_dict() for e in self.elements]
         }
@@ -250,15 +277,13 @@ class ComponentTemplate(QGraphicsObject):
 
     @classmethod
     def from_dict(cls, data: Dict[str, Any]) -> 'ComponentTemplate':
+        geometry = UnitStrGeometry.from_dict(data.get("geometry"))
         template = cls(
             pid=data['pid'],
-            dpi=data.get('dpi', 144),
-            geometry=UnitStrGeometry.from_dict(data.get("geometry")),
+            geometry=geometry,
             name=data.get('name', None),
         )
-
-        template.elements = []
         template.background_image_path = data.get('background_image_path')
-
+        template._elements = data.get('elements')
         return template
         

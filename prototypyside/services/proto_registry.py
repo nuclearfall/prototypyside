@@ -108,70 +108,57 @@ class ProtoRegistry(QObject):
 
     def clone(self, obj: Any) -> Any:
         """
-        Clone an object, give it a new PID, register it, and name it.
+        Clone an object (ComponentTemplate or LayoutTemplate), give it a new PID,
+        register it, and clone children (elements or slots) if applicable.
         """
-        pid = getattr(obj, "pid", None)
-        if pid is None: 
+        if not hasattr(obj, "pid"):
             raise ValueError("Cannot clone object without a 'pid' attribute.")
         
-        new_pid = issue_pid(get_prefix(pid))
         data = self._factory.to_dict(obj)
+        old_pid = data["pid"]
+        new_pid = issue_pid(get_prefix(old_pid))
         data["pid"] = new_pid
-        data["name"] = f"{data.get("name")}_copy" # Optional: let generate_name overwrite this
+        data["name"] = f"{data.get('name', get_prefix(old_pid))}_copy"
 
-        if data.get('elements', None):
-            elements = self.clone_all(self.get("elements", []))
-            data["elements"] = None
-        if data.get("slots", None):
-            slots = clone_all(data.get("slots"))
+        # Clone children if present
+        if data.get("elements") and isinstance(data["elements"], list):
+            data["elements"] = self.clone_children(data["elements"], issue_pid)
+        elif data.get("slots") in data and isinstance(data["slots"], list):
+            data["slots"] = self.clone_children(data["slots"], issue_pid)
+
         clone = self._factory.from_dict(data)
         if clone is None:
-            raise ValueError("Factory failed to clone object from serialized data.")
+            raise ValueError("Factory failed to reconstruct cloned object.")
 
         self.generate_name(clone)
         self.register(clone)
-
         return clone
-
-    def clone_all(obj, issue_pid, factory) -> object:
+        
+    def clone_children(self, items: Any, issue_pid) -> Any:
         """
-        Recursively clones an object and its children. Generates new PIDs and
-        rebuilds the structure using from_dict.
-
-        - `obj`: original model object
-        - `issue_pid`: function to create a new PID with given prefix
-        - `factory`: object with `from_dict()` and `to_dict()` methods
-
-        Returns the new object with all nested children cloned.
+        Recursively clones child objects (elements or 2D list of slots).
+        Generates new PIDs and rebuilds structure using to_dict/from_dict.
         """
-        data = factory.to_dict(obj)
-        old_pid = data["pid"]
-        prefix = old_pid.split("_", 1)[0]
-        new_pid = issue_pid(prefix)
-        data["pid"] = new_pid
-        data["name"] = f"{data.get('name', prefix)}_copy"
-
-        # Recursively handle nested children
-        if "elements" in data and isinstance(data["elements"], list):
-            new_elements = []
-            for elem_data in data["elements"]:
-                child = factory.from_dict(elem_data)
-                cloned_child = clone_with_children(child, issue_pid, factory)
-                new_elements.append(factory.to_dict(cloned_child))
-            data["elements"] = new_elements
-
-        if "slots" in data and isinstance(data["slots"], list):
+        if isinstance(items, list) and all(isinstance(row, list) for row in items):
+            # 2D grid of slots
             new_slots = []
-            for row in data["slots"]:
+            for row in items:
                 new_row = []
                 for slot_data in row:
-                    slot = factory.from_dict(slot_data)
-                    cloned_slot = clone_with_children(slot, issue_pid, factory)
-                    new_row.append(factory.to_dict(cloned_slot))
+                    slot = self._factory.from_dict(slot_data)
+                    cloned = self.clone(slot)  # Recursively clones via `clone()`
+                    new_row.append(self._factory.to_dict(cloned))
                 new_slots.append(new_row)
-            data["slots"] = new_slots
+            return new_slots
+        else:
+            # Flat list of elements
+            new_elements = []
+            for elem_data in items:
+                elem = self._factory.from_dict(elem_data)
+                cloned = self.clone(elem)  # Recursively clones via `clone()`
+                new_elements.append(self._factory.to_dict(cloned))
+            return new_elements
 
-        return factory.from_dict(data)
 
     def reinsert(self, pid: str):
         """
