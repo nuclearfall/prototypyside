@@ -7,7 +7,7 @@ import sys
 
 IS_MAC = sys.platform == 'darwin'
 
-class DesignerGraphicsView(QGraphicsView):
+class ComponentView(QGraphicsView):
     def __init__(self, scene, parent=None):
         super().__init__(scene, parent)
         self.setRenderHints(QPainter.Antialiasing | QPainter.TextAntialiasing | QPainter.SmoothPixmapTransform)

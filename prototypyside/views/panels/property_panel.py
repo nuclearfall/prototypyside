@@ -220,6 +220,92 @@ class PropertyPanel(QWidget):
     def clear_target(self):
         self.target_item = None
 
+    @Slot(str)
+    def on_unit_change(self, display_unit: str):
+        """
+        Called when the user (or the containing Tab) wants
+        to switch display units (e.g. "px" → "in" → "cm").
+        This will re-target the two UnitFields so they
+        re-fetch their model values and reformat in the new unit.
+        """
+        self._display_unit = display_unit
+
+        # if nothing is selected → nothing to do
+        if not self.target_item:
+            return
+
+        # re-bind both unit-aware fields so they redraw
+        self.geometry_field.setTarget(
+            self.target_item,
+            "geometry",
+            display_unit=self._display_unit
+        )
+        self.border_width_field.setTarget(
+            self.target_item,
+            "border_width",
+            display_unit=self._display_unit
+        )
+
+    # def clear_target(self):
+    #     # Disconnect change signal
+    #     if self.target_item and self._element_changed_conn:
+    #         try:
+    #             self.target_item.element_changed.disconnect(self.refresh)
+    #         except (AttributeError, TypeError):
+    #             pass
+    #     self._element_changed_conn = False
+
+    #     self.target_item = None
+    #     # Hide or clear your widgets as before…
+    #     # e.g. self.main_frame.setVisible(False)
+
+    def _populate_fields(self):
+        """Fill every widget from self.target_item’s current state."""
+        el = self.target_item
+        self.pid_label.setText(el.pid)
+        self.template_pid_label.setText(el.template_pid or "N/A")
+        self.name_edit.setText(el.name)
+
+        # geometry / colors / border
+        self.geometry_field.setTarget(el, "geometry", display_unit=self._display_unit)
+        self.color_picker.set_color(el.color)
+        self.bg_color_picker.set_color(el.bg_color)
+        self.border_color_picker.set_color(el.border_color)
+        self.border_width_field.setTarget(el, "border_width", display_unit=self._display_unit)
+
+        # alignment
+        text = self.alignment_rev_map.get(el.alignment, "Center")
+        self.alignment_combo.setCurrentText(text)
+
+        # font toolbar
+        self.font_toolbar.setVisible(hasattr(el, "font"))
+        if hasattr(el, "font"):
+            self.font_toolbar.setTarget(el)
+
+        # aspect checkbox
+        self.keep_aspect_checkbox.setVisible(hasattr(el, "keep_aspect"))
+        if hasattr(el, "keep_aspect"):
+            self.keep_aspect_checkbox.setChecked(el.keep_aspect)
+
+        # content stack
+        if isinstance(el, TextElement):
+            self.content_stack.setCurrentWidget(self.content_text_edit)
+            self.content_text_edit.setTarget(el, "content")
+            self.content_text_edit.setText(el.content or "")
+        elif isinstance(el, ImageElement):
+            self.content_stack.setCurrentWidget(self.content_path_button)
+        else:
+            self.form_layout.labelForField(self.content_stack).hide()
+            self.content_stack.hide()
+
+    @Slot()
+    def refresh(self):
+        """Re-populate the panel from the current target_item."""
+        if not self.target_item:
+            return
+        # re-use the exact same logic (we know signals are blocked in set_target)
+        self.set_target(self.target_item)
+
     def _handle_property_change(self, prop_name: str, new_value: Any):
         if not self.target_item:
             return

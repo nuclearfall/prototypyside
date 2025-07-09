@@ -8,7 +8,7 @@ from PySide6.QtGui import QPainter, QImage, QPixmap, QPdfWriter, QPageSize
 
 # Assuming ComponentTemplate and ComponentGraphicsScene are importable
 from prototypyside.models.component_template import ComponentTemplate
-from prototypyside.views.graphics_scene import ComponentGraphicsScene
+from prototypyside.views.graphics_scene import ComponentScene
 from prototypyside.widgets.page_size_selector import PageSizeSelector
 from prototypyside.widgets.page_size_dialog import PageSizeDialog
 

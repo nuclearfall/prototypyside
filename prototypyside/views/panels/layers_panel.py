@@ -32,7 +32,7 @@ class LayersListWidget(QListWidget):
         self.clear()
         
         # Sort elements by zValue in ascending order for correct layer representation
-        sorted_elements = sorted(elements, key=lambda e: e.zValue())
+        sorted_elements = sorted(elements, key=lambda e: e.zValue(), reverse=True)
         
         for element in sorted_elements:
             item = QListWidgetItem(element.name)
@@ -78,8 +78,8 @@ class LayersListWidget(QListWidget):
         # Assign new Z-values based on the new order.
         # Assign distinct, increasing Z-values.
         # We can use a step (e.g., 100) to allow for insertion in between later.
-        for i, element in enumerate(reordered_elements):
-            new_z_value = (i + 1) * 100 # Start from 100, 200, 300 etc.
+        count = len(reordered_elements)
+        for idx, element in enumerate(reordered_elements):
             if element.zValue() != new_z_value:
                 element.setZValue(new_z_value) # This will cause element.element_changed to emit
 

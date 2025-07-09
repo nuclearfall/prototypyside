@@ -23,14 +23,14 @@ class ComponentTemplate(QGraphicsObject):
     element_z_order_changed = Signal()
     # border width and corner_radius are set based on a standard MTG card
     def __init__(self, pid, geometry=UnitStrGeometry(width="2.5in", height="3.5in", dpi=144), parent = None, 
-        name=None, rounded_corners=True, corner_radius="0in", border_width="0in"):
+        name=None, rounded_corners=True, corner_radius="0in", border_width="0in", template_pid=None):
         super().__init__(parent)
         self._pid = pid
         self._name = name
         self._geometry = geometry
         self._dpi = geometry.dpi
         self._pixmap = None
-        self.is_template = True
+        self.template_pid = template_pid
         self.elements: List['ComponentElement'] = []
         self.element_pids: List[str] = []
         self.background_image_path: Optional[str] = None
@@ -223,47 +223,92 @@ class ComponentTemplate(QGraphicsObject):
     #     # Trigger redraw of entire template and notify any listeners
     #     self.template_changed.emit()
     #     self.update()
-
     def paint(self, painter: QPainter, option, widget=None):
         rect = self.boundingRect()
         painter.setRenderHint(QPainter.Antialiasing)
+
+        # ——— Background ———
+        painter.save()
         painter.setClipRect(rect)
-        # Draw background
+        painter.setPen(Qt.NoPen)
         if self.background_image_path:
-            bg_image = QImage(self.background_image_path)
-            if not bg_image.isNull():
-                painter.drawImage(rect, bg_image)
+            img = QImage(self.background_image_path)
+            if not img.isNull():
+                # drawImage(targetRect, image) will scale it to fill rect
+                painter.drawImage(rect, img)
             else:
                 painter.fillRect(rect, Qt.white)
         else:
             painter.fillRect(rect, Qt.white)
+        painter.restore()
 
-        # Draw border if defined
+        # ——— Border ———
         if self.border.value > 0:
-            thickness_px = self.border.px          
-            radius_px = self.corner_radius.px
+            painter.save()
+            painter.setBrush(Qt.NoBrush)
 
-            inset = thickness_px / 2
-            inner_rect = QRectF(
+            thickness_px = self.border.px
+            inset = thickness_px / 2.0
+            inner = QRectF(
                 rect.x() + inset,
                 rect.y() + inset,
                 rect.width() - thickness_px,
                 rect.height() - thickness_px
             )
 
-            # Clamp radius to avoid drawing errors
-            max_radius = min(inner_rect.width(), inner_rect.height()) / 2
-            radius_px = max(0, min(radius_px - inset, max_radius))
+            # clamp corner radius
+            radius_px = max(0.0, min(self.corner_radius.px - inset,
+                                     min(inner.width(), inner.height()) / 2.0))
 
             path = QPainterPath()
-            if radius_px > 0:
-                path.addRoundedRect(inner_rect, radius_px, radius_px)
+            if radius_px > 0.0:
+                path.addRoundedRect(inner, radius_px, radius_px)
             else:
-                path.addRect(inner_rect)
+                path.addRect(inner)
 
             painter.setPen(QPen(Qt.black, thickness_px))
-            painter.setBrush(Qt.NoBrush)
             painter.drawPath(path)
+            painter.restore()
+    # def paint(self, painter: QPainter, option, widget=None):
+    #     rect = self.boundingRect()
+    #     painter.setRenderHint(QPainter.Antialiasing)
+    #     painter.setClipRect(rect)
+    #     # Draw background
+    #     if self.background_image_path:
+    #         bg_image = QImage(self.background_image_path)
+    #         if not bg_image.isNull():
+    #             painter.drawImage(rect, bg_image)
+    #         else:
+    #             painter.fillRect(rect, Qt.white)
+    #     else:
+    #         painter.fillRect(rect, Qt.white)
+
+    #     # Draw border if defined
+    #     if self.border.value > 0:
+    #         thickness_px = self.border.px          
+    #         radius_px = self.corner_radius.px
+
+    #         inset = thickness_px / 2
+    #         inner_rect = QRectF(
+    #             rect.x() + inset,
+    #             rect.y() + inset,
+    #             rect.width() - thickness_px,
+    #             rect.height() - thickness_px
+    #         )
+
+    #         # Clamp radius to avoid drawing errors
+    #         max_radius = min(inner_rect.width(), inner_rect.height()) / 2
+    #         radius_px = max(0, min(radius_px - inset, max_radius))
+
+    #         path = QPainterPath()
+    #         if radius_px > 0:
+    #             path.addRoundedRect(inner_rect, radius_px, radius_px)
+    #         else:
+    #             path.addRect(inner_rect)
+
+    #         painter.setPen(QPen(Qt.black, thickness_px))
+    #         painter.setBrush(Qt.NoBrush)
+    #         painter.drawPath(path)
 
     def to_dict(self) -> Dict[str, Any]:
         data = {

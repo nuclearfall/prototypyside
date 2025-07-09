@@ -118,7 +118,7 @@ class MainDesignerWindow(QMainWindow):
         self.addDockWidget(Qt.RightDockWidgetArea, self.properties_dock)
 
         # Optional: only add layers dock if actively used
-        self.addDockWidget(Qt.RightDockWidgetArea, self.layers_dock) 
+        self.addDockWidget(Qt.LeftDockWidgetArea, self.layers_dock) 
         # Optional dock features setup
         self.toolbar_dock.setFeatures(QDockWidget.NoDockWidgetFeatures)
         self.toolbar_dock.setTitleBarWidget(QWidget())  # hide title bar
@@ -312,7 +312,7 @@ class MainDesignerWindow(QMainWindow):
             self.toolbar_dock.show()
             self.palette_dock.show()
             self.properties_dock.show()
-            self.layers_dock.hide()
+            self.layers_dock.show()
             print("property_panel sizeHint:", active_tab.property_panel.sizeHint())
             print("remove_element_btn sizeHint:", active_tab.remove_element_btn.sizeHint())
             # Place ComponentTab's widgets into the main window docks

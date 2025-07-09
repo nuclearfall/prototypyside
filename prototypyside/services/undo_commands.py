@@ -225,10 +225,10 @@ class ResizeTemplateCommand(QUndoCommand):
         self.new_geometry = new_geometry
 
     def redo(self):
-        self.template._geometry = self.new_geometry
+        self.template.geometry = self.new_geometry
 
     def undo(self):
-        self.template._geometry = self.old_geometry
+        self.template.geometry = self.old_geometry
 
 class CloneComponentTemplateToSlotCommand(QUndoCommand):
     def __init__(self, registry, template, slot, description="Add Template to Slot"):

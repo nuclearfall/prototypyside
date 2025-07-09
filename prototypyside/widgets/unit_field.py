@@ -69,6 +69,10 @@ class UnitField(QLineEdit):
         else:
             self.clear()
 
+    def on_unit_change(self, display_unit):
+        self.display_unit = display_unit
+        self.setTarget(self.target_item, self.property_name, display_unit)
+
     def setTextFromValue(self, value: UnitStr):
         """
         Sets the displayed text by formatting the given UnitStr value.
@@ -170,7 +174,6 @@ class UnitStrGeometryField(QWidget):
         self.property_name = property_name
         self._display_unit = display_unit
         if isinstance(self.target_item, ComponentElement):
-            print("We have an element")
             self.target_item.element_changed.connect(self.update_from_element)
 
         if self.target_item and self.property_name:
@@ -182,6 +185,10 @@ class UnitStrGeometryField(QWidget):
                 self._clear_fields()
         else:
             self._clear_fields()
+
+    def on_unit_change(self, display_unit):
+        self.display_unit = display_unit
+        self.setTarget(self.target_item, self.property_name, display_unit=display_unit)
 
     def update_from_element(self):
         if self.target_item:

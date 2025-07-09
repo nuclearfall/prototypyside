@@ -10,6 +10,7 @@ from PySide6.QtWidgets import QGraphicsItem
 
 from prototypyside.services.proto_factory import ProtoFactory
 from prototypyside.utils.proto_helpers import get_prefix, issue_pid
+from prototypyside.models.component_template import ComponentTemplate
 
 BASE_NAMES: Dict[str, str] = {
     "ct": "Component Template",
@@ -46,29 +47,46 @@ class ProtoRegistry(QObject):
         return hasattr(obj, 'name') and obj.name is not None and obj.name not in self._unique_names
 
     def generate_name(self, obj: object):
+        pid_prefix = get_prefix(obj.pid)
+
+        # If name already exists and is unique in this registry, preserve it
         if self.has_unique_name(obj):
+            self._unique_names.add(obj.name)
             return obj.name
 
-        pid_prefix = get_prefix(obj.pid)
+        # Determine classification
+        is_local_type = pid_prefix in {"ls", "te", "ie"}
+        is_root_registry = self.parent() is None
+        is_template_clone = hasattr(obj, "template_pid") and obj.template_pid is not None
+
+        # If this registry shouldn't name it, delegate to parent
+        if not is_local_type and not is_template_clone and not is_root_registry:
+            return self.parent().generate_name(obj)
+
+        # Use this registry's counter to assign a name
         base_name = BASE_NAMES.get(pid_prefix, "Object")
         counter = self._name_counts.get(pid_prefix, 0)
 
-        # Refresh unique names from registry
-        existing_names_in_registry = {
-            o.name for o in self._store.values() if hasattr(o, 'name') and o.name is not None
+        # Refresh local uniqueness
+        existing_names = {
+            o.name for o in self._store.values()
+            if hasattr(o, 'name') and o.name is not None
         }
-        self._unique_names.update(existing_names_in_registry)
+        self._unique_names.update(existing_names)
 
+        # Find the next available name
         while True:
             candidate = f"{base_name} {counter}"
             if candidate not in self._unique_names:
                 break
             counter += 1
 
+        # Apply and track the new name
         self._name_counts[pid_prefix] = counter + 1
         obj.name = candidate
         self._unique_names.add(candidate)
         return candidate
+
 
     def create(self, prefix_or_pid: str, **kwargs) -> Any:
         """
@@ -88,11 +106,15 @@ class ProtoRegistry(QObject):
         if not pid:
             raise ValueError("Object must have a .pid attribute")
         if pid in self._store:
-            # Overwrite existing entry
             print(f"Warning: re-registering PID '{pid}'")
-        obj.name = self.generate_name(obj)
+
+        # Only generate a name if it's missing or not unique
+        if not hasattr(obj, "name") or obj.name is None or not self.has_unique_name(obj):
+            self.generate_name(obj)
+
         self._store[pid] = obj
         self.object_registered.emit(obj)
+
 
     def deregister(self, pid: str):
         """
@@ -108,24 +130,41 @@ class ProtoRegistry(QObject):
 
     def clone(self, obj: Any) -> Any:
         """
-        Clone an object (ComponentTemplate or LayoutTemplate), give it a new PID,
-        register it, and clone children (elements or slots) if applicable.
+        Clone an object (ComponentTemplate or LayoutTemplate), assign a new PID,
+        register it, and recursively clone children (elements or slots).
+
+        - If the object is a ComponentTemplate without a template_pid, mark this
+          clone as a clone by setting template_pid = original_pid.
+        - Do not retroactively assign template_pid to originals.
+        - Only add clones (not originals) to root.clone_components.
         """
         if not hasattr(obj, "pid"):
             raise ValueError("Cannot clone object without a 'pid' attribute.")
-        
+
         data = self._factory.to_dict(obj)
         old_pid = data["pid"]
         new_pid = issue_pid(get_prefix(old_pid))
         data["pid"] = new_pid
-        data["name"] = f"{data.get('name', get_prefix(old_pid))}_copy"
 
-        # Clone children if present
-        if data.get("elements") and isinstance(data["elements"], list):
+        template_pid = data.get("template_pid", None)
+        clones = self.root.clone_components
+
+        # If original (no template_pid) and it's a ComponentTemplate, mark clone with template_pid
+        if isinstance(obj, ComponentTemplate) and not template_pid:
+            data["template_pid"] = old_pid
+            clones.append(new_pid)
+
+        # If this is already a clone (has template_pid), also track it (but avoid duplicates)
+        elif template_pid and new_pid not in clones:
+            clones.append(new_pid)
+
+        # Clone children
+        if isinstance(data.get("elements"), list):
             data["elements"] = self.clone_children(data["elements"], issue_pid)
-        elif data.get("slots") in data and isinstance(data["slots"], list):
+        elif isinstance(data.get("slots"), list):
             data["slots"] = self.clone_children(data["slots"], issue_pid)
 
+        # Reconstruct and register the clone
         clone = self._factory.from_dict(data)
         if clone is None:
             raise ValueError("Factory failed to reconstruct cloned object.")
@@ -133,6 +172,7 @@ class ProtoRegistry(QObject):
         self.generate_name(clone)
         self.register(clone)
         return clone
+
         
     def clone_children(self, items: Any, issue_pid) -> Any:
         """
@@ -158,7 +198,6 @@ class ProtoRegistry(QObject):
                 cloned = self.clone(elem)  # Recursively clones via `clone()`
                 new_elements.append(self._factory.to_dict(cloned))
             return new_elements
-
 
     def reinsert(self, pid: str):
         """
@@ -249,7 +288,7 @@ class RootRegistry(ProtoRegistry):
         self._store: Dict[str, Any] = {}
         self._global_orphans: Dict[str, Any] = {}
         self.child_registries: List[ProtoRegistry] = []
-
+        self.clone_components = []
         # watch the system clipboard for copy/cut/paste
         cb: QClipboard = QGuiApplication.clipboard()
         cb.dataChanged.connect(self._on_clipboard_event)

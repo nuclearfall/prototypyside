@@ -1,163 +1,105 @@
-from PySide6.QtWidgets import (
-    QGraphicsScene, QGraphicsItem, QGraphicsSceneMouseEvent, QGraphicsSceneDragDropEvent,
-    QGraphicsRectItem
-)
-from PySide6.QtCore import Qt, QPointF, QRectF, Signal
-from PySide6.QtGui import QColor, QPen, QPainter, QPixmap, QTransform
-
-from prototypyside.config import MEASURE_INCREMENT, LIGHTEST_GRAY, DARKEST_GRAY
-from prototypyside.utils.unit_converter import parse_dimension
-from prototypyside.utils.unit_str import UnitStr
-from prototypyside.utils.unit_str_geometry import UnitStrGeometry
-from prototypyside.utils.graphics_item_helpers import is_movable
-from prototypyside.views.graphics_items import ResizeHandle
-from prototypyside.services.undo_commands import MoveElementCommand, ChangeElementPropertyCommand, ResizeAndMoveElementCommand
-
+# component_graphics_scene.py
+from __future__ import annotations
 from typing import Optional, TYPE_CHECKING
-import math
 
-from prototypyside.utils.qt_helpers import list_to_qrectf
+from PySide6.QtCore    import Qt, QPointF, QRectF, Signal, Slot
+from PySide6.QtGui     import QTransform
+from PySide6.QtWidgets import (
+    QGraphicsScene, QGraphicsItem, QGraphicsSceneMouseEvent,
+    QGraphicsSceneDragDropEvent
+)
+
+from prototypyside.utils.incremental_grid import IncrementalGrid
+from prototypyside.services.undo_commands import MoveElementCommand, ChangeElementPropertyCommand
+from prototypyside.utils.graphics_item_helpers import is_movable
+from prototypyside.models.component_elements import ComponentElement
+
 if TYPE_CHECKING:
-    from prototypyside.views.main_window import MainDesignerWindow
+    from prototypyside.views.component_tab import ComponentTab  
     from prototypyside.models.component_template import ComponentTemplate
-    from prototypyside.models.component_elements import ComponentElement
-else:
-    MainDesignerWindow = object
-    ComponentTemplate = object
-    ComponentElement = object
 
-
-class ComponentGraphicsScene(QGraphicsScene):
-    element_dropped = Signal(QPointF, str)
-    element_cloned = Signal(ComponentElement, QPointF)
-    element_moved = Signal()
-    element_resized = Signal()
+# -------------------------------------------------------------------------
+# Scene
+# -------------------------------------------------------------------------
+class ComponentScene(QGraphicsScene):
+    """Scene that hosts one template (background) + grid + user elements."""
+    # signals used elsewhere in your app
+    element_dropped  = Signal(QPointF, str)
+    element_cloned   = Signal(ComponentElement, QPointF)
+    element_moved    = Signal()
+    element_resized  = Signal(object, str, object, object)
     selectionChanged = Signal()
 
-    def __init__(self, scene_rect: QRectF, parent, tab):
-        super().__init__(scene_rect, parent)
-        self.tab = tab
-        self._template_width_px = int(scene_rect.width())
-        self._template_height_px = int(scene_rect.height())
-        self.setBackgroundBrush(QColor(240, 240, 240))
-        self.dpi = self.tab.template.dpi
-        self._resizing = False
-        self._dragging_item = None
-        self.resize_handle = None
-        self.resizing_element = None
-        self.resize_start_item_geometry = None
-        self.resize_start_item_rect = None
-        self._drag_offset = None
-        self._dragging_start_pos = None
-        self.resize_handle_type = None
-        self.is_snap_to_grid = True
+    # ──────────────────────────────── init ────────────────────────────────
+    def __init__(
+        self,
+        settings,
+        *,
+        grid: "IncrementalGrid",
+        template: "ComponentTemplate",
+        parent=None,
+    ):
+        super().__init__(parent)
 
-        self.selected_item: Optional['ComponentElement'] = None
-        self._max_z_value = 0
-        self.connecting_line: Optional[QGraphicsRectItem] = None
-        self.duplicate_element = None
+        self.settings     = settings
+        #self.tab          = tab
+        self.template  = template          # QGraphicsObject, z = −100
 
-        self.setSceneRect(0, 0, self._template_width_px, self._template_height_px)
+        # 1️⃣  scene rect == template rect
+        self._sync_scene_rect()
 
-    def scene_from_template_dimensions(self, width_px: int, height_px: int):
-        self._template_width_px = width_px
-        self._template_height_px = height_px
-        new_rect = QRectF(0, 0, width_px, height_px)
-        self.setSceneRect(new_rect)
-        self.invalidate(new_rect, QGraphicsScene.BackgroundLayer)
-        self.update()
+        # 2️⃣  add template + grid
+        self.addItem(self.template)
 
-    def drawBackground(self, painter: QPainter, rect: QRectF):
-        super().drawBackground(painter, rect)
-        template_rect = QRectF(0, 0, self._template_width_px, self._template_height_px)
+        self.inc_grid = grid
 
-        main_window: 'MainDesignerWindow' = self.parent()
-        if main_window and hasattr(main_window, 'template') and main_window.template:
-            template: 'ComponentTemplate' = main_window.template
-            if template.background_image_path:
-                bg_pixmap = QPixmap(template.background_image_path)
-                if not bg_pixmap.isNull():
-                    scaled_pixmap = bg_pixmap.scaled(
-                        template_rect.size().toSize(),
-                        Qt.IgnoreAspectRatio,
-                        Qt.SmoothTransformation
-                    )
-                    painter.drawPixmap(template_rect.topLeft(), scaled_pixmap)
-                else:
-                    painter.setBrush(QColor(255, 255, 255))
-                    painter.setPen(Qt.NoPen)
-                    painter.drawRect(template_rect)
-            else:
-                painter.setBrush(QColor(255, 255, 255))
-                painter.setPen(Qt.NoPen)
-                painter.drawRect(template_rect)
-        else:
-            painter.setBrush(QColor(255, 255, 255))
-            painter.setPen(Qt.NoPen)
-            painter.drawRect(template_rect)
+        # React to template-size changes
+        self.template.template_changed.connect(self._on_template_rect_changed)
 
-        self.draw_grid(painter, rect)
+        # internal drag / resize bookkeeping
+        self._resizing            = False
+        self._dragging_item       = None
+        self._dragging_start_pos  = None
+        self._drag_offset         = None
+        self.resize_handle        = None
+        self.resizing_element     = None
+        self.resize_start_geom    = None
+        self.resize_handle_type   = None
 
-        border_pen = QPen(Qt.black, 2)
-        painter.setPen(border_pen)
-        painter.setBrush(Qt.NoBrush)
-        painter.drawRect(template_rect)
+        self.setBackgroundBrush(Qt.lightGray)
 
-    def draw_grid(self, painter, rect):
-        if not getattr(self.parent(), "show_grid", True):
-            return
+    # ─────────────────────────── helpers / utils ──────────────────────────
+    def _sync_scene_rect(self):
+        """Make the scene rect exactly match the template’s bounding rect."""
+        r = self.template.geometry.to("px").rect
+        self.setSceneRect(r)
 
-        # Always use canonical unit string (not UnitStr instance)
-        unit = self.tab.unit
-        dpi = self.tab.dpi
-        levels = sorted(MEASURE_INCREMENT[unit].keys(), reverse=True)
-        num_levels = len(levels)
+    @Slot()
+    def _on_template_rect_changed(self):
+        """Keep scene and grid in sync when the template is resized."""
+        self._sync_scene_rect()
+        self.inc_grid.prepareGeometryChange()
+        self.inc_grid.update()
 
-        gray_range = LIGHTEST_GRAY - DARKEST_GRAY
+    # Public helper for FSM / tools
+    def snap_to_grid(self, pos: QPointF, level: int = 3) -> QPointF:
+        return self.inc_grid.snap_to_grid(pos, level)
 
-        for i, level in enumerate(levels):
-            spacing = self.get_grid_spacing(level)
-
-            gray_value = LIGHTEST_GRAY - int(i * (gray_range / max(1, num_levels - 1)))
-            pen = QPen(QColor(gray_value, gray_value, gray_value))
-            painter.setPen(pen)
-
-            left = int(rect.left())
-            right = int(rect.right())
-            top = int(rect.top())
-            bottom = int(rect.bottom())
-
-            x = left - (left % spacing)
-            while x < right:
-                painter.drawLine(x, top, x, bottom)
-                x += spacing
-
-            y = top - (top % spacing)
-            while y < bottom:
-                painter.drawLine(left, y, right, y)
-                y += spacing
-
-    def get_grid_spacing(self, level: int) -> float:
-        unit = self.tab.unit
-        dpi = self.tab.template.dpi
-        increment = MEASURE_INCREMENT[unit].get(level)
-        if increment is None:
-            raise ValueError(f"Invalid grid level {level} for unit '{unit}'")
-        # This is the physical size of the grid interval in unit, convert to px:
-        spacing_px = UnitStr(increment, dpi=dpi).to("px", dpi=dpi)
-        return spacing_px
-
-    def snap_to_grid(self, pos: QPointF) -> QPointF:
-        if self.is_snap_to_grid:
-            spacing = self.get_grid_spacing(level=3)
-            x = round(pos.x() / spacing) * spacing
-            y = round(pos.y() / spacing) * spacing
-            return QPointF(x, y)
-        return pos
-
-    def apply_snap(self, pos: QPointF, grid_size: float = 10.0) -> QPointF:
-        return self.snap_to_grid(pos, grid_size)
-
+    def select_exclusive(self, element: QGraphicsItem):
+        """
+        Deselect all items except `element`, and select `element`.
+        """
+        # Deselect all other items
+        for item in self.selectedItems():
+            if item is not element:
+                item.setSelected(False)
+        # Select the desired element (if not already)
+        if element is not None and not element.isSelected():
+            element.setSelected(True)
+        # Emit selectionChanged signal if you want property panel, etc. to update
+        self.selectionChanged.emit()
+    # ───────────────────────────── mouse events ───────────────────────────
+    # (unchanged except calls to self.snap_to_grid keep working)
     def mousePressEvent(self, event: QGraphicsSceneMouseEvent):
         item = self.itemAt(event.scenePos(), self.views()[0].transform())
 
@@ -176,6 +118,7 @@ class ComponentGraphicsScene(QGraphicsScene):
         if event.modifiers() & Qt.AltModifier and is_movable(item):
             # emit both the item to clone and the raw scene‐pos
             self._alt_drag_started = True
+            print(f"Item: {item}, event: {event} and scenePos {event.scenePos()}")
             self.element_cloned.emit(item, event.scenePos())
             event.accept()
             return
@@ -190,9 +133,9 @@ class ComponentGraphicsScene(QGraphicsScene):
             snapped_item_pos_at_press = self.snap_to_grid(item.pos())
             snapped_mouse_press_pos = self.snap_to_grid(event.scenePos())
             self._drag_offset = snapped_mouse_press_pos - snapped_item_pos_at_press
+            print (f"On click, snapped item at press: {self.snapped_item_pos_at_press}, snapped mouse press pos {self.snapped_mouse_press_pos}, and drag offset {self._drag_offset}")
             self._dragging_start_pos = QPointF(item.x(), item.y()) # Store the item's position before drag
             item.setPos(snapped_item_pos_at_press) # Snap item to grid immediately
-            print(f"Item {item} is being moved or resized.")
             event.accept()
             return
 
@@ -205,7 +148,6 @@ class ComponentGraphicsScene(QGraphicsScene):
             starting_scene_pos = self.resizing_element.mapToScene(self.resize_handle.pos())
             delta_scene = snapped_scene_pos - starting_scene_pos
             scene_rect = self.resizing_element.mapRectToScene(self.resizing_element.geometry.px.rect)
-            print(f"In mouseMoveEvent, resizing at {self.resizing_element.geometry}")
             self.resizing_element.resize_from_handle(
                 self.resize_handle.handle_type,
                 delta_scene,
@@ -218,13 +160,13 @@ class ComponentGraphicsScene(QGraphicsScene):
             # Calculate the new snapped position for the item based on the snapped mouse position
             # and the stored snapped offset.
             snapped_current_mouse_pos = self.snap_to_grid(event.scenePos())
+            print(f"Current drag offset =  {self._drag_offset}")
             new_snapped_pos = snapped_current_mouse_pos - self._drag_offset
             self._dragging_item.setPos(new_snapped_pos)
             event.accept()
             return
 
         super().mouseMoveEvent(event)
-
 
     def mouseReleaseEvent(self, event: QGraphicsSceneMouseEvent):
         # Commit move to undo stack (if needed)
@@ -237,17 +179,12 @@ class ComponentGraphicsScene(QGraphicsScene):
                 
         elif self._resizing and self.resizing_element and self.resize_start_item_geometry:
             # The new geometry is the current geometry of the element after resizing
-            new_geometry = self.resizing_element.geometry
-            old_geometry = self.resizing_element.geometry = self.resize_start_item_geometry
+            new = self.resizing_element.geometry
+            old = self.resizing_element.geometry = self.resize_start_item_geometry
             # The old geometry was saved when the mouse press began
             # Create the command with the CORRECT new_geometry and old_geometry order
-            command = ChangeElementPropertyCommand(
-                self.resizing_element,
-                "geometry",
-                new_geometry,
-                old_geometry,
-            )
-            self.tab.undo_stack.push(command)
+            self.element_resized.emit(self.resizing_element, "geometry", new, old)
+
 
         # Reset state
         self._resizing = False
@@ -291,29 +228,156 @@ class ComponentGraphicsScene(QGraphicsScene):
         else:
             super().dropEvent(event)
 
+# from PySide6.QtWidgets import (
+#     QGraphicsScene, QGraphicsItem, QGraphicsSceneMouseEvent, QGraphicsSceneDragDropEvent,
+#     QGraphicsRectItem
+# )
+# from PySide6.QtCore import Qt, QPointF, QRectF, Signal, Slot
+# from PySide6.QtGui import QColor, QPen, QPainter, QPixmap, QTransform
 
-    def get_selected_element(self) -> Optional['ComponentElement']:
-        """
-        Returns the first selected ComponentElement in the scene, if any.
-        """
-        selected_items = self.selectedItems()
-        # Filter for ComponentElement type, assuming it's the primary interactive item
-        for item in selected_items:
-            if isinstance(item, ComponentElement):
-                return item
-        return None
+# # from prototypyside.config import MEASURE_INCREMENT, LIGHTEST_GRAY, DARKEST_GRAY
+# from prototypyside.utils.unit_str import UnitStr
+# from prototypyside.utils.unit_str_geometry import UnitStrGeometry
+# from prototypyside.utils.graphics_item_helpers import is_movable
+# from prototypyside.views.graphics_items import ResizeHandle
+# from prototypyside.services.undo_commands import MoveElementCommand, ChangeElementPropertyCommand, ResizeAndMoveElementCommand
 
-    def select_exclusive(self, element: QGraphicsItem):
-        """
-        Deselect all items except `element`, and select `element`.
-        """
-        # Deselect all other items
-        for item in self.selectedItems():
-            if item is not element:
-                item.setSelected(False)
-        # Select the desired element (if not already)
-        if element is not None and not element.isSelected():
-            element.setSelected(True)
-        # Emit selectionChanged signal if you want property panel, etc. to update
-        self.selectionChanged.emit()
+# from typing import Optional, TYPE_CHECKING
+# import math
 
+# from prototypyside.utils.qt_helpers import list_to_qrectf
+# if TYPE_CHECKING:
+#     from prototypyside.views.main_window import MainDesignerWindow
+#     from prototypyside.models.component_template import ComponentTemplate
+#     from prototypyside.models.component_elements import ComponentElement
+# else:
+#     MainDesignerWindow = object
+#     ComponentTemplate = object
+#     ComponentElement = object
+
+
+# class ComponentGraphicsScene(QGraphicsScene):
+#     element_dropped = Signal(QPointF, str)
+#     element_cloned = Signal(ComponentElement, QPointF)
+#     element_moved = Signal()
+#     element_resized = Signal()
+#     selectionChanged = Signal()
+
+#     def __init__(self, settings, parent, tab):
+#         super().__init__(parent)
+#         self.tab = tab
+#         self.template = tab.template
+#         self._template_width_px = int(scene_rect.width())
+#         self._template_height_px = int(scene_rect.height())
+#         self.setBackgroundBrush(QColor(240, 240, 240))
+#         self.dpi = self.tab.template.dpi
+#         self.display_unit = self.tab.settings.display_unit
+#         self._resizing = False
+#         self._dragging_item = None
+#         self.resize_handle = None
+#         self.resizing_element = None
+#         self.resize_start_item_geometry = None
+#         self.resize_start_item_rect = None
+#         self._drag_offset = None
+#         self._dragging_start_pos = None
+#         self.resize_handle_type = None
+#         self.is_snap_to_grid = True
+#         self.show_grid = True
+
+#         self.selected_item: Optional['ComponentElement'] = None
+#         self._max_z_value = 0
+#         self.connecting_line: Optional[QGraphicsRectItem] = None
+#         self.duplicate_element = None
+
+#         self.setSceneRect(0, 0, self._template_width_px, self._template_height_px)
+
+#     def scene_from_template_dimensions(self, width_px: int, height_px: int):
+#         self._template_width_px = width_px
+#         self._template_height_px = height_px
+#         new_rect = QRectF(0, 0, width_px, height_px)
+#         self.setSceneRect(new_rect)
+#         self.invalidate(new_rect, QGraphicsScene.BackgroundLayer)
+#         self.update()
+
+#     # def drawBackground(self, painter: QPainter, rect: QRectF) -> None:
+#     #     painter.save()
+#     #     painter.setRenderHint(QPainter.Antialiasing)
+
+#     #     # 1. Template (fills the background)
+#     #     if not self._template.isNull():
+#     #         painter.drawPixmap(rect, self._template,
+#     #                            self._template.rect())  # scaled-to-fit
+
+#     #     # 2. Grid over the template
+#     #     if self._show_grid and self._grid_spacing > 0:
+#     #         pen = QPen(QColor(0, 0, 0, 50), 0)       # cosmetic, semi-transparent
+#     #         painter.setPen(pen)
+
+#     #         step = self._grid_spacing
+#     #         left   = int(rect.left())  - (int(rect.left())  % step)
+#     #         top    = int(rect.top())   - (int(rect.top())   % step)
+#     #         right  = int(rect.right())
+#     #         bottom = int(rect.bottom())
+
+#     #         # vertical lines
+#     #         x = left
+#     #         while x <= right:
+#     #             painter.drawLine(x, top, x, bottom)
+#     #             x += step
+
+#     #         # horizontal lines
+#     #         y = top
+#     #         while y <= bottom:
+#     #             painter.drawLine(left, y, right, y)
+#     #             y += step
+
+#     #     painter.restore()
+
+
+
+    # def get_grid_spacing(self, level: int) -> float:
+    #     increment = MEASURE_INCREMENT[self.display_unit][level]
+    #     # tell UnitStr that `increment` is in the current unit:
+    #     spacing_px = UnitStr(increment,
+    #                          unit=self.display_unit,
+    #                          dpi=self.dpi) \
+    #                 .to("px", dpi=self.dpi)
+    #     return spacing_px
+
+#     # def snap_to_grid(self, pos: QPointF) -> QPointF:
+#     #     if self.is_snap_to_grid:
+#     #         spacing = self.get_grid_spacing(level=3)
+#     #         x = round(pos.x() / spacing) * spacing
+#     #         y = round(pos.y() / spacing) * spacing
+#     #         return QPointF(x, y)
+#     #     return pos
+
+#     # def apply_snap(self, pos: QPointF, grid_size: float = 10.0) -> QPointF:
+#     #     return self.snap_to_grid(pos, grid_size)
+
+
+
+
+#     def get_selected_element(self) -> Optional['ComponentElement']:
+#         """
+#         Returns the first selected ComponentElement in the scene, if any.
+#         """
+#         selected_items = self.selectedItems()
+#         # Filter for ComponentElement type, assuming it's the primary interactive item
+#         for item in selected_items:
+#             if isinstance(item, ComponentElement):
+#                 return item
+#         return None
+
+
+
+#     @Slot(str)
+#     def on_unit_change(self, unit: str):
+#         """
+#         Called when the user switches display units.
+#         Updates anything in this scene that depends on `self.display_unit`,
+#         then forces a redraw of the background (grid).
+#         """
+#         self.display_unit = unit
+#         # force the background (and grid) to repaint
+#         self.invalidate(self.sceneRect(), QGraphicsScene.BackgroundLayer)
