@@ -4,16 +4,28 @@ from PySide6.QtGui import (QColor, QFont, QPen, QBrush, QTextDocument, QPainter,
 from PySide6.QtWidgets import QGraphicsItem, QGraphicsObject, QGraphicsSceneDragDropEvent
 from typing import Optional, Dict, Any
 from prototypyside.views.graphics_items import ResizeHandle
-from prototypyside.utils.qt_helpers import qrectf_to_list, list_to_qrectf
+from prototypyside.utils.qt_helpers import qrectf_to_list, list_to_qrectf, qfont_from_string
 from prototypyside.utils.unit_str import UnitStr
 from prototypyside.utils.unit_str_geometry import UnitStrGeometry
 from prototypyside.utils.ustr_helpers import with_rect, with_pos
 from prototypyside.utils.style_serialization_helpers import save_style, load_style
 from prototypyside.config import HandleType
-
+from prototypyside.utils.proto_helpers import get_prefix, issue_pid
 
 class ComponentElement(QGraphicsObject):
-    element_changed = Signal()
+    _serializable_fields = {
+        # dict_key      : (from_fn,                 to_fn,                   default)
+        "template_pid": (lambda v: v,              lambda v: v,            None),
+        "name":         (lambda v: v,              lambda v: v,            ""),
+        "z_order":      (int,                      lambda z: z,            0),
+        "color":        (QColor.fromRgba,          lambda c: c.rgba(),     None),
+        "bg_color":     (QColor.fromRgba,          lambda c: c.rgba(),     None),
+        "border_color": (QColor.fromRgba,          lambda c: c.rgba(),     None),
+        "border_width": (UnitStr.from_dict,        lambda u: u.to_dict(),     UnitStr("1pt")),
+        "alignment":    (int,                      lambda a: a,            None),
+        "content":      (lambda v: v,              lambda v: v,            ""),
+    }
+    item_changed = Signal()
 
     def __init__(self, pid, geometry: UnitStrGeometry, template_pid = None, 
             parent: Optional[QGraphicsObject] = None, name: str = None):
@@ -67,7 +79,7 @@ class ComponentElement(QGraphicsObject):
         print(f"[SETTER] pos set to {self._geometry.px.pos}")
         self._geometry = new_geom
         super().setPos(self._geometry.px.pos)
-        # self.element_changed.emit()
+        # self.item_changed.emit()
         self.update()
 
     def boundingRect(self) -> QRectF:
@@ -80,13 +92,11 @@ class ComponentElement(QGraphicsObject):
             return
         self.prepareGeometryChange()
         with_rect(self._geometry, new_rect)
-        # self.element_changed.emit()
-        # self.update()
 
     def itemChange(self, change: QGraphicsItem.GraphicsItemChange, value):
         # This is called when the scene moves the item.
         if change == QGraphicsItem.ItemPositionChange and value != self.pos():
-            # Block signals to prevent a recursive loop if a connected slot
+            # Block signals to prevent a recursive loop if a connected item
             # also tries to set the position.
             signals_blocked = self.signalsBlocked()
             self.blockSignals(True)
@@ -107,7 +117,7 @@ class ComponentElement(QGraphicsObject):
     def pid(self, pid_str):
         if self._pid != pid_str:
             self._pid = pid_str
-            self.element_changed.emit()
+            self.item_changed.emit()
             self.update()
 
     @property
@@ -122,7 +132,7 @@ class ComponentElement(QGraphicsObject):
     def name(self, value):
         if self._name != value:
             self._name = value
-            self.element_changed.emit()
+            self.item_changed.emit()
     
     @property
     def color(self) -> QColor:
@@ -132,7 +142,7 @@ class ComponentElement(QGraphicsObject):
     def color(self, value: QColor):
         if self._color != value:
             self._color = value
-            self.element_changed.emit()
+            self.item_changed.emit()
             self.update()
 
     @property
@@ -143,7 +153,7 @@ class ComponentElement(QGraphicsObject):
     def bg_color(self, value: QColor):
         if self._bg_color != value:
             self._bg_color = value
-            self.element_changed.emit()
+            self.item_changed.emit()
             self.update()
 
     @property
@@ -154,7 +164,7 @@ class ComponentElement(QGraphicsObject):
     def border_color(self, value: QColor):
         if self._border_color != value:
             self._border_color = value
-            self.element_changed.emit()
+            self.item_changed.emit()
             self.update()
 
     @property
@@ -165,12 +175,12 @@ class ComponentElement(QGraphicsObject):
     def border_width(self, value):
         # Accept a UnitStr, string, or number (as current unit)
         self._border_width = value
-        self.element_changed.emit()
+        self.item_changed.emit()
         self.update()
         
         if getattr(self, "_border_width", None) != bw:
             self._border_width = bw
-            self.element_changed.emit()
+            self.item_changed.emit()
             self.update()
 
     @property
@@ -181,7 +191,7 @@ class ComponentElement(QGraphicsObject):
     def alignment(self, value: Qt.AlignmentFlag):
         if self._alignment != value:
             self._alignment = value
-            self.element_changed.emit()
+            self.item_changed.emit()
             self.update()
 
     @property
@@ -191,7 +201,7 @@ class ComponentElement(QGraphicsObject):
     @content.setter
     def content(self, content: str):
         self._content = content
-        self.element_changed.emit()
+        self.item_changed.emit()
         self.update()
 
     @property
@@ -280,14 +290,13 @@ class ComponentElement(QGraphicsObject):
 
         # 7. Final updates
         self.update_handles()
-        self.element_changed.emit()
+        self.item_changed.emit()
         self.update()
 
     def update_from_merge_data(merge_data):
         self.content = merge_data
         self.elment_changed.emit()
         self.update()
-
 
     def paint(self, painter: QPainter, option, widget=None):
         rect = self.boundingRect()
@@ -315,59 +324,36 @@ class ComponentElement(QGraphicsObject):
         if self.handles_visible:
             self.draw_handles()
 
-    def to_dict(self):
-        """Serialize the element to a dictionary with logical units."""
-        return {
-            "pid": self._pid,
-            "template_pid": self._template_pid,
-            "name": self._name,
-            "geometry": self._geometry.dict(),
-            "z_order": self.zValue(),
-            "color": self._color.rgba() if self._color else None,  # Modified for alpha
-            "bg_color": self._bg_color.rgba() if self._bg_color else None, # Modified for alpha
-            "border_color": self._border_color.rgba() if self._border_color else None, # Modified for alpha
-            "border_width": self._border_width.dict(),
-            "alignment": int(self._alignment) if self._alignment is not None else None,
-            "content": self._content if self._content is not None else "",
+    def to_dict(self) -> Dict[str, Any]:
+        data = {
+            "pid":      self._pid,
+            "geometry": self._geometry.to_dict(),
         }
+        for key, (_, to_fn, default) in self._serializable_fields.items():
+            val = getattr(self, f"_{key}", default)
+            data[key] = to_fn(val) if (val is not None) else None
+        return data
 
     @classmethod
-    def from_dict(cls, data):
+    def from_dict(cls, data: Dict[str, Any], registry, is_clone=False) -> "ElementBase":
+        geom = UnitStrGeometry.from_dict(data["geometry"])
         pid = data.get("pid")
-        geometry = UnitStrGeometry.from_dict(data.get("geometry"))
-        template_pid = data.get("template_pid")
-        name = data.get("name", None)
-        obj = cls(
-            pid=pid,
-            geometry=geometry,
-            template_pid=template_pid,
-            parent=None,
-            name=name
-        )
-        # Restore zValue
-        obj.setZValue(data.get("z", 0))
-        # Restore style and other fields
-        if "color" in data and data["color"] is not None:
-            obj._color = QColor.fromRgba(data["color"])
-        if "bg_color" in data and data["bg_color"] is not None:
-            obj._bg_color = QColor.fromRgba(data["bg_color"])
-        if "border_color" in data and data["border_color"] is not None:
-            obj._border_color = QColor.fromRgba(data["border_color"])
-        if "border_width" in data and data["border_width"]:
-            obj._border_width = UnitStr.from_dict(data.get("border_width"))
-        if "alignment" in data and data["alignment"] is not None:
-            obj._alignment = int(data["alignment"])
-        if "content" in data and data["content"] is not None:
-            obj._content = data["content"]
-        # Handle subclass-specific fields (see below)
-        return obj
-
-    def clone(self):
-        data = self.to_dict()
-        prefix = get_prefix(data.get("pid"))
-        data["pid"] = issue_pid(prefix)
-        data["name"] = f"{data.get('name', 'element')}_copy"
-        return type(self).from_dict(data)
+        prefix = get_prefix(pid)
+        if is_clone:
+            pid = issue_pid(prefix)
+        obj = ImageElement if prefix == 'ie' else TextElement
+        inst = obj(pid=pid,
+                   geometry=geom,
+                   template_pid=None,  # will be set below if present
+                   name=None)          # ditto
+        # now restore everything via our metadata
+        for key, (from_fn, _, default) in cls._serializable_fields.items():
+            raw = data.get(key, default)
+            if raw is None:
+                continue
+            setattr(inst, f"_{key}", from_fn(raw))
+        registry.register(inst)
+        return inst
         
     @property
     def handles_visible(self) -> bool:
@@ -415,6 +401,16 @@ class ComponentElement(QGraphicsObject):
 
 
 class TextElement(ComponentElement):
+    _subclass_serializable = {
+        # maps attribute name -> (dict_key, from_fn, to_fn, default)
+        "font": (
+            "font",
+            qfont_from_string,
+            lambda f: f.toString(),
+            QFont("Arial", 12)
+        )
+    }
+
     def __init__(self, pid, geometry: UnitStrGeometry, template_pid = None, 
             parent: Optional[QGraphicsObject] = None, name: str = None):
         super().__init__(pid, geometry, template_pid, parent, name)
@@ -436,10 +432,25 @@ class TextElement(ComponentElement):
             self._font = value
             self._text_document.setDefaultFont(self._font) # Update document's font
             self.update_text_document_layout() # Recalculate layout based on new font
-            self.element_changed.emit()
+            self.item_changed.emit()
             self.update()
 
     # --- End Text-specific Property Getters and Setters ---
+
+    def to_dict(self):
+        data = super().to_dict()  # ← include base fields
+        for attr, (key, _, to_fn, default) in self._subclass_serializable.items():
+            val = getattr(self, f"_{attr}", default)
+            data[key] = to_fn(val)
+        return data
+
+    @classmethod
+    def from_dict(cls, data: dict, registry, is_clone=False):
+        inst = super().from_dict(data, registry, is_clone)
+        for attr, (key, from_fn, _, default) in cls._subclass_serializable.items():
+            raw = data.get(key, default)
+            setattr(inst, f"_{attr}", from_fn(raw))
+        return inst
 
     def paint(self, painter: QPainter, option, widget=None):
         # Call base class paint to handle borders and basic styling first
@@ -466,22 +477,14 @@ class TextElement(ComponentElement):
 
         painter.restore()
 
-
-    def to_dict(self):
-        data = super().to_dict()
-        data['font'] = self.font.toString()  # Serialize QFont to string
-        return data
-
-    @classmethod
-    def from_dict(cls, data):
-        element = super().from_dict(data)
-        font_string = data.get("font", "Arial,12")
-        font = QFont()
-        font.fromString(font_string)
-        element.font = font
-        return element
-
 class ImageElement(ComponentElement):
+    _subclass_serializable = {
+        "keep_aspect": ("keep_aspect",
+                        lambda x: bool(x),
+                        lambda b: b,
+                        True),
+    }
+
     def __init__(self, pid, geometry: UnitStrGeometry, template_pid = None, 
             parent: Optional[QGraphicsObject] = None, name: str = None):
         super().__init__(pid, geometry, template_pid, parent, name)
@@ -511,7 +514,7 @@ class ImageElement(ComponentElement):
         except Exception as e:
             print(f"Error loading image '{new_content}': {e}")
             self._pixmap = None
-        self.element_changed.emit()
+        self.item_changed.emit()
         self.update()
 
     # --- Image-specific Property Getters and Setters ---
@@ -523,26 +526,14 @@ class ImageElement(ComponentElement):
     def keep_aspect(self, value: bool):
         if self._keep_aspect != value:
             self._keep_aspect = value
-            self.element_changed.emit()
+            self.item_changed.emit()
             self.update()
 
     # --- End Image-specific Property Getters and Setters ---
-    def to_dict(self):
-        data = super().to_dict()
-        data['keep_aspect'] = self.keep_aspect
-        data['content'] = self._content
-        return data
-
-    @classmethod
-    def from_dict(cls, data):
-        element = super().from_dict(data)
-        element.keep_aspect = data.get("keep_aspect", True)
-        element.content = data.get("content", None)
-        return element
 
     def paint(self, painter: QPainter, option, widget=None):
         super().paint(painter, option, widget)
-        print(f"Before drawing, the element's contents are {self._content}")
+        print(f"Before drawing, the item's contents are {self._content}")
         rect = self.boundingRect()
         size = self.geometry.px.size
         size = QSize(size.width(), size.height())
@@ -571,6 +562,21 @@ class ImageElement(ComponentElement):
             font.setItalic(True)
             painter.setFont(font)
             painter.drawText(rect, Qt.AlignCenter, "Drop Image\nor Double Click to Set")
+
+    def to_dict(self):
+        data = super().to_dict()  # ← include base fields
+        for attr, (key, _, to_fn, default) in self._subclass_serializable.items():
+            val = getattr(self, f"_{attr}", default)
+            data[key] = to_fn(val)
+        return data
+
+    @classmethod
+    def from_dict(cls, data: dict, registry, is_clone=False):
+        inst = super().from_dict(data, registry, is_clone)
+        for attr, (key, from_fn, _, default) in cls._subclass_serializable.items():
+            raw = data.get(key, default)
+            setattr(inst, f"_{attr}", from_fn(raw))
+        return inst
 
     def dragEnterEvent(self, event: QGraphicsSceneDragDropEvent):
         if event.mimeData().hasUrls():

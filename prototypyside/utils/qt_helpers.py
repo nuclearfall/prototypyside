@@ -31,6 +31,11 @@ def qfont_to_dict(font: QFont) -> Dict[str, Any]:
         'strikeOut': font.strikeOut()
     }
 
+def qfont_from_string(s: str) -> QFont:
+    f = QFont()
+    f.fromString(s)
+    return f
+    
 def dict_to_qfont(data: Dict[str, Any]) -> QFont:
     if not isinstance(data, dict):
         return QFont("Arial", 12)  # Safe default if passed a bool or None

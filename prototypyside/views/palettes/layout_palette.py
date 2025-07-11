@@ -14,7 +14,6 @@ class LayoutPalette(QWidget):
 
     def __init__(self, registry, parent=None):
         super().__init__(parent)
-        # registry is the global registry
         self.registry = registry
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
@@ -36,7 +35,8 @@ class LayoutPalette(QWidget):
     def refresh(self):
         """(Re)populate the list with all open component templates."""
         self.list_widget.clear()
-        existing_components = self.registry.get_global_by_type("ct")
+        existing_components = self.registry.global_get_by_prefix("ct")
+        print(existing_components)
         for obj in existing_components:
             self._add_component_item(obj)
 

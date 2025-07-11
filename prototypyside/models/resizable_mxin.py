@@ -78,4 +78,4 @@ class ResizableMixin:
         self.prepareGeometryChange()
         self.setRect(rect)
         self.update_handle_positions()
-        self.element_changed.emit()
+        self.item_changed.emit()

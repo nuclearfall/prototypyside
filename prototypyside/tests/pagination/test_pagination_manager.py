@@ -31,13 +31,13 @@ class DummyComponentTemplate:
         self.copies = copies                # int for StaticComponent
 
 class DummyLayoutTemplate:
-    def __init__(self, slots):
-        self.layout_slots = slots
+    def __init__(self, items):
+        self.items = items
 
 # ------------------------------------------------------------
 # Bring in the helpers and PaginationManager under test
 # ------------------------------------------------------------
-from prototypyside.utils.pagination_helpers import get_component_mode, get_required_instances, count_slots
+from prototypyside.utils.pagination_helpers import get_component_mode, get_required_instances, count_items
 from prototypyside.services.pagination_manager import PaginationManager
 from prototypyside.services.merge_manager import MergeManager
 
@@ -59,8 +59,8 @@ def test_helper_modes_and_counts():
 
     # simple 1×2 template
     lt = DummyLayoutTemplate([DummyLayoutSlot(static_t), DummyLayoutSlot(merge_t)])
-    assert count_slots(lt, static_t) == 1
-    assert count_slots(lt, merge_t) == 1
+    assert count_items(lt, static_t) == 1
+    assert count_items(lt, merge_t) == 1
 
 # ------------------------------------------------------------
 # Pagination scenarios
@@ -83,7 +83,7 @@ def test_static_component_pagination(copies, expected_pages):
 
 
 def test_merge_component_45_rows():
-    """45 data rows, 9 slots per page ⇒ 5 pages."""
+    """45 data rows, 9 items per page ⇒ 5 pages."""
     rows = [{"id": i} for i in range(45)]
     merge_t = DummyComponentTemplate("ct_merge", csv_rows=rows)
     lt = build_grid(3, 3, merge_t)
@@ -95,7 +95,7 @@ def test_merge_component_45_rows():
     assert len(pm) == 5
     # All pages but the last should be full
     for page in pm.iter_pages():
-        filled = [comp for _slot, comp in page if comp]
+        filled = [comp for _item, comp in page if comp]
         if page is not pm.get_page(len(pm)-1):
             assert len(filled) == 9
 
@@ -109,8 +109,8 @@ def test_mixed_rebalancing_example():
     tB = DummyComponentTemplate("ct_B", csv_rows=b_rows)
     tC = DummyComponentTemplate("ct_C", copies=999)  # effectively unlimited static
 
-    slots = [DummyLayoutSlot(tA)] * 4 + [DummyLayoutSlot(tB)] * 2 + [DummyLayoutSlot(tC)] * 3
-    lt = DummyLayoutTemplate(slots)
+    items = [DummyLayoutSlot(tA)] * 4 + [DummyLayoutSlot(tB)] * 2 + [DummyLayoutSlot(tC)] * 3
+    lt = DummyLayoutTemplate(items)
 
     pm = PaginationManager(lt, DummyRegistry(), MergeManager())
     pm.generate()

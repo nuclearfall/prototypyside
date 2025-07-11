@@ -6,7 +6,7 @@ from PySide6.QtWidgets import (
 
 
 class ElementPalette(QListWidget):
-    element_type_selected = Signal(str)
+    item_type_selected = Signal(str)
 
     def __init__(self, parent=None):
         super().__init__()
@@ -25,10 +25,10 @@ class ElementPalette(QListWidget):
         item.setData(Qt.UserRole, prefix)
         self.addItem(item)
 
-    def on_element_type_selected(self, prefix: str):
+    def on_item_type_selected(self, prefix: str):
         print(f"We've selected {prefix}")
-        self._pending_element_prefix = prefix
-        self.status_message_signal.emit(f"Selected element prefix: {prefix}", "info", 3000)
+        self._pending_item_prefix = prefix
+        self.status_message_signal.emit(f"Selected item prefix: {prefix}", "info", 3000)
 
         if hasattr(self.scene, "set_tool_mode"):
             self.scene.set_tool_mode(prefix)
@@ -37,7 +37,7 @@ class ElementPalette(QListWidget):
         print("Has an Item been clicked?")
         etype = item.data(Qt.UserRole)
         print("Anything?", etype)
-        self.on_element_type_selected.emit(etype)
+        self.on_item_type_selected.emit(etype)
 
     def startDrag(self):
         item = self.currentItem()

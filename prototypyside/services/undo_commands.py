@@ -11,55 +11,55 @@ class AddSlotCommand(QUndoCommand):
     def __init__(self, registry, template):
         self.template = template
         self.registry = registry
-        self.slot = None
+        self.item = None
 
     def undo(self):
-        self.registry.deregister(self.slot.pid)
+        self.registry.deregister(self.item.pid)
 
     def redo(self):
-        if slot is None:
-            self.slot = self.registry.create("ls", tpid=self.template.pid, cpid=None, parent=self.template)
+        if item is None:
+            self.item = self.registry.create("ls", tpid=self.template.pid, cpid=None, parent=self.template)
         else:
-            self.registry.reinsert(self.slot)
+            self.registry.reinsert(self.item)
 
 
 # This method doesn't require adding the template to the scene.
 # Instead when dropped, it also creates a ComponentInstance which will Render
 # and adds that to the scene. The ComponentInstance renders the Template.
 class CreateComponentCommand(QUndoCommand):
-    def __init__(self, component, tab, slot, description="Clone Element"):
+    def __init__(self, component, tab, item, description="Clone Element"):
         super().__init__(description)
         self.tab = tab
         self.component = component
         self.registry = tab.registry
         self.scene = tab.scene
-        self.slot = slot
+        self.item = item
 
         self.clone = None
-        self.clone_elements = []
+        self.clone_items = []
 
     def redo(self):
         if self.clone is None:
             self.clone = self.registry.clone(self.component)
-            self.clone.setParentItem(self.slot)
+            self.clone.setParentItem(self.item)
 
-            self.clone_elements = self.registry.clone_all(self.component.elements)
+            self.clone_items = self.registry.clone_all(self.component.items)
 
-            for ce in self.clone_elements:
-                self.clone.add_element(ce)
+            for ce in self.clone_items:
+                self.clone.add_item(ce)
                 ce.setParentItem(self.clone)
                 self.scene.addItem(ce)
         else:
             self.registry.reinsert(self.clone.pid)
-            for element in self.clone_elemnts:
-                self.registry.reinsert(element.pid)
+            for item in self.clone_elemnts:
+                self.registry.reinsert(item.pid)
 
     def undo(self):
-        for ce in self.clone_elements:
+        for ce in self.clone_items:
             self.registry.deregister(ce.pid)
             self.scene.removeItem(ce)
 
-        self.slot.content = None
+        self.item.content = None
         self.registry.deregister(self.clone.pid)
         self.scene.removeItem(self.clone)
 
@@ -71,54 +71,54 @@ class AddElementCommand(QUndoCommand):
         self.registry = tab.registry
         self.tab = tab
         self.geometry = geometry
-        self.element = None
+        self.item = None
 
     def redo(self):
-        if self.element is None:
+        if self.item is None:
             # Convert default width/height (in inches) to the current logical unit
-            self.element = self.tab.registry.create(
+            self.item = self.tab.registry.create(
                 self.prefix,
                 geometry=self.geometry,
                 template_pid = self.tab.template.pid,
                 parent=self.tab.template,
                 name=None
             )
-            self.element.setRect(self.geometry.px.rect)
-            self.tab.template.add_element(self.element)
-            self.element.setParentItem(self.tab.template)
+            # self.item.setRect(self.geometry.px.rect)
+            self.tab.template.add_item(self.item)
+            self.item.setParentItem(self.tab.template)
 
-        elif self.element is not None and self.tab.registry.is_orphan(self.element.pid):
-            self.tab.registry.reinsert(self.element.pid)
+        elif self.item is not None and self.tab.registry.is_orphan(self.item.pid):
+            self.tab.registry.reinsert(self.item.pid)
 
-        if self.element.scene() is None:
-            self.tab.scene.addItem(self.element)
+        if self.item.scene() is None:
+            self.tab.scene.addItem(self.item)
 
-        scene_pos = self.element.pos()
+        scene_pos = self.item.pos()
         # Snap to grid if enabled (in px, so reconvert)
         if self.tab.snap_to_grid:
-            self.element.setPos(self.tab.scene.snap_to_grid(scene_pos))
+            self.item.setPos(self.tab.scene.snap_to_grid(scene_pos))
 
         # For QGraphicsItem, setPos always uses px
-        visual_offset = self.element.geometry.px.rect.topLeft()
-        self.element.setPos(scene_pos - visual_offset)
-        self.element.setSelected(True)
+        visual_offset = self.item.geometry.px.rect.topLeft()
+        self.item.setPos(scene_pos - visual_offset)
+        self.item.setSelected(True)
         self.tab.update_layers_panel()
 
     def undo(self):
-        self.tab.registry.deregister(self.element.pid)
-        self.tab.scene.removeItem(self.element)
+        self.tab.registry.deregister(self.item.pid)
+        self.tab.scene.removeItem(self.item)
         self.tab.update_layers_panel()
 
 class CloneElementCommand(QUndoCommand):
-    def __init__(self, element, tab, description="Clone Element"):
+    def __init__(self, item, tab, description="Clone Element"):
         super().__init__(description)
-        self.element = element
+        self.item = item
         self.clone = None
         self.tab = tab
 
     def redo(self):
         if self.clone is None:
-            self.clone = self.tab.registry.clone(self.element)
+            self.clone = self.tab.registry.clone(self.item)
         else:
             self.tab.registry.reinsert(self.clone.pid)
         if self.clone.scene() is None:
@@ -131,91 +131,91 @@ class CloneElementCommand(QUndoCommand):
         self.tab.update_layers_panel()
 
 class RemoveElementCommand(QUndoCommand):
-    def __init__(self, element, tab, description="Remove Element"):
+    def __init__(self, item, tab, description="Remove Element"):
         super().__init__(description)
-        self.element = element
+        self.item = item
         self.tab = tab
 
     def redo(self):
-        self.tab.registry.deregister(self.element.pid)
-        self.tab.scene.removeItem(self.element)
+        self.tab.registry.deregister(self.item.pid)
+        self.tab.scene.removeItem(self.item)
         self.tab.update_layers_panel()
 
     def undo(self):
-        self.tab.registry.reinsert(self.element.pid)
-        self.tab.scene.addItem(self.element)
+        self.tab.registry.reinsert(self.item.pid)
+        self.tab.scene.addItem(self.item)
         self.tab.update_layers_panel()
 
 class MoveElementCommand(QUndoCommand):
-    def __init__(self, element, new_pos: QPointF, old_pos: QPointF = None, description="Move Element"):
+    def __init__(self, item, new_pos: QPointF, old_pos: QPointF = None, description="Move Element"):
         super().__init__(description)
-        self.element = element
+        self.item = item
         self.old_pos = old_pos
         if old_pos is not None:
             self.old_pos = old_pos
         self.new_pos = new_pos
 
     def undo(self):
-        self.element.setPos(self.old_pos)
+        self.item.setPos(self.old_pos)
 
     def redo(self):
-        self.element.setPos(self.new_pos)
+        self.item.setPos(self.new_pos)
 
 class ResizeElementCommand(QUndoCommand):
-    def __init__(self, element, new_rect: QRectF, old_rect: QRectF = None, description="Resize Element"):
+    def __init__(self, item, new_rect: QRectF, old_rect: QRectF = None, description="Resize Element"):
         super().__init__(description)
-        self.element = element
-        self.old_rect = element.rect
+        self.item = item
+        self.old_rect = item.rect
         if old_rect:
             self.old_rect = old_rect
         self.new_rect = new_rect
 
     def undo(self):
-        # Prevent re-entrancy when setting the element's geometry
-        self.element.blockSignals(True)
-        self.element.geometry = self.old_geometry
-        self.element.blockSignals(False)
+        # Prevent re-entrancy when setting the item's geometry
+        self.item.blockSignals(True)
+        self.item.geometry = self.old_geometry
+        self.item.blockSignals(False)
 
     def redo(self):
-        # Prevent re-entrancy when setting the element's geometry
-        self.element.blockSignals(True)
-        self.element.geometry = self.new_geometry
-        self.element.blockSignals(False)
+        # Prevent re-entrancy when setting the item's geometry
+        self.item.blockSignals(True)
+        self.item.geometry = self.new_geometry
+        self.item.blockSignals(False)
 
 class ResizeAndMoveElementCommand(QUndoCommand):
     pass
-    # def __init__(self, element, new_geometry, old_geometry, description="Resize/Move Element"):
+    # def __init__(self, item, new_geometry, old_geometry, description="Resize/Move Element"):
     #     super().__init__(description)
-    #     geom = element.geometry
+    #     geom = item.geometry
     #     print(f"Element rect and pos prior to move and resize: {geom.px.rect} at {geom.px.pos}.")
-    #     self.element = element
+    #     self.item = item
     #     self.new_geometry = new_geometry
     #     self.old_geometry = old_geometry
 
     # def undo(self):
-    #     # Prevent re-entrancy when setting the element's geometry
-    #     self.element.geometry = self.old_geometry
+    #     # Prevent re-entrancy when setting the item's geometry
+    #     self.item.geometry = self.old_geometry
 
     # def redo(self):
-    #     # Prevent re-entrancy when setting the element's geometry
-    #     self.element.geometry = self.new_geometry
+    #     # Prevent re-entrancy when setting the item's geometry
+    #     self.item.geometry = self.new_geometry
 
 
-class ChangeElementPropertyCommand(QUndoCommand):
-    def __init__(self, element, prop, new_value, old_value, description="Change Element Property"):
+class ChangeItemPropertyCommand(QUndoCommand):
+    def __init__(self, item, prop, new_value, old_value, description="Change Element Property"):
         super().__init__(description)
-        self.element = element
+        self.item = item
         self.prop = prop 
         self.new_value = new_value
         self.old_value = old_value
 
     def undo(self):
         if self.new_value != self.old_value:
-            setattr(self.element, self.prop, self.old_value)
+            setattr(self.item, self.prop, self.old_value)
 
     def redo(self):
-        print(f"[UNDO] Target ID: {id(self.element)}, Prop: {self.prop}, New: {self.new_value}")
-        setattr(self.element, self.prop, self.new_value)
+        print(f"[UNDO] Target ID: {id(self.item)}, Prop: {self.prop}, New: {self.new_value}")
+        setattr(self.item, self.prop, self.new_value)
 
 class ResizeTemplateCommand(QUndoCommand):
     def __init__(self, template, new_geometry, old_geometry, description="Resize Template"):
@@ -231,10 +231,10 @@ class ResizeTemplateCommand(QUndoCommand):
         self.template.geometry = self.old_geometry
 
 class CloneComponentTemplateToSlotCommand(QUndoCommand):
-    def __init__(self, registry, template, slot, description="Add Template to Slot"):
+    def __init__(self, registry, template, item, description="Add Template to Slot"):
         super().__init__(description)
         self.registry = registry
-        self.slot = slot
+        self.item = item
         self.template = template
         self.clone = None
         self.clone_pid = None
@@ -243,13 +243,13 @@ class CloneComponentTemplateToSlotCommand(QUndoCommand):
         if self.clone is None:
             self.clone = self.registry.clone(self.template)
             self.clone_pid = self.clone.pid
-            setattr(self.slot, "content", self.clone)
+            setattr(self.item, "content", self.clone)
         else:
             self.registry.reinsert(self.clone_pid)
-            self.slot.content = self.clone
+            self.item.content = self.clone
 
     def undo(self):
         self.deregister(self.clone_pid)
-        self.slot.content = None
+        self.item.content = None
 
 

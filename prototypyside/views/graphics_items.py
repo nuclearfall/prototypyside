@@ -33,7 +33,7 @@ class ResizeHandle(QGraphicsRectItem):
         self.setAcceptedMouseButtons(Qt.LeftButton)  # ⬅️ Be explicit
         self.drag_started = False  # debounce flag
         self._handle_type = handle_type
-        self.parent_element = parent_item
+        self.parent_item = parent_item
         self.start_pos = QPointF()
         self.start_scene_rect = QRectF()
         self.is_handle = True

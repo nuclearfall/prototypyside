@@ -4,7 +4,7 @@ from __future__ import annotations
 
 """Refactored PaginationManager
 
-This version delegates *all* slot‑to‑instance decisions to a
+This version delegates *all* item‑to‑instance decisions to a
 ``PaginationPolicy`` obtained from ``PaginationPolicyFactory`` rather than
 containing pagination heuristics inline.  The manager is therefore much
 shorter and focused on orchestration:
@@ -14,7 +14,7 @@ shorter and focused on orchestration:
 * Cache the resulting page matrix so callers can access pages lazily or via
   eager ``generate()``.
 
-The previous re‑balancing / slot‑template mapping logic has been removed – that
+The previous re‑balancing / item‑template mapping logic has been removed – that
 complexity now resides inside the concrete policy class (``InterleaveDatasets``
 by default).
 """
@@ -34,7 +34,7 @@ from .pagination_policy import PaginationPolicyFactory, Placement, PaginationPol
 
 
 class PaginationError(RuntimeError):
-    """Raised when the layout template cannot be paginated (e.g., no slots)."""
+    """Raised when the layout template cannot be paginated (e.g., no items)."""
 
 
 class PaginationManager:
@@ -98,7 +98,7 @@ class PaginationManager:
         if self._policy is not None:
             return  # already prepared
 
-        if not getattr(self.layout_template, "slots", None):
+        if not getattr(self.layout_template, "items", None):
             raise PaginationError("LayoutTemplate has no LayoutSlots")
 
         # Build datasets mapping.  Current assumption: a *single* MergeManager
@@ -107,10 +107,10 @@ class PaginationManager:
         datasets: Dict[str, MergeManager] = {}
         if self.merge_manager is not None:
             unique_templates = {
-                slot.template  # type: ignore[attr-defined]
-                for row in self.layout_template.slots  # type: ignore[attr-defined]
-                for slot in row
-                if slot.template is not None  # type: ignore[attr-defined]
+                item.template  # type: ignore[attr-defined]
+                for row in self.layout_template.items  # type: ignore[attr-defined]
+                for item in row
+                if item.template is not None  # type: ignore[attr-defined]
             }
             for tmpl in unique_templates:
                 # Heuristic: template has data rows if merge_manager.remaining() > 0

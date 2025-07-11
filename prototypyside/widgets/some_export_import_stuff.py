@@ -47,24 +47,24 @@
                 merged_template = ComponentTemplate.from_dict(self.template.to_dict(), parent=None)
                 merged_template.background_image_path = self.template.background_image_path
 
-                for element in merged_template.elements:
-                    if element.name.startswith('@'):
-                        field_name_in_template = element.name # Remove '@' for lookup
+                for item in merged_template.items:
+                    if item.name.startswith('@'):
+                        field_name_in_template = item.name # Remove '@' for lookup
                         if field_name_in_template in row_data:
                             content = row_data[field_name_in_template]
-                            if isinstance(element, ImageElement):
+                            if isinstance(item, ImageElement):
                                 if content and Path(content).is_file():
-                                    element.set_content(content)
+                                    item.set_content(content)
                                 else:
-                                    print(f"Warning: Image file not found for {element.name} (row {i+1}): {content}")
-                                    self.show_status_message(f"Warning: Image not found for field '{element.name}' in row {i+1}.", "warning")
-                                    element.set_content("")
+                                    print(f"Warning: Image file not found for {item.name} (row {i+1}): {content}")
+                                    self.show_status_message(f"Warning: Image not found for field '{item.name}' in row {i+1}.", "warning")
+                                    item.set_content("")
                             else:
-                                element.set_content(content)
+                                item.set_content(content)
                         else:
-                            print(f"Warning: Merge field '{element.name}' not found in CSV row {i+1}.")
-                            self.show_status_message(f"Warning: Field '{element.name}' not found in CSV row {i+1}.", "warning")
-                            element.set_content(f"<{element.name} Not Found>")
+                            print(f"Warning: Merge field '{item.name}' not found in CSV row {i+1}.")
+                            self.show_status_message(f"Warning: Field '{item.name}' not found in CSV row {i+1}.", "warning")
+                            item.set_content(f"<{item.name} Not Found>")
                 self.merged_templates.append(merged_template)
 
             if not cli_mode:

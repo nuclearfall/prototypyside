@@ -35,7 +35,7 @@ class UnitStr:
     3. If the `unit` parameter is also not provided, it defaults to 'px'.
     """
 
-    __slots__ = ("_raw", "_value", "_unit", "_dpi", "_cache")
+    __items__ = ("_raw", "_value", "_unit", "_dpi", "_cache")
 
     def __init__(
         self,
@@ -162,9 +162,12 @@ class UnitStr:
         rounded_val = round(value_in_unit / inc) * inc
         return UnitStr(f"{rounded_val} {self.unit}", dpi=self._dpi)
 
-    def dict(self) -> dict:
+    def to_dict(self) -> dict:
         """JSON-friendly dump of the value in all supported units."""
-        return {u: self.to(u) for u in ("in", "mm", "cm", "pt", "px")}
+        data = {u: self.to(u) for u in ("in", "mm", "cm", "pt", "px")}
+        data['unit'] = self._unit
+        data['dpi'] = self._dpi
+        return data
 
     @classmethod
     def from_dict(

@@ -20,11 +20,11 @@ Assumptions
       rows: int
       columns: int
       auto_fill: bool
-      layout_slots: list[LayoutSlot]
+      items: list[LayoutSlot]
 
   Every ``LayoutSlot`` exposes::
 
-      content: Optional[ComponentTemplate]  # None ↔ empty slot
+      content: Optional[ComponentTemplate]  # None ↔ empty item
 
 These attributes already exist (or have been specified) in the uploaded
 source files.  If a later refactor changes names, adapt the attribute look‑ups
@@ -64,23 +64,23 @@ def get_required_instances(template: "ComponentTemplate") -> int:
     return max(1, int(getattr(template, "copies", 1)))
 
 
-def count_slots(layout_template: "LayoutTemplate", template: "ComponentTemplate") -> int:
-    """How many slots on the *initial* page reference *template*?
+def count_items(layout_template: "LayoutTemplate", template: "ComponentTemplate") -> int:
+    """How many items on the *initial* page reference *template*?
 
     The result depends on *auto‑fill* semantics:
     * If the template appears at least once and ``auto_fill`` is **True**,
-      every *empty* slot is considered to reference this template as well.
+      every *empty* item is considered to reference this template as well.
     * Otherwise we simply count explicit matches.
     """
     # 1) explicit matches
-    explicit_count = sum(1 for slot in layout_template.layout_slots if slot.content is template)
+    explicit_count = sum(1 for item in layout_template.items if item.content is template)
 
     if explicit_count == 0:
         return 0  # template not present on the layout at all
 
     if layout_template.auto_fill:
         total_cells = layout_template.rows * layout_template.columns
-        filled_cells = len(layout_template.layout_slots)
+        filled_cells = len(layout_template.items)
         empty_cells = total_cells - filled_cells
         return explicit_count + empty_cells
 
@@ -109,14 +109,14 @@ def analyse_template(layout_template: "LayoutTemplate", template: "ComponentTemp
     return {
         "mode": get_component_mode(template),  # type: ignore[return-value]
         "required_instances": get_required_instances(template),
-        "slots_per_page": count_slots(layout_template, template),
+        "items_per_page": count_items(layout_template, template),
     }
 
 __all__ = [
     "Mode",
     "get_component_mode",
     "get_required_instances",
-    "count_slots",
+    "count_items",
     "rows_for",
     "analyse_template",
 ]

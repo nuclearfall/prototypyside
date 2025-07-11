@@ -32,7 +32,7 @@ LayoutTemplate = Any     # TODO: replace with real class
 LayoutSlot = Any         # TODO: replace with real class
 MergeManager = Any       # TODO: replace with real class
 
-# When placed on a page, a slot may remain empty (None).
+# When placed on a page, a item may remain empty (None).
 Placement = Tuple["LayoutSlot", Optional["ComponentInstance"]]
 
 # =============================================================================
@@ -107,14 +107,14 @@ class InterleaveDatasets(PaginationPolicy):
         self._layout: LayoutTemplate | None = None
         self._datasets: Dict[str, MergeManager] | None = None
         self._page_index: int = 0
-        self._slots: List[LayoutSlot] = []
+        self._items: List[LayoutSlot] = []
 
     # ------------------------------------------------------------------
     # Helpers
     # ------------------------------------------------------------------
-    def _flatten_slots(self) -> List[LayoutSlot]:
+    def _flatten_items(self) -> List[LayoutSlot]:
         assert self._layout is not None
-        return [slot for row in self._layout.slots for slot in row]
+        return [item for row in self._layout.items for item in row]
 
     # ------------------------------------------------------------------
     # PaginationPolicy implementation
@@ -123,7 +123,7 @@ class InterleaveDatasets(PaginationPolicy):
         self._layout = layout
         self._datasets = datasets
         self._page_index = 0
-        self._slots = self._flatten_slots()
+        self._items = self._flatten_items()
 
     def next_page(self) -> Optional[List[Placement]]:  # noqa: D401
         if self._layout is None or self._datasets is None:
@@ -132,11 +132,11 @@ class InterleaveDatasets(PaginationPolicy):
         placements: List[Placement] = []
         any_data_left = False
 
-        offset = (self._page_index * self._stride) % len(self._slots)
+        offset = (self._page_index * self._stride) % len(self._items)
 
-        for i in range(len(self._slots)):
-            slot = self._slots[(offset + i) % len(self._slots)]
-            template = slot.template  # type: ignore[attr-defined]
+        for i in range(len(self._items)):
+            item = self._items[(offset + i) % len(self._items)]
+            template = item.template  # type: ignore[attr-defined]
             mgr: MergeManager | None = self._datasets.get(template.pid)
 
             if mgr is None:
@@ -147,7 +147,7 @@ class InterleaveDatasets(PaginationPolicy):
                     instance = mgr.next_instance(template)
                 else:
                     instance = None
-            placements.append((slot, instance))
+            placements.append((item, instance))
 
         if not any_data_left:
             return None
@@ -195,10 +195,10 @@ class TileOversizeComponent(PaginationPolicy):
     # ------------------------------------------------------------------
     def prepare(self, layout: LayoutTemplate, datasets: Dict[str, MergeManager]):
         # 1. Validate layout
-        if len(layout.slots) != 1 or len(layout.slots[0]) != 1:
-            raise ValueError("TileOversizeComponent requires exactly one slot in LayoutTemplate")
-        slot = layout.slots[0][0]
-        template = slot.template  # type: ignore[attr-defined]
+        if len(layout.items) != 1 or len(layout.items[0]) != 1:
+            raise ValueError("TileOversizeComponent requires exactly one item in LayoutTemplate")
+        item = layout.items[0][0]
+        template = item.template  # type: ignore[attr-defined]
         if template is None:
             raise ValueError("Slot does not reference a ComponentTemplate")
 
@@ -221,7 +221,7 @@ class TileOversizeComponent(PaginationPolicy):
         if row_data is None:
             row_data = {}
 
-        # The slot is reused on every page; renderer will use instance.viewport
+        # The item is reused on every page; renderer will use instance.viewport
         for r in range(rows):
             for c in range(cols):
                 left = max(c * page_w - overlap, 0)
@@ -238,7 +238,7 @@ class TileOversizeComponent(PaginationPolicy):
                 # Attach viewport meta so renderer can clip
                 setattr(instance, "viewport", viewport)
 
-                self._tiles.append((slot, instance))
+                self._tiles.append((item, instance))
 
         # Optional order: column-major or snake could be implemented later
         if self.params["order"] == "column-major":
@@ -261,7 +261,7 @@ PaginationPolicyFactory.register("TileOversizeComponent", TileOversizeComponent)
 class ClusterByDataset(PaginationPolicy):
     """Fill complete pages with a single dataset at a time.
 
-    Order is the appearance order of templates in ``layout.slots`` unless a
+    Order is the appearance order of templates in ``layout.items`` unless a
     specific list is provided via params::
 
         {"order": ["CT_abcd", "CT_efgh", …]}
@@ -271,26 +271,26 @@ class ClusterByDataset(PaginationPolicy):
         self.order: list[str] | None = params.get("order")
         self._layout: LayoutTemplate | None = None
         self._datasets: Dict[str, MergeManager] | None = None
-        self._slots: list[LayoutSlot] = []
+        self._items: list[LayoutSlot] = []
         self._current_idx: int = 0  # index in self.order
 
     # -------------------------- helpers ---------------------------------
-    def _flatten_slots(self):
+    def _flatten_items(self):
         assert self._layout is not None
-        return [slot for row in self._layout.slots for slot in row]
+        return [item for row in self._layout.items for item in row]
 
     # ----------------------- PaginationPolicy ---------------------------
     def prepare(self, layout: LayoutTemplate, datasets: Dict[str, MergeManager]):
         self._layout = layout
         self._datasets = datasets
-        self._slots = self._flatten_slots()
+        self._items = self._flatten_items()
 
         # Default order = first appearance of each template
         if self.order is None:
             seen: set[str] = set()
             self.order = []
-            for slot in self._slots:
-                pid = slot.template.pid  # type: ignore[attr-defined]
+            for item in self._items:
+                pid = item.template.pid  # type: ignore[attr-defined]
                 if pid not in seen and pid in datasets:
                     seen.add(pid)
                     self.order.append(pid)
@@ -301,8 +301,8 @@ class ClusterByDataset(PaginationPolicy):
 
         pid = self.order[self._current_idx]
         mgr = self._datasets[pid]
-        # Template object (same for all slots referencing this pid)
-        template = next(s.template for s in self._slots if s.template.pid == pid)  # type: ignore[attr-defined]
+        # Template object (same for all items referencing this pid)
+        template = next(s.template for s in self._items if s.template.pid == pid)  # type: ignore[attr-defined]
 
         # No more rows? advance pointer and recurse
         if mgr.remaining(template) == 0:
@@ -310,12 +310,12 @@ class ClusterByDataset(PaginationPolicy):
             return self.next_page()
 
         placements: List[Placement] = []
-        for slot in self._slots:
-            if slot.template.pid == pid:  # type: ignore[attr-defined]
+        for item in self._items:
+            if item.template.pid == pid:  # type: ignore[attr-defined]
                 instance = mgr.next_instance(template)
             else:
                 instance = None
-            placements.append((slot, instance))
+            placements.append((item, instance))
 
         return placements
 
@@ -341,19 +341,19 @@ class StaticFirstRow(PaginationPolicy):
         self.params = {**self.DEFAULT_PARAMS, **params}
         self._layout: LayoutTemplate | None = None
         self._datasets: Dict[str, MergeManager] | None = None
-        self._slot_rows: list[list[LayoutSlot]] = []
+        self._item_rows: list[list[LayoutSlot]] = []
         self._static_cache: Dict[str, ComponentInstance] = {}
 
     # ----------------------- PaginationPolicy ---------------------------
     def prepare(self, layout: LayoutTemplate, datasets: Dict[str, MergeManager]):
         self._layout = layout
         self._datasets = datasets
-        self._slot_rows = layout.slots  # already 2‑D row structure
+        self._item_rows = layout.items  # already 2‑D row structure
 
         # Cache first static instance per static template
-        for row in self._slot_rows:
-            for slot in row:
-                tmpl = slot.template  # type: ignore[attr-defined]
+        for row in self._item_rows:
+            for item in row:
+                tmpl = item.template  # type: ignore[attr-defined]
                 if tmpl.pid not in datasets:  # static
                     self._static_cache[tmpl.pid] = getattr(tmpl, "_static_instance", tmpl.apply_data({}))  # type: ignore[attr-defined]
 
@@ -365,9 +365,9 @@ class StaticFirstRow(PaginationPolicy):
         placements: List[Placement] = []
         n_static_rows = int(self.params["static_rows"])
 
-        for row_idx, row in enumerate(self._slot_rows):
-            for slot in row:
-                tmpl = slot.template  # type: ignore[attr-defined]
+        for row_idx, row in enumerate(self._item_rows):
+            for item in row:
+                tmpl = item.template  # type: ignore[attr-defined]
                 if row_idx < n_static_rows or tmpl.pid not in self._datasets:
                     instance = self._static_cache[tmpl.pid]
                 else:
@@ -377,7 +377,7 @@ class StaticFirstRow(PaginationPolicy):
                         any_data_left = True
                     else:
                         instance = None
-                placements.append((slot, instance))
+                placements.append((item, instance))
 
         if not any_data_left and not placements:
             return None
@@ -405,27 +405,27 @@ class DuplexInterleave(PaginationPolicy):
         self.flip: str = params.get("flip", "long")
         self._layout: LayoutTemplate | None = None
         self._datasets: Dict[str, MergeManager] | None = None
-        self._slots: list[LayoutSlot] = []
+        self._items: list[LayoutSlot] = []
         self._front_pid: str | None = None
         self._is_front_turn: bool = True
 
     def prepare(self, layout: LayoutTemplate, datasets: Dict[str, MergeManager]):
         self._layout = layout
         self._datasets = datasets
-        self._slots = [slot for row in layout.slots for slot in row]
+        self._items = [item for row in layout.items for item in row]
 
-        # Detect front template = first dataset‑bound slot
-        for slot in self._slots:
-            if slot.template.pid in datasets:  # type: ignore[attr-defined]
-                self._front_pid = slot.template.pid  # type: ignore[attr-defined]
+        # Detect front template = first dataset‑bound item
+        for item in self._items:
+            if item.template.pid in datasets:  # type: ignore[attr-defined]
+                self._front_pid = item.template.pid  # type: ignore[attr-defined]
                 break
         if self._front_pid is None:
             raise ValueError("DuplexInterleave: could not detect front template")
 
         if self.back_pid is None:
             # Auto‑detect back = first static template encountered
-            for slot in self._slots:
-                pid = slot.template.pid  # type: ignore[attr-defined]
+            for item in self._items:
+                pid = item.template.pid  # type: ignore[attr-defined]
                 if pid != self._front_pid:
                     self.back_pid = pid
                     break
@@ -434,17 +434,17 @@ class DuplexInterleave(PaginationPolicy):
 
     def _build_page_for_pid(self, pid: str) -> List[Placement]:
         placements: List[Placement] = []
-        template = next(s.template for s in self._slots if s.template.pid == pid)  # type: ignore[attr-defined]
+        template = next(s.template for s in self._items if s.template.pid == pid)  # type: ignore[attr-defined]
         mgr = self._datasets.get(pid)
-        for slot in self._slots:
-            if slot.template.pid == pid:  # type: ignore[attr-defined]
+        for item in self._items:
+            if item.template.pid == pid:  # type: ignore[attr-defined]
                 if mgr and mgr.remaining(template):
                     instance = mgr.next_instance(template)
                 else:
                     instance = getattr(template, "_static_instance", template.apply_data({}))  # type: ignore[attr-defined]
             else:
                 instance = None
-            placements.append((slot, instance))
+            placements.append((item, instance))
         return placements
 
     def next_page(self):
@@ -489,28 +489,28 @@ class StaticCluster(PaginationPolicy):
         # Runtime state
         self._layout: LayoutTemplate | None = None
         self._datasets: Dict[str, MergeManager] | None = None
-        self._slots: list[LayoutSlot] = []
+        self._items: list[LayoutSlot] = []
         self._order: list[str] = []  # sequence of template pids
         self._remaining_static: Dict[str, int] = {}
         self._static_cache: Dict[str, ComponentInstance] = {}
         self._current_idx: int = 0
 
     # ----------------------- helpers ---------------------------
-    def _flatten_slots(self):
+    def _flatten_items(self):
         assert self._layout is not None
-        return [slot for row in self._layout.slots for slot in row]
+        return [item for row in self._layout.items for item in row]
 
     # -------------------- PaginationPolicy ---------------------
     def prepare(self, layout: LayoutTemplate, datasets: Dict[str, MergeManager]):
         self._layout = layout
         self._datasets = datasets
-        self._slots = self._flatten_slots()
+        self._items = self._flatten_items()
 
         static_pids: list[str] = []
         dataset_pids: list[str] = []
 
-        for slot in self._slots:
-            pid = slot.template.pid  # type: ignore[attr-defined]
+        for item in self._items:
+            pid = item.template.pid  # type: ignore[attr-defined]
             if pid in datasets:
                 if pid not in dataset_pids:
                     dataset_pids.append(pid)
@@ -518,7 +518,7 @@ class StaticCluster(PaginationPolicy):
                 if pid not in static_pids:
                     static_pids.append(pid)
                     # Determine copies to print
-                    tmpl = slot.template  # type: ignore[attr-defined]
+                    tmpl = item.template  # type: ignore[attr-defined]
                     copies = getattr(tmpl, "copies", 1)
                     self._remaining_static[pid] = int(copies)
                     # Cache first instance now
@@ -535,7 +535,7 @@ class StaticCluster(PaginationPolicy):
     def _cluster_data_done(self, pid: str) -> bool:
         if pid not in self._datasets:
             return True
-        tmpl = next(s.template for s in self._slots if s.template.pid == pid)  # type: ignore[attr-defined]
+        tmpl = next(s.template for s in self._items if s.template.pid == pid)  # type: ignore[attr-defined]
         return self._datasets[pid].remaining(tmpl) == 0
 
     def _advance_cursor(self):
@@ -557,29 +557,29 @@ class StaticCluster(PaginationPolicy):
 
         pid = self._order[self._current_idx]
         placements: List[Placement] = []
-        tmpl = next(s.template for s in self._slots if s.template.pid == pid)  # type: ignore[attr-defined]
+        tmpl = next(s.template for s in self._items if s.template.pid == pid)  # type: ignore[attr-defined]
 
         if pid in self._datasets:  # dataset cluster
             mgr = self._datasets[pid]
-            for slot in self._slots:
-                if slot.template.pid == pid:  # type: ignore[attr-defined]
+            for item in self._items:
+                if item.template.pid == pid:  # type: ignore[attr-defined]
                     if mgr.remaining(tmpl):
                         inst = mgr.next_instance(tmpl)
                     else:
                         inst = None
                 else:
                     inst = None
-                placements.append((slot, inst))
+                placements.append((item, inst))
         else:  # static cluster
-            for slot in self._slots:
-                if slot.template.pid == pid:  # type: ignore[attr-defined]
+            for item in self._items:
+                if item.template.pid == pid:  # type: ignore[attr-defined]
                     inst = self._static_cache[pid]
                 else:
                     inst = None
-                placements.append((slot, inst))
+                placements.append((item, inst))
             # decrement copies by full page of that static template
-            page_slots = sum(1 for s in self._slots if s.template.pid == pid)  # type: ignore[attr-defined]
-            self._remaining_static[pid] -= page_slots
+            page_items = sum(1 for s in self._items if s.template.pid == pid)  # type: ignore[attr-defined]
+            self._remaining_static[pid] -= page_items
 
         # Check if cluster finished, move cursor
         if (pid in self._datasets and self._cluster_data_done(pid)) or (

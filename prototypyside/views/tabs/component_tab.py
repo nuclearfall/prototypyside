@@ -31,7 +31,7 @@ from prototypyside.services.app_settings import AppSettings
 from prototypyside.services.export_manager import ExportManager
 from prototypyside.services.property_setter import PropertySetter
 from prototypyside.services.undo_commands import (AddElementCommand, RemoveElementCommand, 
-            CloneElementCommand, ResizeTemplateCommand, ResizeAndMoveElementCommand, ChangeElementPropertyCommand)
+            CloneElementCommand, ResizeTemplateCommand, ResizeAndMoveElementCommand, ChangeItemPropertyCommand)
 
 class ComponentTab(QWidget):
     status_message_signal = Signal(str, str, int)
@@ -44,11 +44,12 @@ class ComponentTab(QWidget):
         self.main_window = main_window
         presets = self.main_window.settings
         self.settings = AppSettings(display_dpi=template.geometry.dpi, display_unit=presets.unit, 
-                    physical_unit=template.geometry.unit, print_dpi=presets.print_dpi)
+                    print_unit=template.geometry.unit, print_dpi=presets.print_dpi)
         self.registry = registry
-        self.registry.settings = self.settings
+        self.settings = AppSettings()
         self._template = template
         self.undo_stack = QUndoStack()
+        self.file_path = None
 
         self._unit = self.settings.display_unit
         self._dpi = self.settings.display_dpi
@@ -67,7 +68,7 @@ class ComponentTab(QWidget):
         # self.view.setOptimizationFlag(QGraphicsView.DontSavePainterState)
         # self.view.setOptimizationFlag(QGraphicsView.DontAdjustForAntialiasing)
         # self.scene.addItem(self._template)      
-        self.selected_element: Optional['ComponentElement'] = None
+        self.selected_item: Optional['ComponentElement'] = None
 
         self.export_manager = ExportManager()
 
@@ -130,7 +131,7 @@ class ComponentTab(QWidget):
         self.setup_component_palette()
         self.setup_layers_panel()
 
-        self.set_element_controls_enabled(False) # Initial state: no element selected
+        self.set_item_controls_enabled(False) # Initial state: no item selected
 
     def build_scene(self):
         # create grid
@@ -152,11 +153,11 @@ class ComponentTab(QWidget):
 
         # Connect signals specific to this tab's template and scene
         self.template.template_changed.connect(self.update_component_scene)
-        self.template.element_z_order_changed.connect(self.update_layers_panel)
+        self.template.item_z_order_changed.connect(self.update_layers_panel)
         self.scene.selectionChanged.connect(self.on_selection_changed)
-        self.scene.element_dropped.connect(self.add_element_from_drop)
-        self.scene.element_cloned.connect(self.clone_element)
-        self.scene.element_resized.connect(self.on_property_changed)
+        self.scene.item_dropped.connect(self.add_item_from_drop)
+        self.scene.item_cloned.connect(self.clone_item)
+        self.scene.item_resized.connect(self.on_property_changed)
         self.view.setRenderHints(QPainter.Antialiasing | QPainter.TextAntialiasing | QPainter.SmoothPixmapTransform)
         self.view.setViewportUpdateMode(QGraphicsView.FullViewportUpdate)
         self.view.setOptimizationFlag(QGraphicsView.DontSavePainterState)
@@ -166,7 +167,7 @@ class ComponentTab(QWidget):
 
     def setup_shortcuts(self):
         delete_shortcut = QShortcut(QKeySequence.Delete, self)
-        delete_shortcut.activated.connect(self.remove_selected_element)
+        delete_shortcut.activated.connect(self.remove_selected_item)
 
     @Slot()
     def update_component_scene(self):
@@ -203,16 +204,16 @@ class ComponentTab(QWidget):
         self.property_panel = PropertyPanel(display_unit=self.unit, parent=self)
         self.property_panel.property_changed.connect(self.on_property_changed)
         # self.property_panel.geometry_changed.connect(self.on_geometry_changed)
-        self.remove_element_btn = QPushButton("Remove Selected Element")
-        self.remove_element_btn.setMaximumWidth(200)
-        self.remove_element_btn.clicked.connect(self.remove_selected_element)
-        self.set_element_controls_enabled(False) # Ensure this disables the new button too
+        self.remove_item_btn = QPushButton("Remove Selected Element")
+        self.remove_item_btn.setMaximumWidth(200)
+        self.remove_item_btn.clicked.connect(self.remove_selected_item)
+        self.set_item_controls_enabled(False) # Ensure this disables the new button too
 
     def setup_layers_panel(self):
         # This will be a widget that the QMainWindow will place in a DockWidget
         self.layers_list = LayersListWidget(self)
-        self.layers_list.element_selected_in_list.connect(self.on_layers_list_item_clicked)
-        self.layers_list.element_z_changed_requested.connect(self.reorder_element_z_from_list_event)
+        self.layers_list.item_selected_in_list.connect(self.on_layers_list_item_clicked)
+        self.layers_list.item_z_changed_requested.connect(self.reorder_item_z_from_list_event)
         self.layers_list.itemClicked.connect(self.on_layers_list_item_clicked)
 
     def create_measure_toolbar(self):
@@ -249,12 +250,15 @@ class ComponentTab(QWidget):
             dim.setMaximumWidth(100)
             dim.valueChanged.connect(self.on_template_geometry_changed)
 
-        self.rounded_checkbox = QCheckBox("Rounded Corners")
-        self.rounded_checkbox.setChecked(self.template.rounded_corners)
-        self.rounded_checkbox.stateChanged.connect(self.rounded_corners_toggle)
+        self.border_label = QLabel("Border")
         self.border_width_field = UnitField(self.template, "border", self.unit, self)
         self.border_width_field.valueChanged.connect(self.set_template_border)
         self.border_width_field.setMaximumWidth(80)
+        self.corners_label = QLabel("Corner Radius")
+        self.corners_field = UnitField(self.template, "corner_radius", self.unit, self)
+        self.corners_field.valueChanged.connect(self.on_corner_radius_change)
+        self.corners_field.setMaximumWidth(80)
+
         
         self.measure_toolbar.addWidget(QLabel("Template:"))
         self.measure_toolbar.addWidget(self.template_name_field)
@@ -265,8 +269,10 @@ class ComponentTab(QWidget):
         self.measure_toolbar.addWidget(self.template_width_field)
         self.measure_toolbar.addWidget(self.template_height_field)
         self.measure_toolbar.addWidget(self.snap_checkbox)
+        self.measure_toolbar.addWidget(self.border_label)
         self.measure_toolbar.addWidget(self.border_width_field)
-        self.measure_toolbar.addWidget(self.rounded_checkbox)
+        self.measure_toolbar.addWidget(self.corners_label)
+        self.measure_toolbar.addWidget(self.corners_field)
 
         self.layout().addWidget(self.measure_toolbar)
 
@@ -281,8 +287,8 @@ class ComponentTab(QWidget):
         # self.scene.update()  # force grid redraw
 
     @Slot(int)
-    def rounded_corners_toggle(self, state: int):
-        self.template.rounded_corners = bool(state)
+    def on_corner_radius_change(self, new_value: int):
+        self.template.corner_radius = new_value
 
     # called from menu/toolbar checkboxes:
     def toggle_grid(self, checked: bool):
@@ -324,29 +330,29 @@ class ComponentTab(QWidget):
         # Clear old items (grid/background is drawn in drawBackground, not as items)
         self.scene.clear()
         self.scene.setSceneRect(self.template.geometry.px.rect)
-        # Add every element back into the QGraphicsScene
+        # Add every item back into the QGraphicsScene
         if not self.template.scene():
             self.scene.addItem(self.template)
-        for element in self.template.elements:
-            if not element.scene():
-                self.scene.addItem(element)
-            element.hide_handles()
+        for item in self.template.items:
+            if not item.scene():
+                self.scene.addItem(item)
+            item.hide_handles()
 
     @Slot()
     def on_property_changed(self, target, prop, new, old):
-        command = ChangeElementPropertyCommand(target, prop, new, old)
+        command = ChangeItemPropertyCommand(target, prop, new, old)
         self.undo_stack.push(command)
         print(f"[COMPONENT TAB] Target={target}, prop={prop}, old={old}, new={new}")
         print(f"[UNDO STACK] Pushed: {command}")
 
-    def get_selected_element(self) -> Optional['ComponentElement']:
+    def get_selected_item(self) -> Optional['ComponentElement']:
         items = self.scene.selectedItems()
         if items:
             return items[0] if isinstance(items[0], ComponentElement) else None
         return None
 
     def _handle_new_selection(self, new):
-        old = self.selected_element
+        old = self.selected_item
         if old is new:
             return
 
@@ -354,17 +360,17 @@ class ComponentTab(QWidget):
         if old:
             old.hide_handles()
             try:
-                old.element_changed.disconnect(self.on_element_data_changed)
+                old.item_changed.disconnect(self.on_item_data_changed)
             except RuntimeError:
                 pass  # Signal wasn't connected
 
         # Update selection
-        self.selected_element = new
+        self.selected_item = new
 
         if new:
             new.show_handles()
             try:
-                new.element_changed.connect(self.on_element_data_changed)
+                new.item_changed.connect(self.on_item_data_changed)
             except RuntimeError:
                 pass  # Already connected, which shouldn't happen due to above logic
 
@@ -374,7 +380,7 @@ class ComponentTab(QWidget):
             self.property_panel.clear_target()
             self._clear_layers_selection()
 
-        self.set_element_controls_enabled(bool(new))
+        self.set_item_controls_enabled(bool(new))
 
 
     @Slot()
@@ -391,22 +397,22 @@ class ComponentTab(QWidget):
     @Slot(QListWidgetItem)
     def on_layers_list_item_clicked(self, item):
         """Handles selection from layers list"""
-        element = item.data(Qt.UserRole)
-        if element:
+        item = item.data(Qt.UserRole)
+        if item:
             self.scene.blockSignals(True)
             self.scene.clearSelection()
-            element.setSelected(True)
+            item.setSelected(True)
             self.scene.blockSignals(False)
-            self._handle_new_selection(element)
+            self._handle_new_selection(item)
 
-    def _update_layers_selection(self, element):
-        """Sync layers list selection with current element"""
+    def _update_layers_selection(self, item):
+        """Sync layers list selection with current item"""
         self.layers_list.blockSignals(True)
         self.layers_list.clearSelection()
         
         for i in range(self.layers_list.count()):
             item = self.layers_list.item(i)
-            if item.data(Qt.UserRole) is element:
+            if item.data(Qt.UserRole) is item:
                 item.setSelected(True)
                 self.layers_list.scrollToItem(item)
                 break
@@ -420,65 +426,65 @@ class ComponentTab(QWidget):
 
     @Slot()
     def update_layers_panel(self):
-        self.layers_list.update_list(self.template.elements)
+        self.layers_list.update_list(self.template.items)
 
-    def _adjust_z_value(self, element, new_z):
+    def _adjust_z_value(self, item, new_z):
         """Helper for z-order operations"""
-        element.setZValue(new_z)
-        self.template.elements.sort(key=lambda e: e.zValue())
-        self.template.element_z_order_changed.emit()
+        item.setZValue(new_z)
+        self.template.items.sort(key=lambda e: e.zValue())
+        self.template.item_z_order_changed.emit()
 
     @Slot(int)
     def adjust_z_order_of_selected(self, direction: int):
-        if not (element := self.get_selected_element()):
+        if not (item := self.get_selected_item()):
             return
         
-        elements = self.template.elements
-        sorted_elements = sorted(elements, key=lambda e: e.zValue())
-        idx = sorted_elements.index(element)
+        items = self.template.items
+        sorted_items = sorted(items, key=lambda e: e.zValue())
+        idx = sorted_items.index(item)
         
-        if direction > 0 and idx < len(sorted_elements) - 1:  # Move up
-            next_z = sorted_elements[idx + 1].zValue()
-            self._adjust_z_value(element, next_z + 1)
+        if direction > 0 and idx < len(sorted_items) - 1:  # Move up
+            next_z = sorted_items[idx + 1].zValue()
+            self._adjust_z_value(item, next_z + 1)
         elif direction < 0 and idx > 0:  # Move down
-            prev_z = sorted_elements[idx - 1].zValue()
-            self._adjust_z_value(element, prev_z - 1)
+            prev_z = sorted_items[idx - 1].zValue()
+            self._adjust_z_value(item, prev_z - 1)
 
     @Slot()
     def bring_selected_to_front(self):
-        if element := self.get_selected_element():
-            max_z = max(e.zValue() for e in self.template.elements)
-            if element.zValue() < max_z:
-                self._adjust_z_value(element, max_z + 1)
+        if item := self.get_selected_item():
+            max_z = max(e.zValue() for e in self.template.items)
+            if item.zValue() < max_z:
+                self._adjust_z_value(item, max_z + 1)
 
     @Slot()
     def send_selected_to_back(self):
-        if element := self.get_selected_element():
-            min_z = min(e.zValue() for e in self.template.elements)
-            if element.zValue() > min_z:
-                self._adjust_z_value(element, min_z - 1)
+        if item := self.get_selected_item():
+            min_z = min(e.zValue() for e in self.template.items)
+            if item.zValue() > min_z:
+                self._adjust_z_value(item, min_z - 1)
 
     @Slot(object, int)
-    def reorder_element_z_from_list_event(self, element: object, direction: int):
+    def reorder_item_z_from_list_event(self, item: object, direction: int):
         # Reuse existing logic
         self.adjust_z_order_of_selected(direction)
 
     @Slot(QGraphicsItem)
-    def select_element_from_layers_list(self, element: QGraphicsItem):
-        if isinstance(element, ComponentElement):
+    def select_item_from_layers_list(self, item: QGraphicsItem):
+        if isinstance(item, ComponentElement):
             self.scene.blockSignals(True)
             self.scene.clearSelection()
-            element.setSelected(True)
+            item.setSelected(True)
             self.scene.blockSignals(False)
 
 
     @Slot()
-    def on_element_data_changed(self):
-        self.selected_element.update()
+    def on_item_data_changed(self):
+        self.selected_item.update()
         pass
-        # element = self.get_selected_element()
-        # if element and element == self.selected_element:
-        #     element.update()
+        # item = self.get_selected_item()
+        # if item and item == self.selected_item:
+        #     item.update()
         #     self.scene.update()
 
     @Slot()
@@ -486,20 +492,20 @@ class ComponentTab(QWidget):
         if self.scene.selectedItems():
             self.scene.clearSelection()
 
-    def add_element_from_drop(self, scene_pos: QPointF, element_type: str):
+    def add_item_from_drop(self, scene_pos: QPointF, item_type: str):
         self.scene.clearSelection()
         rect = UnitStrGeometry(width="0.5in", height="0.25in", dpi=self.template.dpi)
         new_geometry = with_pos(rect, scene_pos)
-        command = AddElementCommand(element_type, self, new_geometry)
+        command = AddElementCommand(item_type, self, new_geometry)
         self.undo_stack.push(command)
-        self.selected_element = self.registry.get_last()
+        self.selected_item = self.registry.get_last()
         tz = self.template.zValue()
         gz = self.inc_grid.zValue()
-        ezs = [e.zValue() for e in self.template.elements]
-        print(f"[Z_ORDER] zOrdering after element placement: Template {tz}, Grid {gz}, Elements {ezs}")
+        ezs = [e.zValue() for e in self.template.items]
+        print(f"[Z_ORDER] zOrdering after item placement: Template {tz}, Grid {gz}, Elements {ezs}")
 
     @Slot(ComponentElement, QPointF)
-    def clone_element(self, original, press_scene_pos):
+    def clone_item(self, original, press_scene_pos):
         """Clone via the registry and immediately begin dragging."""
         # 1) Do the registry‐based clone
         original.hide_handles()
@@ -519,26 +525,26 @@ class ComponentTab(QWidget):
         self.scene._dragging_item = new
         self.scene._drag_offset   = drag_offset
 
-    def set_element_controls_enabled(self, enabled: bool):
+    def set_item_controls_enabled(self, enabled: bool):
         self.property_panel.setEnabled(enabled)
-        self.remove_element_btn.setEnabled(enabled)
+        self.remove_item_btn.setEnabled(enabled)
 
     @Slot()
-    def remove_selected_element(self):
-        element = self.get_selected_element()
-        if element:
+    def remove_selected_item(self):
+        item = self.get_selected_item()
+        if item:
             reply = QMessageBox.question(self, "Remove Element",
-                                         f"Are you sure you want to remove '{element.name}'?",
+                                         f"Are you sure you want to remove '{item.name}'?",
                                          QMessageBox.Yes | QMessageBox.No)
             if reply == QMessageBox.No:
                 self.show_status_message("Element removal cancelled.", "info")
                 return
-            command = RemoveElementCommand(element, self)
+            command = RemoveElementCommand(item, self)
             self.undo_stack.push(command)
             self.on_selection_changed()
-            self.show_status_message(f"Element '{element.name}' removed.", "info")
+            self.show_status_message(f"Element '{item.name}' removed.", "info")
         else:
-            self.show_status_message("No element selected to remove.", "warning")
+            self.show_status_message("No item selected to remove.", "warning")
 
     def update_color_display(self):
         self.current_color_display.setStyleSheet(f"background-color: {self._current_drawing_color.name()}; border: 1px solid black;")

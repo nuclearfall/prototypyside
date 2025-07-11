@@ -42,11 +42,11 @@ class ExportManager:
                 )
                 painter.drawPixmap(0, 0, scaled_bg)
 
-        # Create a temporary scene for rendering the template elements
+        # Create a temporary scene for rendering the template items
         scene_rect = QRectF(0, 0, template.width_px, template.height_px)
         temp_scene = ComponentGraphicsScene(scene_rect, parent=None)
-        for element in template.elements:
-            temp_scene.addItem(element)
+        for item in template.items:
+            temp_scene.addItem(item)
 
         # Render the scene content onto the QImage
         temp_scene.render(painter,

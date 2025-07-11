@@ -8,18 +8,19 @@ from typing import Optional, List, Dict, Any
 from PySide6.QtWidgets import (QMainWindow, QDockWidget, QTabWidget, QWidget,
                                QVBoxLayout, QLabel, QFileDialog, QMessageBox,
                                QToolBar, QPushButton, QHBoxLayout, QSizePolicy) # Added QPushButton, QHBoxLayout for temporary property panel layout
-from PySide6.QtCore import Qt, Signal, Slot, QTimer, QStandardPaths
+from PySide6.QtCore import Qt, Signal, Slot, QTimer, QStandardPaths, QSaveFile
 from PySide6.QtGui import QIcon, QAction, QKeySequence, QShortcut, QUndoStack, QUndoGroup, QUndoCommand
 
 # Import the new ComponentTab
-from prototypyside.views.component_tab import ComponentTab
-from prototypyside.views.layout_tab import LayoutTab
+from prototypyside.views.tabs.component_tab import ComponentTab
+from prototypyside.views.tabs.layout_tab import LayoutTab
 
 # Other imports that are still needed for MainDesignerWindow's global concerns
 # (e.g., AppSettings if it's truly global, not per-tab)
 from prototypyside.services.app_settings import AppSettings
 from prototypyside.widgets.page_size_dialog import PageSizeDialog # Used in New Template dialog
-from prototypyside.services.proto_registry import RootRegistry, ProtoRegistry
+from prototypyside.services.proto_registry import ProtoRegistry
+from prototypyside.utils.proto_helpers import get_prefix
 
 def MetaKeySequence(key: str) -> QKeySequence:
     """
@@ -52,7 +53,8 @@ class MainDesignerWindow(QMainWindow):
 
         # Main application settings, might be shared or passed to tabs
         self.settings = AppSettings(display_unit="px", print_dpi=300)
-        self.registry = RootRegistry(settings=self.settings)
+        self.registry = ProtoRegistry(parent=self)
+        self.registries = self.registry.all()
         self._tab_map = {}  # pid: tab
 
         self.tab_widget: Optional[QTabWidget] = None
@@ -73,10 +75,12 @@ class MainDesignerWindow(QMainWindow):
         self.setup_actions_and_menus()
 
         # Add initial tabs
-        self.add_new_component_tab()
-        # self.add_new_layout_tab()
+        self.add_new_tab(ComponentTab, "ct")
+        self.add_new_tab(LayoutTab, "lt")
 
-    ### GUI Setup ###
+
+
+    ### --- GUI Setup --- ###
     def setup_ui(self):
         self.tab_widget = QTabWidget()
         self.tab_widget.setTabsClosable(True)
@@ -168,10 +172,10 @@ class MainDesignerWindow(QMainWindow):
         file_menu = self.menuBar().addMenu("&File")
 
         new_action = file_menu.addAction("&New Component Tab")
-        new_action.triggered.connect(self.add_new_component_tab)
+        new_action.triggered.connect(lambda: self.add_new_tab(ComponentTab, "ct"))
 
         new_action = file_menu.addAction("New &Layout Tab")
-        new_action.triggered.connect(self.add_new_layout_tab)
+        new_action.triggered.connect(lambda: self.add_new_tab(LayoutTab, "lt"))
 
         open_act = file_menu.addAction("&Open")
         open_act.setShortcut(QKeySequence.Open)
@@ -314,7 +318,7 @@ class MainDesignerWindow(QMainWindow):
             self.properties_dock.show()
             self.layers_dock.show()
             print("property_panel sizeHint:", active_tab.property_panel.sizeHint())
-            print("remove_element_btn sizeHint:", active_tab.remove_element_btn.sizeHint())
+            print("remove_item_btn sizeHint:", active_tab.remove_item_btn.sizeHint())
             # Place ComponentTab's widgets into the main window docks
             self.toolbar_dock.setWidget(active_tab.measure_toolbar) #
             self.palette_dock.setWidget(active_tab.palette) #
@@ -326,7 +330,7 @@ class MainDesignerWindow(QMainWindow):
             prop_layout = QVBoxLayout(prop_container)
             prop_layout.setContentsMargins(0, 0, 0, 0)
             prop_layout.addWidget(active_tab.property_panel)
-            prop_layout.addWidget(active_tab.remove_element_btn, alignment=Qt.AlignCenter) #
+            prop_layout.addWidget(active_tab.remove_item_btn, alignment=Qt.AlignCenter) #
             prop_layout.addStretch(1)
             self.properties_dock.setWidget(prop_container)
 
@@ -354,7 +358,7 @@ class MainDesignerWindow(QMainWindow):
             prop_layout.setContentsMargins(0, 0, 0, 0)
             prop_layout.addWidget(active_tab.property_panel)
             prop_layout.addWidget(active_tab.margin_spacing_panel)
-            prop_layout.addWidget(active_tab.remove_slot_btn, alignment=Qt.AlignCenter)
+            prop_layout.addWidget(active_tab.remove_item_btn, alignment=Qt.AlignCenter)
             prop_layout.addStretch(1)
             self.properties_dock.setWidget(prop_container)
 
@@ -366,7 +370,6 @@ class MainDesignerWindow(QMainWindow):
             if index != -1:
                 self.tab_widget.setTabText(index, title)
 
-
     def get_current_tab(self) -> Optional[ComponentTab]:
         tw = getattr(self, "tab_widget")
         return tw.currentWidget() if isinstance(tw, QTabWidget) else None
@@ -376,39 +379,42 @@ class MainDesignerWindow(QMainWindow):
         return self.tab_widget.widget(index) if isinstance(tw, QTabWidget) else None
 
     @Slot()
-    def add_new_layout_tab(self):
-        new_registry = self.registry.create_child_registry()
-        new_template = new_registry.create("lt")
-        new_tab = LayoutTab(parent=self, main_window=self, template=new_template, registry=new_registry)
+    def add_new_tab(self, tab, prefix):
+        registry = ProtoRegistry()
+        self.registries.append(registry)
+        template = registry.create(prefix, registry=registry)
+        new_tab = tab(parent=self, main_window=self, template=template, registry=registry)
         self.undo_group.addStack(new_tab.undo_stack)
-        # Connect the tab's status message signal to the main window's slot
+        # Connect the tab's status message signal to the main window's item
         new_tab.status_message_signal.connect(self.show_status_message)
         new_tab.tab_title_changed.connect(self.on_tab_title_changed)
-        index = self.tab_widget.addTab(new_tab, new_template.name)
-        self._tab_map[new_template.pid] = index
+        index = self.tab_widget.addTab(new_tab, template.name)
+        self._tab_map[template.pid] = index
         self.tab_widget.setCurrentIndex(index)
         self.show_status_message("New template tab created.", "info")
         self.on_tab_changed(index) # Manually trigger update for new tab
 
-    @Slot()
-    def add_new_component_tab(self):
-        new_registry = self.registry.create_child_registry()
-        new_template = new_registry.create("ct")
-        new_tab = ComponentTab(parent=self, main_window=self, template=new_template, registry=new_registry)
-        self.undo_group.addStack(new_tab.undo_stack)
-        # Connect the tab's status message signal to the main window's slot
-        new_tab.status_message_signal.connect(self.show_status_message)
-        new_tab.tab_title_changed.connect(self.on_tab_title_changed)
-        index = self.tab_widget.addTab(new_tab, new_template.name)
-        self._tab_map[new_template.pid] = index
-        self.tab_widget.setCurrentIndex(index)
-        self.show_status_message("New template tab created.", "info")
-        self.on_tab_changed(index) # Manually trigger update for new tab
+    # @Slot()
+    # def add_new_component_tab(self):
+    #     new_registry = ProtoRegistry()
+    #     self.registries.append(new_registry)
+    #     new_template = new_registry.create("ct")
+    #     new_tab = ComponentTab(parent=self, main_window=self, template=new_template, registry=new_registry)
+    #     self.undo_group.addStack(new_tab.undo_stack)
+    #     # Connect the tab's status message signal to the main window's item
+    #     new_tab.status_message_signal.connect(self.show_status_message)
+    #     new_tab.tab_title_changed.connect(self.on_tab_title_changed)
+    #     index = self.tab_widget.addTab(new_tab, new_template.name)
+    #     self._tab_map[new_template.pid] = index
+    #     self.tab_widget.setCurrentIndex(index)
+    #     self.show_status_message("New template tab created.", "info")
+    #     self.on_tab_changed(index) # Manually trigger update for new tab
 
     # ————— Template File ———— #
     @Slot()
     def on_save_template(self):
         tab = self.get_current_tab()
+        template = tab.template
         if not tab:
             return
 
@@ -417,8 +423,8 @@ class MainDesignerWindow(QMainWindow):
         if not path:
             return
 
-        # Dump just that registry out
-        self.root_registry.dump_proto_registry(tab.registry, path)
+        Path(path).write_text(json.dumps(tab.registry.to_dict(template)), encoding="utf-8")
+
         self.show_status_message(f"Template saved to {path}", "success")
         # update tab title if you like:
         self.tab_widget.setTabText(self.tab_widget.currentIndex(), Path(path).stem)
@@ -428,21 +434,25 @@ class MainDesignerWindow(QMainWindow):
         path, _ = QFileDialog.getOpenFileName(self, "Open Template…", "", "JSON Files (*.json)")
         if not path:
             return
+        with open(path, "r", encoding="utf-8") as f:
+            data = json.load(f)
 
-        try:
-            # Load it into a fresh child registry
-            new_reg = self.root_registry.load_proto_registry(path)
-            # Then create a tab around its root object:
-            tpl = next(iter(new_reg._store.values()))  # or however you pick the “root” PID
+        template, registry = ProtoRegistry.from_dict(data)
+        self.registries.append(registry)
+        prefix = get_prefix(template.pid)
+        if prefix == 'ct':
             new_tab = ComponentTab(parent=self,
-                                   registry=new_reg,
-                                   template=tpl)
-            # … wire up undo_group, signals, etc. …
-            idx = self.tab_widget.addTab(new_tab, Path(path).stem)
-            self.tab_widget.setCurrentIndex(idx)
-        except Exception as e:
-            QMessageBox.critical(self, "Load Error", f"Could not load template: {e}")
-            self.show_status_message(f"Error loading template: {e}", "error")
+                                   main_window=self,
+                                   registry=registry,
+                                   template=template)
+        elif prefix == "lt":
+             new_tab = LayoutTab(parent=self,
+                                   main_window=self,
+                                   registry=registry,
+                                   template=template)         
+        # … wire up undo_group, signals, etc. …
+        idx = self.tab_widget.addTab(new_tab, Path(path).stem)
+        self.tab_widget.setCurrentIndex(idx)
 
     @Slot(int)
     def close_tab(self, index: int):
@@ -467,20 +477,19 @@ class MainDesignerWindow(QMainWindow):
 
     @Slot()
     def save_template(self):
-        pass
-        # tab = self.get_current_tab()
-        # if not tab:
-        #     return
+        tab = self.get_current_tab()
+        if not tab:
+            return
 
-        # # If we’ve never saved before, fall back to Save As…
-        # if not getattr(tab, "file_path", None):
-        #     return self.on_save_as()
-
-        # self._write_tab_to_path(tab, tab.file_path)
-        # self.show_status_message(f"Saved to {tab.file_path}", "success")
-        # # update the tab title if needed
-        # idx = self.tab_widget.indexOf(tab)
-        # self.tab_widget.setTabText(idx, Path(tab.file_path).stem)
+        path = tab.file_path
+        if not path:
+            self.save_as_template()
+            return
+        self.write_template_to_path(tab.template, tab.file_path)
+        self.show_status_message(f"Saved to {tab.file_path}", "success")
+        # update the tab title if needed
+        idx = self.tab_widget.indexOf(tab)
+        self.tab_widget.setTabText(idx, Path(tab.file_path).stem)
 
     @Slot()
     def save_as_template(self):
@@ -493,16 +502,15 @@ class MainDesignerWindow(QMainWindow):
             self.show_status_message("Save cancelled", "info")
             return
 
-        self._write_tab_to_path(tab, path)
+        self._write_template_to_path(tab.template, tab.registry, path)
         tab.file_path = path
         self.show_status_message(f"Saved to {path}", "success")
         idx = self.tab_widget.indexOf(tab)
         self.tab_widget.setTabText(idx, Path(path).stem)
 
-    def _write_tab_to_path(self, tab, path: str):
+    def _write_template_to_path(self, template, registry, path: str):
         try:
-            # Grab only that template’s data
-            data = self.registry.to_dict(root_pid=tab.template.pid)
+            data = registry.to_dict(template)
             saver = QSaveFile(path, self)
             if not saver.open(QSaveFile.WriteOnly | QSaveFile.Text):
                 raise IOError(f"Cannot open {path} for writing")
@@ -512,6 +520,7 @@ class MainDesignerWindow(QMainWindow):
         except Exception as e:
             QMessageBox.critical(self, "Save Error", str(e))
             self.show_status_message(f"Error saving: {e}", "error")
+
     @Slot()
     def save_current_tab_template(self):
         current_tab = self.get_current_tab()
@@ -530,7 +539,7 @@ class MainDesignerWindow(QMainWindow):
                 root_pid = current_template.pid
                 print(f"Saving template with root pid: {root_pid}")
                 
-                self.registry.save_to_file(root_pid, path)
+                current_tab.save_to_file(root_pid, path)
                 self.show_status_message(f"Template saved to {path}", "success")
                 current_tab.tab_title_changed.emit(Path(path).stem) # Update tab title
             except Exception as e:
@@ -549,76 +558,56 @@ class MainDesignerWindow(QMainWindow):
         path, _ = QFileDialog.getSaveFileName(
             self, "Save Project", "", "JSON Files (*.json)"
         )
-        if not path:
-            return
+        pass 
+        # if not path:
+        #     return
 
-        try:
-            data = self.root_registry.to_dict()
-            saver = QSaveFile(path, self)
-            if not saver.open(QSaveFile.WriteOnly | QSaveFile.Text):
-                raise IOError(f"Cannot open {path}")
-            saver.write(json.dumps(data, indent=2).encode("utf-8"))
-            if not saver.commit():
-                raise IOError(f"Failed to commit save to {path}")
-            self.show_status_message(f"Project saved to {path}", "success")
-        except Exception as e:
-            QMessageBox.critical(self, "Save Project Error", str(e))
-            self.show_status_message(f"Error saving project: {e}", "error")
+        # try:
+        #     data = self.registry.to_dict()
+        #     saver = QSaveFile(path, self)
+        #     if not saver.open(QSaveFile.WriteOnly | QSaveFile.Text):
+        #         raise IOError(f"Cannot open {path}")
+        #     saver.write(json.dumps(data, indent=2).encode("utf-8"))
+        #     if not saver.commit():
+        #         raise IOError(f"Failed to commit save to {path}")
+        #     self.show_status_message(f"Project saved to {path}", "success")
+        # except Exception as e:
+        #     QMessageBox.critical(self, "Save Project Error", str(e))
+        #     self.show_status_message(f"Error saving project: {e}", "error")
 
     @Slot()
     def on_open_project(self):
-        path, _ = QFileDialog.getOpenFileName(
-            self, "Open Project", "", "JSON Files (*.json)"
-        )
-        if not path:
-            return
+        pass
+        # path, _ = QFileDialog.getOpenFileName(
+        #     self, "Open Project", "", "JSON Files (*.json)"
+        # )
+        # if not path:
+        #     return
 
-        try:
-            with open(path, "r", encoding="utf-8") as f:
-                data = json.load(f)
+        # try:
+        #     with open(path, "r", encoding="utf-8") as f:
+        #         data = json.load(f)
+        #     # 1) Rebuild the entire global registry + all children
 
-            # 1) Rebuild the entire global registry + all children
-            self.root_registry.from_dict(data)
+        #     # 2) Clear out UI tabs & undo stacks
+        #     self.tab_widget.clear()
+        #     self.undo_group.clear()
 
-            # 2) Clear out UI tabs & undo stacks
-            self.tab_widget.clear()
-            self.undo_group.clear()
+        #     # 3) Re-create one tab per child registry
+        #         # wire up undo & signals
+        #         self.undo_group.addStack(tab.undo_stack)
+        #         tab.status_message_signal.connect(self.show_status_message)
+        #         tab.tab_title_changed.connect(self.on_tab_title_changed)
 
-            # 3) Re-create one tab per child registry
-            for child_reg in self.root_registry.children:
-                # find the “root” template object in that registry:
-                # assume it’s the one whose pid prefix is 'ct' or 'lt'
-                for obj in child_reg.get_all():
-                    prefix = obj.pid.split("_", 1)[0]
-                    if prefix == "ct":
-                        tab = ComponentTab(
-                            parent=self, registry=child_reg, template=obj
-                        )
-                        break
-                    elif prefix == "lt":
-                        tab = LayoutTab(
-                            parent=self, registry=child_reg, template=obj,
-                            settings=self.settings
-                        )
-                        break
-                else:
-                    # no recognizable template—skip
-                    continue
+        #         # add to UI
+        #         idx = self.tab_widget.addTab(tab, tab.template.name)
+        #         # you might call self.on_tab_changed(idx) here if you want it to become active
 
-                # wire up undo & signals
-                self.undo_group.addStack(tab.undo_stack)
-                tab.status_message_signal.connect(self.show_status_message)
-                tab.tab_title_changed.connect(self.on_tab_title_changed)
+        #     self.show_status_message(f"Project loaded from {path}", "success")
 
-                # add to UI
-                idx = self.tab_widget.addTab(tab, tab.template.name)
-                # you might call self.on_tab_changed(idx) here if you want it to become active
-
-            self.show_status_message(f"Project loaded from {path}", "success")
-
-        except Exception as e:
-            QMessageBox.critical(self, "Open Project Error", str(e))
-            self.show_status_message(f"Error loading project: {e}", "error")
+        # except Exception as e:
+        #     QMessageBox.critical(self, "Open Project Error", str(e))
+        #     self.show_status_message(f"Error loading project: {e}", "error")
 
     @Slot()
     def on_close_project(self):
@@ -631,14 +620,14 @@ class MainDesignerWindow(QMainWindow):
             return
 
         # 1) Clear registry (drops all children & global objects)
-        self.root_registry.from_dict({"global": {}, "children": []})
+        self.registry.from_dict({"global": {}, "children": []})
 
         # 2) Clear the UI and undo stacks
         self.tab_widget.clear()
         self.undo_group.clear()
 
         # 3) Optionally create a fresh blank tab:
-        self.add_new_component_tab()
+        self.add_new_tab(ComponentTab, "ct")
         self.show_status_message("Project closed; new blank template created.", "info")
 
     ### Copy/Pase methods

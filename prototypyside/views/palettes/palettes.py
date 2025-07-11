@@ -13,9 +13,9 @@ class ComponentListWidget(QListWidget):
             return
 
         mime_data = QMimeData()
-        element_type = item.data(Qt.UserRole)
-        if element_type:
-            mime_data.setText(element_type)
+        item_type = item.data(Qt.UserRole)
+        if item_type:
+            mime_data.setText(item_type)
 
         drag = QDrag(self)
         drag.setMimeData(mime_data)

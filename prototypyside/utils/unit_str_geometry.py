@@ -19,11 +19,11 @@ class UnitStrGeometry:
     `unit` (defaults to 'in'). Pixel values can be accessed via the
     `.px` property or `.to("px")`.
     """
-    __slots__ = (
+    __items__ = (
         "_pos_x", "_pos_y",
         "_rect_x", "_rect_y",
         "_w", "_h",
-        "_unit", "_dpi",
+        "_unit", "_dpi", "_print_dpi"
     )
 
     def __init__(
@@ -39,9 +39,11 @@ class UnitStrGeometry:
         width:  Number | None   = None,
         height: Number | None   = None,
         dpi:    int             = 144,
+        print_dpi: int          = 300,
         unit: Optional[str] = None,
     ):
         self._dpi = dpi
+        self._print_dpi = print_dpi
         self._unit = (unit or "in").lower().replace('"', "in")
 
         # Unpack Qt types. These values are assumed to be in pixels unless they
@@ -76,6 +78,10 @@ class UnitStrGeometry:
     @property
     def dpi(self) -> int:
         return self._dpi
+
+    @property 
+    def print(self) -> int:
+        return self._print_dpi
 
     @property
     def round(self) -> UnitStrGeometry:
@@ -156,17 +162,18 @@ class UnitStrGeometry:
             dpi=dpi,
         )
 
-    def dict(self) -> dict:
+    def to_dict(self) -> dict:
         """JSON-friendly dump of the geometry."""
         return {
             "unit": self.unit,
             "dpi": self.dpi,
-            "pos": {"x": self._pos_x.dict(), "y": self._pos_y.dict()},
+            "print_dpi": self._print_dpi,
+            "pos": {"x": self._pos_x.to_dict(), "y": self._pos_y.to_dict()},
             "rect": {
-                "x": self._rect_x.dict(),
-                "y": self._rect_y.dict(),
-                "width": self._w.dict(),
-                "height": self._h.dict(),
+                "x": self._rect_x.to_dict(),
+                "y": self._rect_y.to_dict(),
+                "width": self._w.to_dict(),
+                "height": self._h.to_dict(),
             },
         }
 
@@ -184,6 +191,7 @@ class UnitStrGeometry:
             rect_y=UnitStr.from_dict(rect_data.get("y", {}), dpi=dpi),
             width=UnitStr.from_dict(rect_data.get("width", {}), dpi=dpi),
             height=UnitStr.from_dict(rect_data.get("height", {}), dpi=dpi),
+            print_dpi=blob.get("print_dpi", 300),
             dpi=dpi,
             unit=blob.get("unit", "in"),
         )

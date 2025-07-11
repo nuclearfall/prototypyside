@@ -174,7 +174,7 @@ class UnitStrGeometryField(QWidget):
         self.property_name = property_name
         self._display_unit = display_unit
         if isinstance(self.target_item, ComponentElement):
-            self.target_item.element_changed.connect(self.update_from_element)
+            self.target_item.item_changed.connect(self.update_from_item)
 
         if self.target_item and self.property_name:
             geom: Optional[UnitStrGeometry] = getattr(self.target_item, self.property_name, None)
@@ -190,7 +190,7 @@ class UnitStrGeometryField(QWidget):
         self.display_unit = display_unit
         self.setTarget(self.target_item, self.property_name, display_unit=display_unit)
 
-    def update_from_element(self):
+    def update_from_item(self):
         if self.target_item:
             self._update_display(self.target_item.geometry)
 

@@ -170,9 +170,9 @@ class PropertyPanel(QWidget):
         self.font_toolbar.font_changed.connect(self.property_changed.emit)
         self.keep_aspect_checkbox.toggled.connect(lambda t: self._handle_property_change("keep_aspect", t))
 
-    def set_target(self, element: Optional[ComponentElement]):
-        self.target_item = element
-        if not element:
+    def set_target(self, item: Optional[ComponentElement]):
+        self.target_item = item
+        if not item:
             self.clear_target()
             return
         # Block signals to prevent firing while populating
@@ -180,33 +180,33 @@ class PropertyPanel(QWidget):
             widget.blockSignals(True)
 
         # Populate common fields
-        self.pid_label.setText(element.pid)
-        self.template_pid_label.setText(element.template_pid or "N/A")
-        self.name_edit.setText(element.name)
-        self.content_text_edit.setTarget(element, "content")
-        self.geometry_field.setTarget(element, "geometry", display_unit=self._display_unit)
-        self.color_picker.set_color(element.color)
-        self.bg_color_picker.set_color(element.bg_color)
-        self.border_color_picker.set_color(element.border_color)
-        self.border_width_field.setTarget(element, "border_width", display_unit=self._display_unit)
+        self.pid_label.setText(item.pid)
+        self.template_pid_label.setText(item.template_pid or "N/A")
+        self.name_edit.setText(item.name)
+        self.content_text_edit.setTarget(item, "content")
+        self.geometry_field.setTarget(item, "geometry", display_unit=self._display_unit)
+        self.color_picker.set_color(item.color)
+        self.bg_color_picker.set_color(item.bg_color)
+        self.border_color_picker.set_color(item.border_color)
+        self.border_width_field.setTarget(item, "border_width", display_unit=self._display_unit)
         
-        alignment_text = self.alignment_rev_map.get(element.alignment, "Center")
+        alignment_text = self.alignment_rev_map.get(item.alignment, "Center")
         self.alignment_combo.setCurrentText(alignment_text)
 
         # Handle conditional widgets
-        self.font_toolbar.setVisible(hasattr(element, 'font'))
-        if hasattr(element, 'font'):
-            self.font_toolbar.setTarget(element)
+        self.font_toolbar.setVisible(hasattr(item, 'font'))
+        if hasattr(item, 'font'):
+            self.font_toolbar.setTarget(item)
 
-        self.keep_aspect_checkbox.setVisible(hasattr(element, 'keep_aspect'))
-        if hasattr(element, 'keep_aspect'):
-            self.keep_aspect_checkbox.setChecked(element.keep_aspect)
+        self.keep_aspect_checkbox.setVisible(hasattr(item, 'keep_aspect'))
+        if hasattr(item, 'keep_aspect'):
+            self.keep_aspect_checkbox.setChecked(item.keep_aspect)
         
         # Handle content widget type
-        if isinstance(element, TextElement):
-            self.content_text_edit.setText(element.content or "")
+        if isinstance(item, TextElement):
+            self.content_text_edit.setText(item.content or "")
             self.content_stack.setCurrentWidget(self.content_text_edit)
-        elif isinstance(element, ImageElement):
+        elif isinstance(item, ImageElement):
             self.content_stack.setCurrentWidget(self.content_path_button)
         else:
              self.form_layout.labelForField(self.content_stack).hide()
@@ -248,12 +248,12 @@ class PropertyPanel(QWidget):
 
     # def clear_target(self):
     #     # Disconnect change signal
-    #     if self.target_item and self._element_changed_conn:
+    #     if self.target_item and self._item_changed_conn:
     #         try:
-    #             self.target_item.element_changed.disconnect(self.refresh)
+    #             self.target_item.item_changed.disconnect(self.refresh)
     #         except (AttributeError, TypeError):
     #             pass
-    #     self._element_changed_conn = False
+    #     self._item_changed_conn = False
 
     #     self.target_item = None
     #     # Hide or clear your widgets as before…

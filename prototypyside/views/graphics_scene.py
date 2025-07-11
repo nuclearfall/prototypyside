@@ -9,12 +9,14 @@ from PySide6.QtWidgets import (
     QGraphicsSceneDragDropEvent
 )
 
-from prototypyside.utils.incremental_grid import IncrementalGrid
-from prototypyside.services.undo_commands import MoveElementCommand, ChangeElementPropertyCommand
+
+from prototypyside.services.undo_commands import MoveElementCommand, ChangeItemPropertyCommand
 from prototypyside.utils.graphics_item_helpers import is_movable
+from prototypyside.utils.ustr_helpers import with_pos
 from prototypyside.models.component_elements import ComponentElement
 
 if TYPE_CHECKING:
+    from prototypyside.utils.incremental_grid import IncrementalGrid
     from prototypyside.views.component_tab import ComponentTab  
     from prototypyside.models.component_template import ComponentTemplate
 
@@ -22,12 +24,12 @@ if TYPE_CHECKING:
 # Scene
 # -------------------------------------------------------------------------
 class ComponentScene(QGraphicsScene):
-    """Scene that hosts one template (background) + grid + user elements."""
+    """Scene that hosts one template (background) + grid + user items."""
     # signals used elsewhere in your app
-    element_dropped  = Signal(QPointF, str)
-    element_cloned   = Signal(ComponentElement, QPointF)
-    element_moved    = Signal()
-    element_resized  = Signal(object, str, object, object)
+    item_dropped  = Signal(QPointF, str)
+    item_cloned   = Signal(ComponentElement, QPointF)
+    item_moved    = Signal()
+    item_resized  = Signal(object, str, object, object)
     selectionChanged = Signal()
 
     # ──────────────────────────────── init ────────────────────────────────
@@ -62,7 +64,7 @@ class ComponentScene(QGraphicsScene):
         self._dragging_start_pos  = None
         self._drag_offset         = None
         self.resize_handle        = None
-        self.resizing_element     = None
+        self.resizing_item     = None
         self.resize_start_geom    = None
         self.resize_handle_type   = None
 
@@ -85,18 +87,13 @@ class ComponentScene(QGraphicsScene):
     def snap_to_grid(self, pos: QPointF, level: int = 3) -> QPointF:
         return self.inc_grid.snap_to_grid(pos, level)
 
-    def select_exclusive(self, element: QGraphicsItem):
-        """
-        Deselect all items except `element`, and select `element`.
-        """
-        # Deselect all other items
-        for item in self.selectedItems():
-            if item is not element:
-                item.setSelected(False)
-        # Select the desired element (if not already)
-        if element is not None and not element.isSelected():
-            element.setSelected(True)
-        # Emit selectionChanged signal if you want property panel, etc. to update
+    def select_exclusive(self, item: QGraphicsItem):
+        """Deselect all items except `item`, and select `item`."""
+        for other in self.selectedItems():
+            if other is not item:
+                other.setSelected(False)
+        if item is not None and not item.isSelected():
+            item.setSelected(True)
         self.selectionChanged.emit()
     # ───────────────────────────── mouse events ───────────────────────────
     # (unchanged except calls to self.snap_to_grid keep working)
@@ -107,10 +104,10 @@ class ComponentScene(QGraphicsScene):
             print("Entering resize event")
             self._resizing = True
             self.resize_handle = item
-            self.resizing_element = item.parentItem()
+            self.resizing_item = item.parentItem()
             # Save local position and rect at drag start (not sceneBoundingRect)
-            self.resize_start_item_geometry = self.resizing_element.geometry
-            # self.resize_start_item_rect = self.resizing_element.geometry.rect
+            self.resize_start_item_geometry = self.resizing_item.geometry
+            # self.resize_start_item_rect = self.resizing_item.geometry.rect
             event.accept()
             return
 
@@ -119,7 +116,7 @@ class ComponentScene(QGraphicsScene):
             # emit both the item to clone and the raw scene‐pos
             self._alt_drag_started = True
             print(f"Item: {item}, event: {event} and scenePos {event.scenePos()}")
-            self.element_cloned.emit(item, event.scenePos())
+            self.item_cloned.emit(item, event.scenePos())
             event.accept()
             return
 
@@ -130,10 +127,12 @@ class ComponentScene(QGraphicsScene):
             # Calculate the offset from the snapped *item's top-left corner* to the snapped *mouse press position*.
             # The item's position (pos()) is relative to its parent, which for top-level items is the scene's origin (0,0).
             # So, item.pos() is already in scene coordinates for top-level items.
+            print(f"Is there any item? {item}")
+            print(f"Snap position? {item.pos()}")
             snapped_item_pos_at_press = self.snap_to_grid(item.pos())
             snapped_mouse_press_pos = self.snap_to_grid(event.scenePos())
             self._drag_offset = snapped_mouse_press_pos - snapped_item_pos_at_press
-            print (f"On click, snapped item at press: {self.snapped_item_pos_at_press}, snapped mouse press pos {self.snapped_mouse_press_pos}, and drag offset {self._drag_offset}")
+            print (f"On click, snapped item at press: {snapped_item_pos_at_press}, snapped mouse press pos {snapped_mouse_press_pos}, and drag offset {self._drag_offset}")
             self._dragging_start_pos = QPointF(item.x(), item.y()) # Store the item's position before drag
             item.setPos(snapped_item_pos_at_press) # Snap item to grid immediately
             event.accept()
@@ -142,13 +141,13 @@ class ComponentScene(QGraphicsScene):
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event: QGraphicsSceneMouseEvent):
-        if self._resizing and self.resizing_element:
+        if self._resizing and self.resizing_item:
             # Snap the current mouse position to the grid!
             snapped_scene_pos = self.snap_to_grid(event.scenePos())
-            starting_scene_pos = self.resizing_element.mapToScene(self.resize_handle.pos())
+            starting_scene_pos = self.resizing_item.mapToScene(self.resize_handle.pos())
             delta_scene = snapped_scene_pos - starting_scene_pos
-            scene_rect = self.resizing_element.mapRectToScene(self.resizing_element.geometry.px.rect)
-            self.resizing_element.resize_from_handle(
+            scene_rect = self.resizing_item.mapRectToScene(self.resizing_item.geometry.px.rect)
+            self.resizing_item.resize_from_handle(
                 self.resize_handle.handle_type,
                 delta_scene,
                 scene_rect
@@ -171,25 +170,28 @@ class ComponentScene(QGraphicsScene):
     def mouseReleaseEvent(self, event: QGraphicsSceneMouseEvent):
         # Commit move to undo stack (if needed)
         if self._dragging_item and self._dragging_start_pos is not None:
+            geom = self._dragging_item.geometry
             old_pos = self._dragging_start_pos
+            old = with_pos(geom, old_pos)
             new_pos = self._dragging_item.pos()
+            new = with_pos(geom, new_pos)
+
             if old_pos != new_pos:
-                command = MoveElementCommand(self._dragging_item, new_pos, old_pos)
-                self.tab.undo_stack.push(command)
+                self.item_resized.emit(self._dragging_item, "geometry", new, old)
                 
-        elif self._resizing and self.resizing_element and self.resize_start_item_geometry:
-            # The new geometry is the current geometry of the element after resizing
-            new = self.resizing_element.geometry
-            old = self.resizing_element.geometry = self.resize_start_item_geometry
+        elif self._resizing and self.resizing_item and self.resize_start_item_geometry:
+            # The new geometry is the current geometry of the item after resizing
+            new = self.resizing_item.geometry
+            old = self.resizing_item.geometry = self.resize_start_item_geometry
             # The old geometry was saved when the mouse press began
             # Create the command with the CORRECT new_geometry and old_geometry order
-            self.element_resized.emit(self.resizing_element, "geometry", new, old)
+            self.item_resized.emit(self.resizing_item, "geometry", new, old)
 
 
         # Reset state
         self._resizing = False
         self.resize_handle = None
-        self.resizing_element = None
+        self.resizing_item = None
         self.resize_start_item_geometry = None
         self.resize_start_item_rect = None
         self._dragging_item = None
@@ -213,9 +215,9 @@ class ComponentScene(QGraphicsScene):
 
     def dropEvent(self, event: QGraphicsSceneDragDropEvent):
         if event.mimeData().hasFormat('text/plain'):
-            element_type = event.mimeData().text()
+            item_type = event.mimeData().text()
             scene_pos = self.snap_to_grid(event.scenePos())
-            self.element_dropped.emit(scene_pos, element_type)
+            self.item_dropped.emit(scene_pos, item_type)
             event.acceptProposedAction()
         elif event.mimeData().hasUrls():
             # Let the item at the drop location handle the event
@@ -240,7 +242,7 @@ class ComponentScene(QGraphicsScene):
 # from prototypyside.utils.unit_str_geometry import UnitStrGeometry
 # from prototypyside.utils.graphics_item_helpers import is_movable
 # from prototypyside.views.graphics_items import ResizeHandle
-# from prototypyside.services.undo_commands import MoveElementCommand, ChangeElementPropertyCommand, ResizeAndMoveElementCommand
+# from prototypyside.services.undo_commands import MoveElementCommand, ChangeItemPropertyCommand, ResizeAndMoveElementCommand
 
 # from typing import Optional, TYPE_CHECKING
 # import math
@@ -257,10 +259,10 @@ class ComponentScene(QGraphicsScene):
 
 
 # class ComponentGraphicsScene(QGraphicsScene):
-#     element_dropped = Signal(QPointF, str)
-#     element_cloned = Signal(ComponentElement, QPointF)
-#     element_moved = Signal()
-#     element_resized = Signal()
+#     item_dropped = Signal(QPointF, str)
+#     item_cloned = Signal(ComponentElement, QPointF)
+#     item_moved = Signal()
+#     item_resized = Signal()
 #     selectionChanged = Signal()
 
 #     def __init__(self, settings, parent, tab):
@@ -275,7 +277,7 @@ class ComponentScene(QGraphicsScene):
 #         self._resizing = False
 #         self._dragging_item = None
 #         self.resize_handle = None
-#         self.resizing_element = None
+#         self.resizing_item = None
 #         self.resize_start_item_geometry = None
 #         self.resize_start_item_rect = None
 #         self._drag_offset = None
@@ -287,7 +289,7 @@ class ComponentScene(QGraphicsScene):
 #         self.selected_item: Optional['ComponentElement'] = None
 #         self._max_z_value = 0
 #         self.connecting_line: Optional[QGraphicsRectItem] = None
-#         self.duplicate_element = None
+#         self.duplicate_item = None
 
 #         self.setSceneRect(0, 0, self._template_width_px, self._template_height_px)
 
@@ -358,7 +360,7 @@ class ComponentScene(QGraphicsScene):
 
 
 
-#     def get_selected_element(self) -> Optional['ComponentElement']:
+#     def get_selected_item(self) -> Optional['ComponentElement']:
 #         """
 #         Returns the first selected ComponentElement in the scene, if any.
 #         """

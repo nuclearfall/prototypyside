@@ -13,30 +13,29 @@ from prototypyside.models.component_elements import ImageElement, TextElement
 from prototypyside.utils.unit_str import UnitStr
 from prototypyside.utils.unit_str_geometry import UnitStrGeometry
 from prototypyside.utils.ustr_helpers import with_pos, with_rect
-from prototypyside.utils.proto_helpers import get_prefix
+from prototypyside.utils.proto_helpers import get_prefix, issue_pid
 # Use TYPE_CHECKING for type hinting
 if TYPE_CHECKING:
     from prototypyside.models.component_elements import ComponentElement
 
+
 class ComponentTemplate(QGraphicsObject):
     template_changed = Signal()
-    element_z_order_changed = Signal()
+    item_z_order_changed = Signal()
     # border width and corner_radius are set based on a standard MTG card
-    def __init__(self, pid, geometry=UnitStrGeometry(width="2.5in", height="3.5in", dpi=144), parent = None, 
-        name=None, rounded_corners=True, corner_radius="0in", border_width="0in", template_pid=None):
+    def __init__(self, pid, geometry=UnitStrGeometry(width="2.5in", height="3.5in"), parent = None, 
+        name=None, registry=None, corner_radius=UnitStr("0in"), border=UnitStr("0in")):
         super().__init__(parent)
         self._pid = pid
         self._name = name
+        self._registry = registry
         self._geometry = geometry
         self._dpi = geometry.dpi
         self._pixmap = None
-        self.template_pid = template_pid
-        self.elements: List['ComponentElement'] = []
-        self.element_pids: List[str] = []
-        self.background_image_path: Optional[str] = None
-        self._rounded_corners = rounded_corners
-        self.border = UnitStr(border_width, dpi=self._dpi)
-        self.corner_radius = UnitStr(corner_radius, dpi=self._dpi)
+        self.items: List['ComponentElement'] = []
+        self._background_image: Optional[str] = None
+        self._border = border
+        self._corner_radius = corner_radius
 
     @property
     def pid(self) -> str:
@@ -67,7 +66,7 @@ class ComponentTemplate(QGraphicsObject):
         print(f"[SETTER] pos set to {self._geometry.px.pos}")
         self._geometry = new_geom
         super().setPos(self._geometry.px.pos)
-        # self.element_changed.emit()
+        # self.item_changed.emit()
         self.update()
 
     def boundingRect(self) -> QRectF:
@@ -76,17 +75,16 @@ class ComponentTemplate(QGraphicsObject):
     # This method is for when ONLY the rectangle (size) changes,
     # not the position.
     def setRect(self, new_rect: QRectF):
+        # Do not emit signals here. setRect shouldn't be called directly.
         if self._geometry.px.rect == new_rect:
             return
         self.prepareGeometryChange()
         with_rect(self._geometry, new_rect)
-        # self.element_changed.emit()
-        # self.update()
 
     def itemChange(self, change: QGraphicsItem.GraphicsItemChange, value):
         # This is called when the scene moves the item.
         if change == QGraphicsItem.ItemPositionChange and value != self.pos():
-            # Block signals to prevent a recursive loop if a connected slot
+            # Block signals to prevent a recursive loop if a connected item
             # also tries to set the position.
             signals_blocked = self.signalsBlocked()
             self.blockSignals(True)
@@ -108,46 +106,48 @@ class ComponentTemplate(QGraphicsObject):
         return self._geometry.px.height
 
     @property
-    def rounded_corners(self):
-        return self._rounded_corners
+    def corner_radius(self):
+        return self._corner_radius
 
-    @rounded_corners.setter
-    def rounded_corners(self, value:bool):
-        if self._rounded_corners != value:
-            self._rounded_corners = value
+    @corner_radius.setter
+    def corner_radius(self, value:bool):
+        if self._corner_radius != value:
+            self._corner_radius = value
             self.template_changed.emit()
             self.update()
 
-    def add_element(self, element) -> "ComponentElement":
-        if element in self.elements:
+    @property
+    def border(self):
+        return self._border
+    
+    def add_item(self, item) -> "ComponentElement":
+        if item in self.items:
             return
-        self.elements.append(element)
-
-        self.element_pids.append(element.pid)
-        max_z = max([e.zValue() for e in self.elements], default=0)
-        element.setZValue(max_z + 100)
-        # element.element_changed.connect(self._on_element_changed)
+        self.items.append(item)
+        max_z = max([e.zValue() for e in self.items], default=0)
+        item.setZValue(max_z + 100)
+        # item.item_changed.connect(self._on_item_changed)
         self.template_changed.emit()
-        self.element_z_order_changed.emit()
+        self.item_z_order_changed.emit()
 
-    def remove_element(self, element: 'ComponentElement'):
-        if element in self.elements:
-            self.elements.remove(element)
+    def remove_item(self, item: 'ComponentElement'):
+        if item in self.items:
+            self.items.remove(item)
             self.template_changed.emit()
-            self.element_z_order_changed.emit()
+            self.item_z_order_changed.emit()
 
-    def reorder_element_z(self, element: 'ComponentElement', direction: int):
-        if element not in self.elements:
+    def reorder_item_z(self, item: 'ComponentElement', direction: int):
+        if item not in self.items:
             return
 
         # Create a stable ordering using indices as secondary key
-        sorted_elements = sorted(
-            enumerate(self.elements),
+        sorted_items = sorted(
+            enumerate(self.items),
             key=lambda x: (x[1].zValue(), x[0])
         )
         
         # Find current position
-        current_idx = next((i for i, (idx, e) in enumerate(sorted_elements) if e is element), -1)
+        current_idx = next((i for i, (idx, e) in enumerate(sorted_items) if e is item), -1)
         if current_idx == -1:
             return
 
@@ -155,15 +155,15 @@ class ComponentTemplate(QGraphicsObject):
         new_idx = current_idx + direction
         
         # Validate move boundaries
-        if new_idx < 0 or new_idx >= len(sorted_elements):
+        if new_idx < 0 or new_idx >= len(sorted_items):
             return
 
-        # Get adjacent element
-        adj_element = sorted_elements[new_idx][1]
+        # Get adjacent item
+        adj_item = sorted_items[new_idx][1]
         
         # Swap z-values using robust method
-        current_z = element.zValue()
-        adj_z = adj_element.zValue()
+        current_z = item.zValue()
+        adj_z = adj_item.zValue()
         
         # Handle z-value collisions
         if direction > 0:
@@ -172,57 +172,63 @@ class ComponentTemplate(QGraphicsObject):
             new_z = adj_z - 1
         
         # Apply new z-values
-        element.setZValue(new_z)
-        adj_element.setZValue(current_z)
+        item.setZValue(new_z)
+        adj_item.setZValue(current_z)
         
         # Maintain unique z-values by resetting the entire stack
         self._normalize_z_values()
-        self.element_z_order_changed.emit()
+        self.item_z_order_changed.emit()
 
     def _normalize_z_values(self):
-        """Ensure all elements have unique, ordered z-values"""
+        """Ensure all items have unique, ordered z-values"""
         # Sort by current z-value
-        sorted_elements = sorted(self.elements, key=lambda e: e.zValue())
+        sorted_items = sorted(self.items, key=lambda e: e.zValue())
         
         # Assign new values with fixed increments
-        for z_value, el in enumerate(sorted_elements, start=100):
+        for z_value, el in enumerate(sorted_items, start=100):
             el.setZValue(z_value * 100)  # Fixed increment of 100
         
         # Sort internal list to match new order
-        self.elements.sort(key=lambda e: e.zValue())
+        self.items.sort(key=lambda e: e.zValue())
 
-    def bring_to_front(self, element: 'ComponentElement'):
-        if element not in self.elements:
+    def bring_to_front(self, item: 'ComponentElement'):
+        if item not in self.items:
             return
         
         # Set to max + increment
-        max_z = max(e.zValue() for e in self.elements)
-        element.setZValue(max_z + 100)
+        max_z = max(e.zValue() for e in self.items)
+        item.setZValue(max_z + 100)
         self._normalize_z_values()
-        self.element_z_order_changed.emit()
+        self.item_z_order_changed.emit()
 
-    def send_to_back(self, element: 'ComponentElement'):
-        if element not in self.elements:
+    def send_to_back(self, item: 'ComponentElement'):
+        if item not in self.items:
             return
         
         # Set to min - increment
-        min_z = min(e.zValue() for e in self.elements)
-        element.setZValue(min_z - 100)
+        min_z = min(e.zValue() for e in self.items)
+        item.setZValue(min_z - 100)
         self._normalize_z_values()
-        self.element_z_order_changed.emit()
+        self.item_z_order_changed.emit()
 
-    def set_background_image(self, path: str):
-        if Path(path).exists():
-            self.background_image_path = path
-            self.template_changed.emit() # Re-add signal emission
-            print(f"path from gc_template {path}")
-            return True
-        return False
+    @property
+    def background_image(self):
+        return self._background_image
 
-    # def _on_element_changed(self):
-    #     # Trigger redraw of entire template and notify any listeners
-    #     self.template_changed.emit()
-    #     self.update()
+    @background_image.setter
+    def background_image(self, path):
+        if not path:
+            self._background_image = None
+            return
+
+        path = Path(path)  # Only now that we know it's not None
+        if path.exists():
+            self._background_image = path
+            self.update()
+        else:
+            self._background_image = None
+            print(f"[Warning] Background image not found: {path}")
+
     def paint(self, painter: QPainter, option, widget=None):
         rect = self.boundingRect()
         painter.setRenderHint(QPainter.Antialiasing)
@@ -231,8 +237,8 @@ class ComponentTemplate(QGraphicsObject):
         painter.save()
         painter.setClipRect(rect)
         painter.setPen(Qt.NoPen)
-        if self.background_image_path:
-            img = QImage(self.background_image_path)
+        if self.background_image:
+            img = QImage(self.background_image)
             if not img.isNull():
                 # drawImage(targetRect, image) will scale it to fill rect
                 painter.drawImage(rect, img)
@@ -269,66 +275,53 @@ class ComponentTemplate(QGraphicsObject):
             painter.setPen(QPen(Qt.black, thickness_px))
             painter.drawPath(path)
             painter.restore()
-    # def paint(self, painter: QPainter, option, widget=None):
-    #     rect = self.boundingRect()
-    #     painter.setRenderHint(QPainter.Antialiasing)
-    #     painter.setClipRect(rect)
-    #     # Draw background
-    #     if self.background_image_path:
-    #         bg_image = QImage(self.background_image_path)
-    #         if not bg_image.isNull():
-    #             painter.drawImage(rect, bg_image)
-    #         else:
-    #             painter.fillRect(rect, Qt.white)
-    #     else:
-    #         painter.fillRect(rect, Qt.white)
-
-    #     # Draw border if defined
-    #     if self.border.value > 0:
-    #         thickness_px = self.border.px          
-    #         radius_px = self.corner_radius.px
-
-    #         inset = thickness_px / 2
-    #         inner_rect = QRectF(
-    #             rect.x() + inset,
-    #             rect.y() + inset,
-    #             rect.width() - thickness_px,
-    #             rect.height() - thickness_px
-    #         )
-
-    #         # Clamp radius to avoid drawing errors
-    #         max_radius = min(inner_rect.width(), inner_rect.height()) / 2
-    #         radius_px = max(0, min(radius_px - inset, max_radius))
-
-    #         path = QPainterPath()
-    #         if radius_px > 0:
-    #             path.addRoundedRect(inner_rect, radius_px, radius_px)
-    #         else:
-    #             path.addRect(inner_rect)
-
-    #         painter.setPen(QPen(Qt.black, thickness_px))
-    #         painter.setBrush(Qt.NoBrush)
-    #         painter.drawPath(path)
 
     def to_dict(self) -> Dict[str, Any]:
+        print("Is this serializing?")
+        self._geometry
+        self._border
         data = {
             'pid': self._pid,
             'name': self._name,
-            'geometry': self._geometry.dict(),
-            'background_image_path': self.background_image_path,
-            'elements': [e.to_dict() for e in self.elements]
+            'geometry': self._geometry.to_dict(),
+            'background_image': str(self.background_image) if self.background_image else None,
+            'items': [e.to_dict() for e in self.items],
+            'border': self.border.to_dict(),
+            'corner_radius': self.corner_radius.to_dict()
         }
         return data
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any]) -> 'ComponentTemplate':
-        geometry = UnitStrGeometry.from_dict(data.get("geometry"))
-        template = cls(
-            pid=data['pid'],
-            geometry=geometry,
-            name=data.get('name', None),
+    def from_dict(cls, data: dict, registry, is_clone=False):
+        geom = UnitStrGeometry.from_dict(data["geometry"])
+        pid = data.get("pid")
+        prefix = get_prefix(pid)
+        background_image = data.get("background_image")
+
+        if is_clone:
+            pid = issue_pid("cc") # ComponentClone pid for is_clone
+        inst = cls(
+                    pid=pid, 
+                    geometry=geom, 
+                    name=data.get("name") if is_clone is False else None,
+                    border=UnitStr.from_dict(data.get("border")),
+                    corner_radius=data.get("corner_radius"),
         )
-        template.background_image_path = data.get('background_image_path')
-        template._elements = data.get('elements')
-        return template
-        
+        inst.background_image = Path(background_image) if background_image else None
+        registry.register(inst)
+
+        inst.items = []
+        for e in data.get("items", []):
+            item_pid = e.get("pid")
+            prefix = get_prefix(item_pid)
+            if prefix == 'ie':
+                item = ImageElement.from_dict(e, registry, is_clone=is_clone)
+            elif prefix == 'te':
+                item = TextElement.from_dict(e, registry, is_clone=is_clone)
+            else:
+                raise ValueError(f"Unknown item prefix {prefix!r}")
+
+            item.setParentItem(inst)
+            inst.items.append(item)
+
+        return inst

@@ -17,7 +17,7 @@ Assumptions
 ===========
 * A ComponentTemplate exposes:
     - `pid` (str)
-    - `elements` (list[dict]) where bound fields are expressed as
+    - `items` (list[dict]) where bound fields are expressed as
       `name = "@field"`.
     - `apply_data(row_dict)` -> ComponentInstance
 * Static templates either have `csv_rows = []` attribute **or** the caller does
@@ -80,10 +80,10 @@ class MergeManager:  # pylint: disable=too-many-instance-attributes
     # ------------------------------------------------------------------
     @staticmethod
     def _get_bound_fields(template: ComponentTemplate) -> set[str]:
-        """Extract @bound field names from template elements."""
+        """Extract @bound field names from template items."""
         return {
             elem["name"][1:]
-            for elem in getattr(template, "elements", [])
+            for elem in getattr(template, "items", [])
             if isinstance(elem.get("name"), str) and elem["name"].startswith("@")
         }
 

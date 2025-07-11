@@ -18,7 +18,7 @@ class LayoutToolbar(QWidget):
     """
 
     # Signals emitted by toolbar controls
-    page_size_changed = Signal(str, QPageSize)    # (display_string, QPageSize)
+    page_size_changed = Signal(str)    # (display_string, QPageSize)
     orientation_changed = Signal(bool)
     grid_size_changed = Signal(int, int)
     margin_changed = Signal(str, int)
@@ -36,28 +36,32 @@ class LayoutToolbar(QWidget):
 
         # --- Page Size ---
         self.page_size_combo = QComboBox(self)
-        self.page_size_combo.addItems(list(PAGE_SIZES.keys()))
-        self.page_size_combo.currentTextChanged.connect(self._on_page_size_changed)
+        # Populate combo with userData=key
+        for key, cfg in PAGE_SIZES.items():
+            self.page_size_combo.addItem(cfg["display"], key)
+
+        # Connect to the index‐changed overload so we get an int
+        self.page_size_combo.currentIndexChanged[int].connect(
+            self._on_page_size_changed
+        )
         layout.addWidget(QLabel("Page Size:", self))
         layout.addWidget(self.page_size_combo)
 
         # --- Orientation ---
         self.orientation_checkbox = QCheckBox("Landscape", self)
-        self.orientation_checkbox.stateChanged.connect(
-            lambda state: self.orientation_changed.emit(state == Qt.Checked)
-        )
+        self.orientation_checkbox.toggled.connect(self.orientation_changed)
         layout.addWidget(self.orientation_checkbox)
 
         # --- Grid Dimensions ---
         self.rows_spin = QSpinBox(self)
         self.rows_spin.setRange(1, 20)
         self.rows_spin.valueChanged.connect(
-            lambda val: self.grid_size_changed.emit(val, self.cols_spin.value())
+            lambda: self.grid_size_changed.emit(self.cols_spin.value(), self.rows_spin.value())
         )
         self.cols_spin = QSpinBox(self)
         self.cols_spin.setRange(1, 20)
         self.cols_spin.valueChanged.connect(
-            lambda val: self.grid_size_changed.emit(self.rows_spin.value(), val)
+            lambda: self.grid_size_changed.emit(self.cols_spin.value(), self.rows_spin.value())
         )
 
         layout.addWidget(QLabel("Rows:", self))
@@ -90,25 +94,15 @@ class LayoutToolbar(QWidget):
             self.policy_combo.addItem(name)
         layout.addWidget(self.policy_combo)
 
-        self.policy_settings_btn = QPushButton("Policy Settings…", self)
-        layout.addWidget(self.policy_settings_btn)
-
         # Signals
         self.policy_combo.currentTextChanged.connect(self._emit_policy_changed)
-        self.policy_settings_btn.clicked.connect(self._open_policy_settings)
 
-        # Internal
-        self._policy_params: dict = {}
 
-    @Slot(str)
-    def _on_page_size_changed(self, name: str):
-        """Handle page size selection and emit (display_string, QPageSize or None for custom)."""
-        ps_enum = PAGE_SIZES.get(name)
-        if ps_enum is not None:
-            ps = QPageSize(ps_enum)
-        else:
-            ps = None  # Handle custom size logic as needed
-        self.page_size_changed.emit(name, ps)
+    @Slot(int)
+    def _on_page_size_changed(self, index: int):
+        # Pull out the key you stored earlier in userData
+        key = self.page_size_combo.itemData(index)
+        self.page_size_changed.emit(key)
 
     @Slot(object)
     def _on_display_flag_changed(self, flag_key):
@@ -120,42 +114,27 @@ class LayoutToolbar(QWidget):
         Populate toolbar controls from a LayoutTemplate instance.
         Assumes template.page_size is a display string matching PAGE_SIZES.
         """
-        if template.page_size in PAGE_SIZES:
-            self.page_size_combo.setCurrentText(template.page_size)
-            self._on_page_size_changed(template.page_size)
-        self.orientation_checkbox.setChecked(template.landscape)
+        # Select the correct entry by matching the key in userData
+        idx = self.page_size_combo.findData(template.page_size)
+        if idx != -1:
+            self.page_size_combo.setCurrentIndex(idx)
+        self.orientation_checkbox.setChecked(template.is_landscape)
         self.rows_spin.setValue(template.rows)
         self.cols_spin.setValue(template.columns)
-        self.autofill_checkbox.setChecked(template.auto_fill)
 
     def update_template(self, template):
+        pass
         """
         Write back toolbar control values into the LayoutTemplate instance.
         All values are stored as unit strings.
         """
-        template.page_size = self.page_size_combo.currentText()
-        template.landscape = self.orientation_checkbox.isChecked()
-        template.rows = self.rows_spin.value()
-        template.cols = self.cols_spin.value()
-        template.auto_fill = self.autofill_checkbox.isChecked()
+        # template.is_landscape = self.orientation_checkbox.isChecked()
+        # template.rows = self.rows_spin.value()
+        # template.cols = self.cols_spin.value()
 
 
     # ------------------------------------------------------------------
     # Private helpers
     # ------------------------------------------------------------------
     def _emit_policy_changed(self):
-        self.pagination_policy_changed.emit(
-            self.policy_combo.currentText(), self._policy_params
-        )
-
-    def _open_policy_settings(self):
-        # For now only InterleaveDatasets exposes *stride*
-        # You can swap in a proper QDialog later.
-        from PySide6.QtWidgets import QInputDialog
-        stride, ok = QInputDialog.getInt(
-            self, "InterleaveDatasets", "Stride (page offset):", 
-            self._policy_params.get("stride", 1), 1, 10, 1
-        )
-        if ok:
-            self._policy_params = {"stride": stride}
-            self._emit_policy_changed()
+        self.pagination_policy_changed.emit(self.policy_combo.currentText())

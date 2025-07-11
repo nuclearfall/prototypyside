@@ -3,6 +3,7 @@
 from PySide6.QtGui import Qt, QColor, QPageSize
 from enum import Enum, auto
 
+from prototypyside.utils.unit_str_geometry import UnitStrGeometry
 
 # --- Constants for Resize Handles ---
 HANDLE_SIZE = 8
@@ -17,20 +18,56 @@ PAGE_UNITS = {
 }
 
 PAGE_SIZES = {
-    "Letter (8.5 × 11 in)": QPageSize.Letter,
-    "Legal (8.5 × 14 in)": QPageSize.Legal,
-    "A4 (210 × 297 mm)": QPageSize.A4,
-    "A5 (148 × 210 mm)": QPageSize.A5,
-    "Tabloid (11 × 17 in)": QPageSize.Tabloid,
-    "Executive (7.25 × 10.5 in)": QPageSize.Executive,
-    "B5 (176 × 250 mm)": QPageSize.B5,
-    "Custom...": None  # Placeholder if user wants to enter their own dimensions
+    "letter":
+        {
+            "display":  "Letter (8.5 × 11 in)",
+            "qpage_size": QPageSize.Letter,
+            "geometry": UnitStrGeometry(width="8.5in", height="11in"),
+            "unit": "in"
+        },
+    "legal": {
+            "display": "Legal (8.5 × 14 in)",
+            "qpage_size": QPageSize.Legal,
+            "geometry": UnitStrGeometry(width="8.5in", height="14in"),
+            "unit": "in"
+        },
+    "a4": {
+            "display": "A4 (210 × 297 mm)",
+            "qpage_size": QPageSize.A4,
+            "geometry": UnitStrGeometry(width="210mm", height="297mm"),
+            "unit": "mm"
+    },
+    "a5": {
+            "display": "A5 (148 × 210 mm)",
+            "qpage_size": QPageSize.A5,
+            "geometry": UnitStrGeometry(width="148mm", height="210mm"),
+            "unit": "mm"
+    },
+    "tabloid": {
+        "display": "Tabloid (11 × 17 in)",
+        "qpage_size": QPageSize.Tabloid,
+        "geometry": UnitStrGeometry(width="11in", height="17in"),
+        "unit": "in"
+    },
+    "executive": {
+        "display": "(7.25 × 10.5 in)",
+        "qpage_size": QPageSize.Executive,
+        "geometry": UnitStrGeometry(width="7.25in", height="10.5in"),
+        "unit": "in"
+    },
+    "b5": {
+        "display": "B5 (176 × 250 mm)",
+        "qpage_size": QPageSize.B5,
+        "geometry": UnitStrGeometry(width="176mm", height="250mm"),
+
+    },
+    "custom": {
+        "display": "Custom...",
+        "qpage_size": None,
+        "geometry": None # Must enter custom_geometry in UnitStrGeometryField
+    }
 }
 
-PAGE_MEASURE = {
-    "in": QPageSize.Letter,
-
-}
 
 DISPLAY_MODE_FLAGS = {
     "stretch":      {"aspect": Qt.IgnoreAspectRatio,         "desc": "Stretch to Fit"},
@@ -103,7 +140,7 @@ class HandleType(Enum):
     LEFT_CENTER = auto()
     RIGHT_CENTER = auto()
 
-MIN_ELEMENT_SIZE = 20.0 # Define a minimum size for elements
+MIN_ELEMENT_SIZE = 20.0 # Define a minimum size for items
 MIN_ALLOWED_SCALE = 0.8
 
 

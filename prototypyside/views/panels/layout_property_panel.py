@@ -25,10 +25,10 @@ class LayoutPropertyPanel(QWidget):
         """
         if template:
             self.name_label.setText(getattr(template, "name", ""))
-            # Gather details: merge info, elements, etc.
+            # Gather details: merge info, items, etc.
             text = ""
-            if hasattr(template, "elements"):
-                for elem in template.elements:
+            if hasattr(template, "items"):
+                for elem in template.items:
                     text += f"{getattr(elem, 'name', '')} - {type(elem).__name__}\n"
                     if hasattr(elem, "content"):
                         text += f"  {getattr(elem, 'content', '')}\n"
