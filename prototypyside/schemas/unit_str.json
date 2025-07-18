@@ -1,0 +1,17 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "unit_str.json",
+  "title": "UnitStr",
+  "type": "object",
+  "properties": {
+    "in":   { "type": "number" },
+    "mm":   { "type": "number" },
+    "cm":   { "type": "number" },
+    "pt":   { "type": "number" },
+    "px":   { "type": "number" },
+    "unit": { "type": "string", "enum": ["in","mm","cm","pt","px"] },
+    "dpi":  { "type": "integer", "minimum": 1 }
+  },
+  "required": ["in","mm","cm","pt","px","unit","dpi"],
+  "additionalProperties": false
+}

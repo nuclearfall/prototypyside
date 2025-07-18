@@ -1,177 +1,99 @@
 # merge_manager.py
-from __future__ import annotations
 
-"""MergeManager
-
-Responsibilities
-================
-1. Parse and cache CSV rows **per ComponentTemplate**.
-2. Validate bindings: every `@field` in the template must exist in the CSV;
-   extra CSV columns raise only a *warning* (callable hook).
-3. Hand out **ComponentInstance** objects on demand via `next_instance()` –
-   cloning the template and applying the next row.
-4. Provide `remaining()` so PaginationPolicy can test exhaustion.
-5. Keep a *per-template cursor* so each dataset is consumed sequentially.
-
-Assumptions
-===========
-* A ComponentTemplate exposes:
-    - `pid` (str)
-    - `items` (list[dict]) where bound fields are expressed as
-      `name = "@field"`.
-    - `apply_data(row_dict)` -> ComponentInstance
-* Static templates either have `csv_rows = []` attribute **or** the caller does
-  not ask MergeManager for them (policy omits them from *datasets* mapping).
-* A central `warning_handler(str)` can be injected – defaults to `print`.
-"""
-
-from typing import Dict, List, Optional, Callable, Any
 import csv
-from copy import deepcopy
+from pathlib import Path
+from typing import List, Optional, Dict, Callable, Any
 
-# ---------------------------------------------------------------------------
-# Forward stubs to avoid heavy imports – replace in real application context
-# ---------------------------------------------------------------------------
-ComponentTemplate = Any  # TODO: real class
-ComponentInstance = Any  # TODO: real class
-ProtoRegistry = Any      # TODO: real registry factory (if needed)
+from prototypyside.models.component_template import ComponentTemplate
 
-
-class MergeManager:  # pylint: disable=too-many-instance-attributes
-    """One shared instance can serve *all* templates of a project."""
-
-    # ------------------------------------------------------------------
-    # Construction helpers
-    # ------------------------------------------------------------------
+class CSVData:
+    """
+    Holds one CSV’s rows and headers, plus the file_path as a Path.
+    """
     def __init__(
         self,
-        csv_fp,  # file‑like object or path
-        *,
-        registry: Optional[ProtoRegistry] = None,
-        warning_handler: Callable[[str], None] | None = None,
-    ) -> None:
-        self._registry = registry
-        self._warn = warning_handler or (lambda msg: print(f"⚠️  {msg}"))
+        file_path: str,
+        template: ComponentTemplate,
+        clear_fn: Optional[Callable[[], None]] = None
+    ):
+        self.file_path: Path = Path(file_path)
+        if not self.file_path.exists():
+            raise FileNotFoundError(f"CSV file not found: {file_path}")
 
-        # Global cache keyed by template.pid
-        self._rows: Dict[str, List[dict[str, str]]] = {}
-        self._cursor: Dict[str, int] = {}
-        self._validated: Dict[str, bool] = {}
+        self.template = template
+        # This is the reference point for access by clones:
+        self.tpid = template.template_pid
+        if self.tpid is None:
+            self.tpid = template.pid
+        self.headers: List[str]
+        self.rows: Optional[List[Dict[str, str]]]
+        self._clear_fn    = clear_fn or self._default_clear
 
-        # Raw CSV rows available to *every* template unless the template has
-        # its own csv_rows attribute (acts as override).
-        self._global_rows: List[dict[str, str]] = self._load_csv(csv_fp)
+        # load & validate immediately
+        with self.file_path.open("r", newline="", encoding="utf8") as f:
+            reader = csv.DictReader(f)
+            self.headers = reader.fieldnames or []
+            # if no @-fields, treat as empty
+            if not any(h.startswith("@") for h in self.headers):
+                self.rows = []
+            else:
+                self.rows = list(reader)
 
-    # ------------------------------------------------------------------
-    # CSV parsing
-    # ------------------------------------------------------------------
-    @staticmethod
-    def _load_csv(csv_fp) -> List[dict[str, str]]:
-        if isinstance(csv_fp, (str, bytes, bytearray)):
-            f = open(csv_fp, "r", newline="", encoding="utf8")  # caller closes? fine for prototype.
-        else:
-            f = csv_fp  # file‑like
-        reader = csv.DictReader(f)
-        rows = list(reader)
-        return rows
+    def _default_clear(self):
+        """Reset all @-bound template items to empty string."""
+        for item in getattr(self.template, "items", []):
+            if getattr(item, "name", "").startswith("@"):
+                item.content = ""
 
-    # ------------------------------------------------------------------
-    # Validation helpers
-    # ------------------------------------------------------------------
-    @staticmethod
-    def _get_bound_fields(template: ComponentTemplate) -> set[str]:
-        """Extract @bound field names from template items."""
-        return {
-            elem["name"][1:]
-            for elem in getattr(template, "items", [])
-            if isinstance(elem.get("name"), str) and elem["name"].startswith("@")
-        }
-
-    def _validate_template(self, template: ComponentTemplate) -> None:
-        pid = template.pid
-        if self._validated.get(pid):
-            return  # already validated
-
-        csv_headers = set(self._global_rows[0].keys()) if self._global_rows else set()
-        required = self._get_bound_fields(template)
-        missing = required - csv_headers
-        unused = csv_headers - required
-
-        if missing:
-            raise ValueError(
-                f"CSV is missing required columns for template {pid}: {sorted(missing)}"
-            )
-        if unused:
-            self._warn(
-                f"CSV contains unused columns for template {pid}: {sorted(unused)}"
-            )
-        self._validated[pid] = True
-
-    # ------------------------------------------------------------------
-    # Registration / row cache
-    # ------------------------------------------------------------------
-    def _ensure_registered(self, template: ComponentTemplate) -> None:
-        pid = template.pid
-        if pid in self._rows:
-            return
-
-        # Prefer template‑specific rows if present, else global CSV
-        rows = deepcopy(getattr(template, "csv_rows", None)) or deepcopy(self._global_rows)
-        self._rows[pid] = rows
-        self._cursor[pid] = 0
-        self._validate_template(template)
-
-    # ------------------------------------------------------------------
-    # Public API expected by PaginationPolicy
-    # ------------------------------------------------------------------
-    def remaining(self, template: ComponentTemplate) -> int:
-        self._ensure_registered(template)
-        pid = template.pid
-        return len(self._rows[pid]) - self._cursor[pid]
-
-    # Convenience alias for policies
-    def total_rows(self, template: ComponentTemplate) -> int:  # noqa: D401
-        self._ensure_registered(template)
-        return len(self._rows[template.pid])
-
-    def next_row(self, template: ComponentTemplate) -> Optional[dict[str, str]]:
-        self._ensure_registered(template)
-        pid = template.pid
-        idx = self._cursor[pid]
-        if idx >= len(self._rows[pid]):
-            return None
-        row = self._rows[pid][idx]
-        self._cursor[pid] += 1
-        return row
-
-    # ------------------------------------------------------------------
-    # New API: next_instance()
-    # ------------------------------------------------------------------
-    def next_instance(self, template: ComponentTemplate) -> Optional[ComponentInstance]:
-        """Return a *new* ComponentInstance with next data row applied.
-
-        If registry is provided we defer creation to it; otherwise we call
-        template.apply_data(row).
+    def validate_headers(self) -> Dict[str, str]:
         """
-        row = self.next_row(template)
-        if row is None:
-            return None
+        Returns a map of @-field → status ("ok", "missing", "warn").
+        """
+        element_keys = [e.name for e in self.template.items if e.name.startswith("@")]
+        header_keys  = [h for h in self.headers if h.startswith("@")]
+        result: Dict[str, str] = {}
+        for key in set(element_keys) | set(header_keys):
+            if key in element_keys and key in header_keys:
+                result[key] = "ok"
+            elif key in element_keys:
+                result[key] = "missing"
+            else:
+                result[key] = "warn"
+        return result
 
-        if self._registry is not None:
-            # Registry is responsible for PID issuance / cloning
-            return self._registry.create("ci", template=template, row=row)
 
-        # Fallback: template handles cloning+merge itself
-        return template.apply_data(row)  # type: ignore[attr-defined]
+class MergeManager:
+    """
+    Manages loading CSVData objects and handing out row-dicts on demand.
+    """
 
-    # ------------------------------------------------------------------
-    # Reset util – helpful for regenerate/undo
-    # ------------------------------------------------------------------
-    def reset(self, template: ComponentTemplate | None = None) -> None:
-        """Reset cursor(s) so pagination can be regenerated."""
-        if template is None:
-            for pid in self._cursor:
-                self._cursor[pid] = 0
-        else:
-            self._ensure_registered(template)
-            self._cursor[template.pid] = 0
+    def __init__(self, warning_handler: Optional[Callable[[str], None]] = None):
+        # map template.pid → CSVData
+        self._csv_data: Dict[str, CSVData] = {}
+        self._warning  = warning_handler or print
+
+
+    def load_csv(self, csv_path: str, template: ComponentTemplate) -> CSVData:
+        """
+        Read the CSV into a CSVData instance, cache it, and return it.
+        """
+        data = CSVData(csv_path, template)
+        # Data is linked to the root Component Template not the clones
+        # store so we can look up both rows *and* file_path later
+        self._csv_data[data.tpid] = data
+        # let caller inspect data.rows and data.headers
+        return data
+
+    def validate_headers(self, tpid) -> Dict[str, str]:
+        data = self._csv_data.get(tpid)
+        return data.validate_headers() if data else {}
+
+    def get_all_rows(self, tpid) -> List[Dict[str, str]]:
+        """
+        Return a fresh list of dicts for this template’s CSV,
+        as loaded into CSVData.rows.
+        """
+        data = self._csv_data.get(tpid)
+        if not data or data.rows is None:
+            return []
+        return list(data.rows)

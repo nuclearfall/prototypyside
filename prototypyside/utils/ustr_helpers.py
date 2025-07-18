@@ -1,67 +1,58 @@
-# ustr_helpers.py
-from typing import Optional, Union
-from decimal import Decimal
 from PySide6.QtCore import QRectF, QPointF
-from prototypyside.utils.unit_str import UnitStr
 from prototypyside.utils.unit_str_geometry import UnitStrGeometry
+from prototypyside.utils.unit_converter import UnitStr
 
-Number = Union[int, float, str, Decimal, UnitStr]
-
-
-def with_pos(
-    geom: UnitStrGeometry,
-    pos: Optional[QPointF] = None,
-    *,
-    x: Number | None = None,
-    y: Number | None = None
+def geometry_with_px_rect(
+    base: UnitStrGeometry,
+    px_rect: QRectF,
 ) -> UnitStrGeometry:
     """
-    Returns a new UnitStrGeometry with the same rectangular properties as `geom`,
-    but with its scene-position set to `pos` (or to x, y).
-
-    The new position values are interpreted as pixels if they are numbers.
+    Return a new UnitStrGeometry whose rect (x,y,width,height)
+    comes from px_rect converted into inches (via from_px),
+    preserving base.dpi and the original x/y position.
     """
-    if pos is not None and (x is not None or y is not None):
-        raise ValueError("Provide either 'pos' or 'x' and 'y', not both.")
+    dpi = base.dpi
 
-    new_x = pos.x() if pos is not None else x
-    new_y = pos.y() if pos is not None else y
+    width  = UnitStr.from_px(px_rect.width(),  dpi=dpi)
+    height = UnitStr.from_px(px_rect.height(), dpi=dpi)
+    rect_x = UnitStr.from_px(px_rect.x(),      dpi=dpi)
+    rect_y = UnitStr.from_px(px_rect.y(),      dpi=dpi)
 
-    if new_x is None or new_y is None:
-        raise ValueError("Either 'pos' or both 'x' and 'y' must be provided.")
+    # keep the original logical position
+    x = base.x
+    y = base.y
 
     return UnitStrGeometry(
-        # Preserve original rect components by passing the UnitStr objects
-        rect_x=0,
-        rect_y=0,
-        width=geom.width,
-        height=geom.height,
-        # Set the new position
-        x=new_x,
-        y=new_y,
-        # Preserve settings
-        dpi=geom.dpi,
-        unit=geom.unit
+        width=width,
+        height=height,
+        rect_x=rect_x,
+        rect_y=rect_y,
+        x=x,
+        y=y,
+        dpi=dpi,
     )
 
-def with_rect(
-    geom: UnitStrGeometry,
-    rect: QRectF
+
+def geometry_with_px_pos(
+    base: UnitStrGeometry,
+    px_pos: QPointF,
 ) -> UnitStrGeometry:
     """
-    Returns a new UnitStrGeometry with the same position as `geom`,
-    but with its local rect (rect_x, rect_y, width, height) replaced by `rect`.
-
-    The values in the new QRectF are interpreted as pixels.
+    Return a new UnitStrGeometry whose position (x,y)
+    comes from px_pos converted into inches (via from_px),
+    preserving base.dpi and the original size/rect.
     """
-    rect = QRectF(0, 0, rect.width(), rect.height())
+    dpi = base.dpi
+
+    x = UnitStr.from_px(px_pos.x(), dpi=dpi)
+    y = UnitStr.from_px(px_pos.y(), dpi=dpi)
+
     return UnitStrGeometry(
-        # Preserve original position by passing the UnitStr objects
-        x=geom.pos_x,
-        y=geom.pos_y,
-        # Set the new rect from the QRectF (values treated as pixels)
-        rect=rect,
-        # Preserve settings
-        dpi=geom.dpi,
-        unit=geom.unit
+        width=base.width,
+        height=base.height,
+        rect_x=base.rect_x,
+        rect_y=base.rect_y,
+        x=x,
+        y=y,
+        dpi=dpi,
     )

@@ -10,54 +10,54 @@ from PySide6.QtWidgets import QGraphicsItem
 
 from prototypyside.services.proto_factory import ProtoFactory
 from prototypyside.utils.proto_helpers import get_prefix, issue_pid
+
+
 BASE_NAMES: Dict[str, str] = {
     "ct": "Component Template",
     "cc": "Component",
     "ie": "Image Element",
     "te": "Text Element",
     "lt": "Layout Template",
+    "pg": "Layout Page",
     "ls": "Layout Slot",
 }
 
 class ProtoRegistry(QObject):
-    """
-    A per‐template registry. Manages its own `_store` of objects,
-    emits three core signals, and supports lookup & JSON serialization.
-    """
+    object_registered = Signal(str)  # pid, registry
+    object_deregistered = Signal(str)
 
-    _registries = []  # Shared list across all instances
-    _factory = ProtoFactory()
-    object_registered = Signal(object)    # Emits the object that was added
-    object_deregistered = Signal(object)  # Emits the object that was removed
-    object_orphaned = Signal(object)      # Emits the object that was orphaned
-
-    def __init__(self, parent=None):
+    def __init__(self, parent=None, root=None):
         super().__init__(parent)
-        # Automatically register this instance when constructed
-        print("Constructing registry...")
-        self.__class__._registries.append(self)
-
-        self._unique_names: set = set()
-        self._name_counts: Dict[str, int] = {prefix: 1 for prefix in BASE_NAMES if prefix != "ls"}
+        self._factory = ProtoFactory()
+        self._is_root = isinstance(self, RootRegistry)
+        self.root = self if self._is_root else root
         self._store: Dict[str, Any] = {}
         self._orphans: Dict[str, Any] = {}
-        # print(f"Registries in existence: {self.all()}")
+        self._unique_names = set()
+        self._name_counts = {prefix: 1 for prefix in BASE_NAMES if prefix != "ls"}
 
-    @classmethod
-    def all(cls, index=None):
-        """Return all active registries (shared list)."""
-        if index and index < len(cls._registries):
-            return cls._registries[index]
-        return cls._registries
+    def register(self, obj: Any):
+        pid = getattr(obj, "pid", None)
+        prefix = get_prefix(pid)
 
-    @classmethod
-    def new(cls, class_prefix, **kwargs):
-        # Create the object via factory
-        registry = cls()
-        obj = registry.create(class_prefix, **kwargs)
-        # Create a fresh registry instance
-        
-        return obj, registry
+        target = self.root if self.root and prefix in ("ct", "lt") else self
+        if pid in target._store:
+            print(f"[Registry] Skipping duplicate: {pid}")
+            return
+
+        if not hasattr(obj, "name") or not self.has_unique_name(obj):
+            self.generate_name(obj)
+
+        target._store[pid] = obj
+        target.object_registered.emit(obj.pid)
+
+    def find_root(self):
+        parent = self.parent()
+        while parent:
+            if isinstance(parent, RootRegistry):
+                return parent
+            parent = parent.parent()
+        raise RuntimeError("No RootRegistry found in parent chain.")
 
     def orphans(self):
         return [o for o in self._orphans]
@@ -65,9 +65,8 @@ class ProtoRegistry(QObject):
     def has_unique_name(self, obj: object) -> bool:
         return hasattr(obj, 'name') and obj.name is not None and obj.name not in self._unique_names
 
-    @classmethod
-    def has(cls, pid):
-        return any(pid in r._store for r in cls._registries)
+    def has(self, pid):
+        return pid in self._store
 
     def generate_name(self, obj: object):
         pid_prefix = get_prefix(obj.pid)
@@ -109,26 +108,8 @@ class ProtoRegistry(QObject):
         # print(f"Object created with final_pid {final_pid}")
         obj = self._factory.create(pid=final_pid, **kwargs)
         self.register(obj)
+        print ("Obj registered")
         return obj
-
-    def register(self, obj: Any):
-        """
-        Add obj to the registry. Emits object_registered.
-        """
-        pid = getattr(obj, "pid", None)
-        if not pid:
-            raise ValueError("Object must have a .pid attribute")
-
-        if pid in self._store:
-            print(f"Warning: not re-registering PID '{pid}'")
-            return
-
-        # Only generate a name if it's missing or not unique
-        if not hasattr(obj, "name") or obj.name is None or not self.has_unique_name(obj):
-            self.generate_name(obj)
-
-        self._store[pid] = obj
-        self.object_registered.emit(obj)
 
     def deregister(self, pid: str):
         """
@@ -139,20 +120,16 @@ class ProtoRegistry(QObject):
             print(f"Warning: cannot deregister missing PID '{pid}'")
             return
         self._orphans[pid] = obj
-        self.object_deregistered.emit(obj)
-        self.object_orphaned.emit(obj)
+        self.object_deregistered.emit(obj.pid)
+        self.object_orphaned.emit(obj.pid)
 
     @classmethod
-    def from_dict(cls, data, registry=None, is_clone=False):
+    def from_dict(cls, data, registry, is_clone=False):
         pid = data.get("pid")
-        if not registry:
-            registry = cls()
-        print(f"[from_dict] Checking pid {pid}. Registry has? {registry.has(pid)}")
-        if pid and registry.has(pid):
-            print(f"[from_dict] Object already exists: {pid}")
-            return registry.get(pid), registry
-        obj = cls._factory.from_dict(data, registry=registry, is_clone=is_clone)
-        return obj, registry
+        if pid and registry.global_get(pid) and not is_clone:
+            return registry.global_get(pid)
+        obj = registry._factory.from_dict(data, registry=registry, is_clone=is_clone)
+        return obj
 
     def to_dict(self, obj) -> object:
         # only dump things that know how to to_dict()
@@ -161,17 +138,19 @@ class ProtoRegistry(QObject):
         data = self._factory.to_dict(obj)
         return data
 
+    # in proto_registry.py
     def clone(self, obj: Any) -> Any:
+        """
+        Creates a deep clone by round‐tripping through *this* registry’s from_dict,
+        ensuring all registration logic runs.
+        """
+        print(f"Cloning {obj.name}:{obj.pid}")
         if not hasattr(obj, "pid"):
             raise ValueError("Cannot clone object without a 'pid'.")
-        # serialize the existing object
         payload = self._factory.to_dict(obj)
-        # rehydrate in “clone” mode—your from_dict must handle is_clone=True
-        return self._factory.from_dict(
-            payload,
-            registry=self,
-            is_clone=True
-        )
+        # This calls ProtoRegistry.from_dict → factory.from_dict with is_clone=True
+        # which in turn invokes your LayoutTemplate.from_dict with is_clone=True
+        return self.from_dict(payload, registry=self, is_clone=True)
 
     def reinsert(self, pid: str):
         """
@@ -185,14 +164,26 @@ class ProtoRegistry(QObject):
     def is_orphan(self, pid: str) -> bool:
         return True if pid in self._orphans else False
 
-    @classmethod
-    def get(cls, pid):
-        for r in cls._registries:
+    def get(self, pid, registry=None):
+        for r in registry._store:
             item = r._store.get(pid)
             if item:
                 return item
         return None
 
+    def global_get(self, pid):
+        """
+        Globally look up an object by pid, starting from this registry's root.
+        """
+        root = self.root
+        if pid in root._store:
+            return root._store[pid]
+
+        for child in getattr(root, "_children", []):
+            if pid in child._store:
+                return child._store[pid]
+
+        return None
 
     def get_by_prefix(self, prefix):
         if prefix:           
@@ -202,9 +193,12 @@ class ProtoRegistry(QObject):
 
     def global_get_by_prefix(self, prefix=None):
         global_found = []
-        for child in self._registries:
-            global_found += child.get_by_prefix(prefix)
+        children = getattr(self, "children")
+        if children:
+            for child in self.children:
+                global_found += child.get_by_prefix(prefix)
             return global_found
+
 
     def get_last(self, prefix=None) -> object:
         vals = list(self._store.values())
@@ -214,3 +208,46 @@ class ProtoRegistry(QObject):
         vals = list(self._store.values())
         return vals[0] if vals else None
 
+
+class RootRegistry(ProtoRegistry):
+    object_registered = Signal(str)
+    object_deregistered = Signal(str)
+
+    def __init__(self):
+        super().__init__()
+        self.root = self
+        self._children = []
+
+    def add_child(self, child: ProtoRegistry):
+        self._children.append(child)
+        child.object_registered.connect(self._repeat_registered)
+        child.object_deregistered.connect(self._repeat_deregistered)
+
+    def has(self, pid):
+        if pid in self._store:
+            return True
+        for child in self._children:
+            if child.has(pid):
+                return True
+        return False
+
+    def _repeat_registered(self, pid):
+        self.object_registered.emit(pid)
+
+    def _repeat_deregistered(self, pid):
+        self.object_deregistered.emit(pid)
+
+    def global_get_by_prefix(self, prefix):
+        results = self.get_by_prefix(prefix)
+        for child in self._children:  # FIXED
+            results += child.get_by_prefix(prefix)
+        return results
+
+    def global_get(self, pid):
+        obj = self._store.get(pid)
+        if obj:
+            return obj
+        for child in self._children:
+            if pid in child._store:
+                return child._store[pid]
+        return None

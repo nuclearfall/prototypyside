@@ -5,18 +5,17 @@ from typing import Tuple, Optional
 
 
 # Move this here to avoid circular imports from component_factory
-VALID_ID_PREFIXES = {"te", "ie", "ct", "ci", "lt", "ls"}
+VALID_ID_PREFIXES = {"te", "ie", "ct", "cc", "lt", "ls", "pg"}
 ELEMENT_PREFIXES = {"te", "ie"}
 OBJ_BASE_NAMES = {
     "ie": "Image Element",
     "te": "Text Element",
     "ct": "Component Template",
-    "ci": "Component Instance",
-    "lt": "Page Layout Template",
+    "cc": "Component Template Clone",
+    "lt": "Layout Template",
+    "pg": "Page Layout Template Clone",
     "ls": "Layout Slot",
-    "pr": "Proto Registry"
 }
-
 def parse_pid(pid_str: str) -> Tuple[Optional[str], Optional[str]]:
     pattern = r"^([a-zA-Z0-9]+)(?:_(.*))?$"
     match = re.match(pattern, pid_str)

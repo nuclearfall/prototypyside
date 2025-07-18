@@ -399,7 +399,7 @@ class DuplexInterleave(PaginationPolicy):
 
     Params:: {"back_pid": "CT_back", "flip": "long" | "short"}
     """
-
+    DEFAULT_PARAMS: {"back_pid": "CT_back", "flip": "long" | "short"}
     def __init__(self, **params):
         self.back_pid: str | None = params.get("back_pid")
         self.flip: str = params.get("flip", "long")

@@ -19,7 +19,7 @@ from prototypyside.views.panels.layers_panel import LayersListWidget
 from prototypyside.views.palettes.palettes import ComponentListWidget
 # Import widgets
 from prototypyside.widgets.unit_field import UnitField, UnitStrGeometryField
-from prototypyside.utils.ustr_helpers import with_pos
+from prototypyside.utils.ustr_helpers import geometry_with_px_pos
 from prototypyside.utils.unit_str_geometry import UnitStrGeometry
 from prototypyside.utils.incremental_grid import IncrementalGrid
 # from prototypyside.widgets.font_toolbar import FontToolbar
@@ -28,7 +28,6 @@ from prototypyside.widgets.pdf_export_dialog import PDFExportDialog
 
 from prototypyside.models.component_elements import (ComponentElement, TextElement, ImageElement)
 from prototypyside.services.app_settings import AppSettings
-from prototypyside.services.export_manager import ExportManager
 from prototypyside.services.property_setter import PropertySetter
 from prototypyside.services.undo_commands import (AddElementCommand, RemoveElementCommand, 
             CloneElementCommand, ResizeTemplateCommand, ResizeAndMoveElementCommand, ChangeItemPropertyCommand)
@@ -69,8 +68,6 @@ class ComponentTab(QWidget):
         # self.view.setOptimizationFlag(QGraphicsView.DontAdjustForAntialiasing)
         # self.scene.addItem(self._template)      
         self.selected_item: Optional['ComponentElement'] = None
-
-        self.export_manager = ExportManager()
 
         self._current_drawing_color = QColor(0, 0, 0) # For drawing tools
 
@@ -495,7 +492,7 @@ class ComponentTab(QWidget):
     def add_item_from_drop(self, scene_pos: QPointF, item_type: str):
         self.scene.clearSelection()
         rect = UnitStrGeometry(width="0.5in", height="0.25in", dpi=self.template.dpi)
-        new_geometry = with_pos(rect, scene_pos)
+        new_geometry = geometry_with_px_pos(rect, scene_pos)
         command = AddElementCommand(item_type, self, new_geometry)
         self.undo_stack.push(command)
         self.selected_item = self.registry.get_last()

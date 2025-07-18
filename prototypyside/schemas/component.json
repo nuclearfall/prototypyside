@@ -1,0 +1,50 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "$id": "component.json",
+  "title": "ComponentModel",
+  "type": "object",
+  "properties": {
+    "pid": {
+      "type": "string"
+    },
+    "name": {
+      "type": ["string"],
+      "default": "Untitled Component Template"
+    },
+    "geometry": {
+      "$ref": "unit_str_geometry.json"
+    },
+    "background_image": {
+      "type": ["string","null"]
+    },
+    "template_pid": {
+      "type": ["string", "null"],
+      "default": "null"
+    },
+    "items": {
+      "items": {
+        "oneOf":[
+          { "$ref": "text_element.json" },
+          { "$ref": "image_element.json" }
+        ]
+      },
+      "description": "List of TextElement or ImageElement objects"
+    },
+    "border": {
+      "$ref": "unit_str.json"
+    },
+    "corner_radius": {
+      "$ref": "unit_str.json"
+    },
+    "csv_path": {
+      "type": "string"
+    }
+  },
+  "required": [
+    "pid",
+    "geometry",
+    "items",
+    "template_pid"
+  ],
+  "additionalProperties": false
+}

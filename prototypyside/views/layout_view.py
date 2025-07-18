@@ -66,10 +66,8 @@ class LayoutView(QGraphicsView):
         self._update_min_scale()
 
     def gestureEvent(self, event: QGestureEvent) -> bool:
-        print(f"gestureEvent triggered {self._pinch_direction}")
         pinch = event.gesture(Qt.PinchGesture)
         if pinch:
-            print(f"gestureEvent triggered {self._pinch_direction}")
             self.handlePinchGesture(pinch)
             return True
         return False
@@ -117,19 +115,19 @@ class LayoutView(QGraphicsView):
             self._pinch_last_factor = 1.0
 
 
-    def wheelEvent(self, event: QWheelEvent):
-        if event.modifiers() == Qt.ControlModifier or IS_MAC:
-            degrees = event.angleDelta().y() / 8
-            steps = degrees / 15  # 15 degrees = 1 "notch"
-            factor = 1.0 + steps * 0.05  # 5% zoom per notch
+    # def wheelEvent(self, event: QWheelEvent):
+    #     if event.modifiers() == Qt.ControlModifier or IS_MAC:
+    #         degrees = event.angleDelta().y() / 8
+    #         steps = degrees / 15  # 15 degrees = 1 "notch"
+    #         factor = 1.0 + steps * 0.05  # 5% zoom per notch
 
-            # Clamp for safety
-            if factor > 0:
-                self.scaleView(factor)
+    #         # Clamp for safety
+    #         if factor > 0:
+    #             self.scaleView(factor)
 
-            event.accept()
-        else:
-            super().wheelEvent(event)
+    #         event.accept()
+    #     else:
+    #         super().wheelEvent(event)
 
     def scaleView(self, factor: float):
         proposed_scale = self.current_scale * factor

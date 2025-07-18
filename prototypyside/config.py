@@ -10,6 +10,17 @@ HANDLE_SIZE = 8
 HANDLE_COLOR = QColor(0, 120, 215)
 HANDLE_GRAB_WIDTH = 12 # Larger grab area for handles
 
+ALIGNMENT_MAP = {
+    "Top Left": Qt.AlignTop | Qt.AlignLeft, 
+    "Top Center": Qt.AlignTop | Qt.AlignHCenter,
+    "Top Right": Qt.AlignTop | Qt.AlignRight, 
+    "Center Left": Qt.AlignVCenter | Qt.AlignLeft,
+    "Center": Qt.AlignCenter, 
+    "Center Right": Qt.AlignVCenter | Qt.AlignRight,
+    "Bottom Left": Qt.AlignBottom | Qt.AlignLeft, 
+    "Bottom Center": Qt.AlignBottom | Qt.AlignHCenter,
+    "Bottom Right": Qt.AlignBottom | Qt.AlignRight,
+}
 
 PAGE_UNITS = {
     "in": QPageSize.Unit.Inch,

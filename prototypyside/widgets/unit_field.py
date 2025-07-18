@@ -91,7 +91,7 @@ class UnitField(QLineEdit):
         Returns a new UnitStr object from the current text in the line edit.
         The text is interpreted as being in the widget's `display_unit`.
         """
-        unit = self.target_item._geometry.unit
+        unit = self.target_item.geometry.unit
         current_text = super().text()
         if not current_text.strip():
             return UnitStr("0", unit=unit, dpi=self._dpi)
@@ -223,10 +223,10 @@ class UnitStrGeometryField(QWidget):
         
         # Create a UnitStr from each field's text
         try:
-            x_val = UnitStr(self.x_field.text(), unit=self._display_unit, dpi=dpi)
-            y_val = UnitStr(self.y_field.text(), unit=self._display_unit, dpi=dpi)
-            w_val = UnitStr(self.w_field.text(), unit=self._display_unit, dpi=dpi)
-            h_val = UnitStr(self.h_field.text(), unit=self._display_unit, dpi=dpi)
+            x_val = UnitStr(self.x_field.text(), unit=self._display_unit, dpi=self.dpi)
+            y_val = UnitStr(self.y_field.text(), unit=self._display_unit, dpi=self.dpi)
+            w_val = UnitStr(self.w_field.text(), unit=self._display_unit, dpi=self.dpi)
+            h_val = UnitStr(self.h_field.text(), unit=self._display_unit, dpi=self.dpi)
         except ValueError: # Handle invalid input
              self._update_display(self._old_geometry) # Revert to old values
              if isinstance(self.sender(), QLineEdit): self.sender().clearFocus()
@@ -235,7 +235,7 @@ class UnitStrGeometryField(QWidget):
         # Construct the new geometry object
         new_geometry = UnitStrGeometry(
             x=x_val, y=y_val, width=w_val, height=h_val,
-            unit=self._old_geometry.unit, dpi=dpi, 
+            unit=self._old_geometry.unit, dpi=self.dpi, 
         )
 
         # Emit the signal with all necessary info for an undo command

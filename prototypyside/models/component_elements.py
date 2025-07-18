@@ -1,15 +1,16 @@
+from pathlib import Path
 from PySide6.QtCore import Qt, QRectF, QPointF, QSize, Signal, QObject
-from PySide6.QtGui import (QColor, QFont, QPen, QBrush, QTextDocument, QPainter, QPixmap,
+from PySide6.QtGui import (QColor, QFont, QPen, QBrush, QTextDocument, QTextOption, QPainter, QPixmap, QPalette,
             QAbstractTextDocumentLayout)
 from PySide6.QtWidgets import QGraphicsItem, QGraphicsObject, QGraphicsSceneDragDropEvent
-from typing import Optional, Dict, Any
+from typing import Optional, Dict, Any, Union
 from prototypyside.views.graphics_items import ResizeHandle
 from prototypyside.utils.qt_helpers import qrectf_to_list, list_to_qrectf, qfont_from_string
 from prototypyside.utils.unit_str import UnitStr
 from prototypyside.utils.unit_str_geometry import UnitStrGeometry
-from prototypyside.utils.ustr_helpers import with_rect, with_pos
+from prototypyside.utils.ustr_helpers import geometry_with_px_rect, geometry_with_px_pos
 from prototypyside.utils.style_serialization_helpers import save_style, load_style
-from prototypyside.config import HandleType
+from prototypyside.config import HandleType, ALIGNMENT_MAP
 from prototypyside.utils.proto_helpers import get_prefix, issue_pid
 
 class ComponentElement(QGraphicsObject):
@@ -22,7 +23,7 @@ class ComponentElement(QGraphicsObject):
         "bg_color":     (QColor.fromRgba,          lambda c: c.rgba(),     None),
         "border_color": (QColor.fromRgba,          lambda c: c.rgba(),     None),
         "border_width": (UnitStr.from_dict,        lambda u: u.to_dict(),     UnitStr("1pt")),
-        "alignment":    (int,                      lambda a: a,            None),
+        "alignment":    (str,                      lambda a: a,            "Center"),
         "content":      (lambda v: v,              lambda v: v,            ""),
     }
     item_changed = Signal()
@@ -34,15 +35,15 @@ class ComponentElement(QGraphicsObject):
         self._template_pid = template_pid
         self._geometry = geometry
         self._dpi = geometry.dpi
+        self._unit = "px"
         self._name = name
-
         # Set the QGraphicsItem position (scene expects px)
         self.setPos(self._geometry.px.pos)
         self._color = QColor(Qt.black)
         self._bg_color = QColor(255,255,255,0)
         self._border_color = QColor(Qt.black)
         self._border_width = UnitStr("0.5 pt", dpi=self._dpi)
-        self._alignment = Qt.AlignLeft
+        self._alignment = "Top Left"
         self._content: Optional[str] = ""
 
         self.setFlags(
@@ -54,14 +55,30 @@ class ComponentElement(QGraphicsObject):
         self._handles: Dict[HandleType, ResizeHandle] = {}
         self.create_handles()
 
-
     # --- Property Getters and Setters --- #
 
     # This property and three methods must be defined for each object.
     # These three methods must be defined for each object.
     @property
-    def dpi(self):
+    def alignment_flags(self):
+        return ALIGNMENT_MAP.get(self.alignment, Qt.AlignCenter)
+    @property
+    def dpi(self) -> int:
         return self._dpi
+
+    @dpi.setter
+    def dpi(self, new: int):
+        if self._dpi != new:
+            self._dpi = new
+
+    @property
+    def unit(self) -> str:
+        return self._unit
+
+    @unit.setter
+    def unit(self, new: str):
+        if self._unit != new:
+            self._unit = new
 
     @property
     def geometry(self):
@@ -69,29 +86,29 @@ class ComponentElement(QGraphicsObject):
 
     @geometry.setter
     def geometry(self, new_geom: UnitStrGeometry):
-        print(f"[SETTER] geometry called with {new_geom}")
+        # print(f"[SETTER] geometry called with {new_geom}")
         if self._geometry == new_geom:
-            print("[SETTER] geometry unchanged")
+            # print("[SETTER] geometry unchanged")
             return
 
         self.prepareGeometryChange()
-        print(f"[SETTER] prepareGeometryChange called")
-        print(f"[SETTER] pos set to {self._geometry.px.pos}")
+        # print(f"[SETTER] prepareGeometryChange called")
+        # print(f"[SETTER] pos set to {self._geometry.px.pos}")
         self._geometry = new_geom
-        super().setPos(self._geometry.px.pos)
+        super().setPos(self._geometry.to(self.unit, dpi=self.dpi).pos)
         # self.item_changed.emit()
         self.update()
 
     def boundingRect(self) -> QRectF:
-        return self._geometry.px.rect
+        return self._geometry.to(self.unit, dpi=self.dpi).rect
 
     # This method is for when ONLY the rectangle (size) changes,
     # not the position.
     def setRect(self, new_rect: QRectF):
-        if self._geometry.px.rect == new_rect:
+        if self._geometry.to(self.unit, dpi=self.dpi).rect == new_rect:
             return
         self.prepareGeometryChange()
-        with_rect(self._geometry, new_rect)
+        geometry_with_px_rect(self._geometry, new_rect)
 
     def itemChange(self, change: QGraphicsItem.GraphicsItemChange, value):
         # This is called when the scene moves the item.
@@ -100,9 +117,9 @@ class ComponentElement(QGraphicsObject):
             # also tries to set the position.
             signals_blocked = self.signalsBlocked()
             self.blockSignals(True)
-            with_pos(self._geometry, value)
-            print(f"[ITEMCHANGE] Called with change={change}, value={value}")
-            print(f"[ITEMCHANGE] Geometry.pos updated to: {self._geometry.px.pos}")
+            geometry_with_px_pos(self._geometry, value)
+            # print(f"[ITEMCHANGE] Called with change={change}, value={value}")
+            # print(f"[ITEMCHANGE] Geometry.pos updated to: {self._geometry.px.pos}")
             self.blockSignals(signals_blocked)
 
         # It's crucial to call the base class implementation. This will update geometry.
@@ -178,8 +195,8 @@ class ComponentElement(QGraphicsObject):
         self.item_changed.emit()
         self.update()
         
-        if getattr(self, "_border_width", None) != bw:
-            self._border_width = bw
+        if getattr(self, "_border_width", None) != value:
+            self._border_width = value
             self.item_changed.emit()
             self.update()
 
@@ -188,7 +205,7 @@ class ComponentElement(QGraphicsObject):
         return self._alignment
 
     @alignment.setter
-    def alignment(self, value: Qt.AlignmentFlag):
+    def alignment(self, value: str):
         if self._alignment != value:
             self._alignment = value
             self.item_changed.emit()
@@ -211,7 +228,7 @@ class ComponentElement(QGraphicsObject):
     def resize_from_handle(self, handle_type: HandleType, delta: QPointF, start_scene_rect: QRectF):
         """Resize by handle: supports all 8 directions with proper boundary constraints."""
         self.prepareGeometryChange()
-        dpi = self._dpi
+        dpi = self.dpi
         scene = self.scene()
         scene_rect = scene.sceneRect() if scene else QRectF()
 
@@ -285,7 +302,7 @@ class ComponentElement(QGraphicsObject):
         self._geometry = UnitStrGeometry.from_px(
             rect=new_local_bounds,
             pos=new_scene_pos,
-            dpi=self._dpi
+            dpi=self.dpi
         )
 
         # 7. Final updates
@@ -299,19 +316,29 @@ class ComponentElement(QGraphicsObject):
         self.update()
 
     def paint(self, painter: QPainter, option, widget=None):
-        rect = self.boundingRect()
+        """
+        Draws the background, border, and handles of the element using the specified unit and DPI.
 
-        # Background
+        Parameters:
+            painter (QPainter): The painter used to draw the element.
+            option: QStyleOptionGraphicsItem passed by the scene.
+            widget: Optional widget; unused.
+        """
+        rect = self.geometry.to(self.unit, dpi=self.dpi).rect
+
+        # --- Background Fill ---
         bg = self._bg_color if isinstance(self._bg_color, QColor) else QColor(self._bg_color)
+
         painter.setBrush(QBrush(bg))
         painter.setPen(Qt.NoPen)
         painter.drawRect(rect)
 
-        # Border
+        # --- Border ---
         try:
-            bw = float(self._border_width.px)
+            bw = float(self._border_width.to(self.unit, dpi=self.dpi))
         except Exception:
             bw = 1.0
+
         if bw > 0:
             border_col = self._border_color if isinstance(self._border_color, QColor) else QColor(self._border_color)
             pen = QPen(border_col)
@@ -320,9 +347,10 @@ class ComponentElement(QGraphicsObject):
             painter.setBrush(Qt.NoBrush)
             painter.drawRect(rect)
 
-        # Handles
+        # --- Resize Handles (only shown if visible) ---
         if self.handles_visible:
             self.draw_handles()
+
 
     def to_dict(self) -> Dict[str, Any]:
         data = {
@@ -417,8 +445,6 @@ class TextElement(ComponentElement):
 
         self._font = QFont("Arial", 12)
         self._content = "Sample Text"
-        self.text = True
-
 
     # --- Text-specific Property Getters and Setters ---
     @property
@@ -430,8 +456,6 @@ class TextElement(ComponentElement):
         if self._font != value:
             self.prepareGeometryChange() # Font change might change layout/size
             self._font = value
-            self._text_document.setDefaultFont(self._font) # Update document's font
-            self.update_text_document_layout() # Recalculate layout based on new font
             self.item_changed.emit()
             self.update()
 
@@ -449,33 +473,81 @@ class TextElement(ComponentElement):
         inst = super().from_dict(data, registry, is_clone)
         for attr, (key, from_fn, _, default) in cls._subclass_serializable.items():
             raw = data.get(key, default)
-            setattr(inst, f"_{attr}", from_fn(raw))
+            # We want to set content using the content setter.
+            if hasattr(inst, f"{attr}"):
+                setattr(inst, f"{attr}", from_fn(raw))
+            else:
+                setattr(inst, f"_{attr}", from_fn(raw))
         return inst
 
-    def paint(self, painter: QPainter, option, widget=None):
-        # Call base class paint to handle borders and basic styling first
+    def paint(self, painter, option, widget=None):
         super().paint(painter, option, widget)
-        rect = self.boundingRect()
+
+        rect = self.geometry.to(self.unit, dpi=self.dpi).rect
         painter.save()
 
-        # Set up QTextDocument for automatic word wrapping within rect
+        # 1) build the document
         doc = QTextDocument()
         doc.setDefaultFont(self.font)
-        doc.setPlainText(self.content)
+
+        # force text color
+        ctx = QAbstractTextDocumentLayout.PaintContext()
+        ctx.palette.setColor(QPalette.Text, self.color)
+
+        doc.setDocumentMargin(0)
+        doc.setDefaultTextOption(QTextOption(self.alignment_flags))
+        doc.setPlainText(self.content or "")
         doc.setTextWidth(rect.width())
 
-        # Ensure content doesn't exceed rect height
-        layout = doc.documentLayout()
-        required_height = layout.documentSize().height()
-        if required_height > rect.height():
-            # Clip content to fit rect height if necessary
+        # 2) clip if needed
+        if doc.size().height() > rect.height():
             painter.setClipRect(rect)
 
-        # Position the text correctly within the rect
+        # 3) translate into position and draw
         painter.translate(rect.topLeft())
-        doc.drawContents(painter, QRectF(0, 0, rect.width(), rect.height()))
+        doc.documentLayout().draw(painter, ctx)
 
         painter.restore()
+    # # draw background & border
+    # super().paint(painter, option, widget, unit=self.unit, dpi=self.dpi)
+
+    # rect = self.geometry.to(self.unit, dpi=self.dpi).rect
+    # painter.save()
+    # painter.setPen(self.color)                     # use your element’s color
+    # painter.setBrush(Qt.NoBrush)
+    # # wrap text to the rectangle
+    # painter.drawText(
+    #     rect,
+    #     self.alignment_flags | Qt.TextWordWrap,
+    #     self.content or ""
+    # )
+    # painter.restore()
+        """
+        Draws the styled background + text using QTextDocument inside the specified rect.
+
+        Parameters:
+            unit (str): Unit like 'in', 'mm', or 'px' used to compute drawing size.
+            dpi (int): Resolution in dots-per-inch for physical scaling.
+        """
+        # # Base element painting: bg and border
+        # super().paint(painter, option, widget)
+
+        # rect = self.geometry.to(self.unit, dpi=self.dpi).rect
+        # painter.save()
+
+        # doc = QTextDocument()
+        # doc.setDefaultFont(self.font)
+        # doc.setPlainText(self.content or "")
+        # doc.setTextWidth(rect.width())
+
+        # layout = doc.documentLayout()
+        # required_height = layout.documentSize().height()
+        # if required_height > rect.height():
+        #     painter.setClipRect(rect)
+
+        # painter.translate(rect.topLeft())
+        # doc.drawContents(painter, QRectF(0, 0, rect.width(), rect.height()))
+        # painter.restore()
 
 class ImageElement(ComponentElement):
     _subclass_serializable = {
@@ -491,12 +563,11 @@ class ImageElement(ComponentElement):
 
         self._pixmap: Optional[QPixmap] = None
         # _content is handled by ComponentElement
-        self.alignment = Qt.AlignCenter
+        self._alignment = "Center"
         # Image-specific properties
         self._keep_aspect = True
-        # _alignment is already handled by super().__init__; if it differs,
-        # subclass's init will override it. For ImageElement, it's AlignCenter by default.
-        
+        self.showPlaceholderText = True
+
         self.setAcceptDrops(True)
 
     # override the content getter/setter
@@ -505,17 +576,19 @@ class ImageElement(ComponentElement):
         return self._content
 
     @content.setter
-    def content(self, new_content: str):
-        # Overriding to handle pixmap loading
-        self._content = new_content
-        try:
-            pixmap = QPixmap(new_content)
-            self._pixmap = pixmap if not pixmap.isNull() else None
-        except Exception as e:
-            print(f"Error loading image '{new_content}': {e}")
+    def content(self, new_content: Optional[str]):
+        # always clear pixmap if new_content is None or invalid
+        if not new_content or not Path(new_content).exists():
             self._pixmap = None
+            self._content = None
+        else:
+            pm = QPixmap(new_content)
+            self._pixmap = pm if not pm.isNull() else None
+            self._content = new_content
         self.item_changed.emit()
         self.update()
+
+
 
     # --- Image-specific Property Getters and Setters ---
     @property
@@ -532,17 +605,20 @@ class ImageElement(ComponentElement):
     # --- End Image-specific Property Getters and Setters ---
 
     def paint(self, painter: QPainter, option, widget=None):
-        super().paint(painter, option, widget)
-        print(f"Before drawing, the item's contents are {self._content}")
-        rect = self.boundingRect()
-        size = self.geometry.px.size
-        size = QSize(size.width(), size.height())
+        """
+        Paints an image inside the bounding rect, respecting aspect ratio and logical units.
+        Always draws the border *after* the content so it sits on top.
+        """
+        # 1) figure out our rect & size
+        rect = self.geometry.to(self.unit, dpi=self.dpi).rect
+        size = self.geometry.to(self.unit, dpi=self.dpi).size
+        w = size.width()
+        h = size.height()
+        # 2) draw the image *first*
         if self._pixmap:
             if self._keep_aspect:
                 scaled = self._pixmap.scaled(
-                    size,
-                    Qt.KeepAspectRatio,
-                    Qt.SmoothTransformation
+                    w, h, Qt.KeepAspectRatio, Qt.SmoothTransformation
                 )
                 x = rect.x() + (rect.width() - scaled.width()) / 2
                 y = rect.y() + (rect.height() - scaled.height()) / 2
@@ -552,16 +628,22 @@ class ImageElement(ComponentElement):
                     rect.topLeft(),
                     self._pixmap.scaled(size, Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
                 )
-        else:
-            painter.setPen(QPen(Qt.gray, 1, Qt.DashLine))
-            painter.setBrush(Qt.NoBrush)
-            painter.drawRect(rect)
+
+        # 3) or draw placeholder text *instead* (still before the border)
+        elif self.showPlaceholderText:
+            painter.save()
             painter.setPen(QPen(Qt.darkGray))
             font = painter.font()
             font.setPointSize(10)
             font.setItalic(True)
             painter.setFont(font)
-            painter.drawText(rect, Qt.AlignCenter, "Drop Image\nor Double Click to Set")
+            painter.drawText(rect, self.alignment_flags,
+                             "Drop Image\nor Double Click to Set")
+            painter.restore()
+
+        # 4) finally, draw the border on top
+        super().paint(painter, option, widget)
+
 
     def to_dict(self):
         data = super().to_dict()  # ← include base fields
@@ -575,7 +657,10 @@ class ImageElement(ComponentElement):
         inst = super().from_dict(data, registry, is_clone)
         for attr, (key, from_fn, _, default) in cls._subclass_serializable.items():
             raw = data.get(key, default)
-            setattr(inst, f"_{attr}", from_fn(raw))
+            if hasattr(inst, f"{attr}"):
+                setattr(inst, f"{attr}", from_fn(raw))
+            else:
+                setattr(inst, f"_{attr}", from_fn(raw))
         return inst
 
     def dragEnterEvent(self, event: QGraphicsSceneDragDropEvent):

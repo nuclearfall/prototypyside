@@ -12,12 +12,12 @@ from PySide6.QtWidgets import QMessageBox
 from prototypyside.models.component_elements import ImageElement, TextElement
 from prototypyside.utils.unit_str import UnitStr
 from prototypyside.utils.unit_str_geometry import UnitStrGeometry
-from prototypyside.utils.ustr_helpers import with_pos, with_rect
+from prototypyside.utils.ustr_helpers import geometry_with_px_pos, geometry_with_px_rect
 from prototypyside.utils.proto_helpers import get_prefix, issue_pid
 # Use TYPE_CHECKING for type hinting
 if TYPE_CHECKING:
     from prototypyside.models.component_elements import ComponentElement
-
+    from prototypyside.services.proto_registry import ProtoRegistry
 
 class ComponentTemplate(QGraphicsObject):
     template_changed = Signal()
@@ -26,16 +26,25 @@ class ComponentTemplate(QGraphicsObject):
     def __init__(self, pid, geometry=UnitStrGeometry(width="2.5in", height="3.5in"), parent = None, 
         name=None, registry=None, corner_radius=UnitStr("0in"), border=UnitStr("0in")):
         super().__init__(parent)
+        self._template_pid = None
         self._pid = pid
         self._name = name
         self._registry = registry
         self._geometry = geometry
-        self._dpi = geometry.dpi
+        self._dpi = 144
+        self._unit = "px"
         self._pixmap = None
         self.items: List['ComponentElement'] = []
         self._background_image: Optional[str] = None
         self._border = border
         self._corner_radius = corner_radius
+        self._csv_row = []
+        self._csv_path: Path = None 
+        self.content = None
+
+    @property
+    def registry(self):
+        return self._registry
 
     @property
     def pid(self) -> str:
@@ -47,8 +56,39 @@ class ComponentTemplate(QGraphicsObject):
         self.template_changed.emit()
 
     @property
-    def dpi(self):
+    def csv_path(self):
+        return self._csv_path
+
+    @csv_path.setter
+    def csv_path(self, value):
+        if value is None:
+            self._csv_path = None
+        else:
+            path_value = Path(value)
+            if path_value != self._csv_path:
+                self._csv_path = path_value
+                
+    @property
+    def dpi(self) -> int:
         return self._dpi
+
+    @dpi.setter
+    def dpi(self, new: int):
+        if self._dpi != new:
+            self._dpi = new
+            for item in self.items:
+                item.unit = self._unit
+
+    @property
+    def unit(self) -> str:
+        return self._unit
+
+    @unit.setter
+    def unit(self, new: str):
+        if self._unit != new:
+            self._unit = new
+            for item in self.items:
+                item.unit = self._unit
 
     @property
     def geometry(self):
@@ -56,14 +96,14 @@ class ComponentTemplate(QGraphicsObject):
 
     @geometry.setter
     def geometry(self, new_geom: UnitStrGeometry):
-        print(f"[SETTER] geometry called with {new_geom}")
+        # print(f"[SETTER] geometry called with {new_geom}")
         if self._geometry == new_geom:
-            print("[SETTER] geometry unchanged")
+            # print("[SETTER] geometry unchanged")
             return
 
         self.prepareGeometryChange()
-        print(f"[SETTER] prepareGeometryChange called")
-        print(f"[SETTER] pos set to {self._geometry.px.pos}")
+        # print(f"[SETTER] prepareGeometryChange called")
+        # print(f"[SETTER] pos set to {self._geometry.px.pos}")
         self._geometry = new_geom
         super().setPos(self._geometry.px.pos)
         # self.item_changed.emit()
@@ -79,7 +119,7 @@ class ComponentTemplate(QGraphicsObject):
         if self._geometry.px.rect == new_rect:
             return
         self.prepareGeometryChange()
-        with_rect(self._geometry, new_rect)
+        geometry_with_px_rect(self._geometry, new_rect)
 
     def itemChange(self, change: QGraphicsItem.GraphicsItemChange, value):
         # This is called when the scene moves the item.
@@ -88,7 +128,7 @@ class ComponentTemplate(QGraphicsObject):
             # also tries to set the position.
             signals_blocked = self.signalsBlocked()
             self.blockSignals(True)
-            with_pos(self._geometry, value)
+            geometry_with_px_pos(self._geometry, value)
             print(f"[ITEMCHANGE] Called with change={change}, value={value}")
             print(f"[ITEMCHANGE] Geometry.pos updated to: {self._geometry.px.pos}")
             self.blockSignals(signals_blocked)
@@ -229,18 +269,29 @@ class ComponentTemplate(QGraphicsObject):
             self._background_image = None
             print(f"[Warning] Background image not found: {path}")
 
-    def paint(self, painter: QPainter, option, widget=None):
-        rect = self.boundingRect()
+    def paint(self, painter: QPainter, option, widget=None, unit='px', dpi=144):
+        """
+        Paints the template's background and border using the specified unit and dpi.
+
+        Parameters:
+            painter (QPainter): Painter object used by the scene or exporter.
+            option: QStyleOptionGraphicsItem from the scene (unused).
+            widget: Optional QWidget; unused.
+            unit (str): Unit such as 'px', 'in', or 'mm'.
+            dpi (int): Dots-per-inch resolution to use for physical units.
+        """
+        rect = self.geometry.to(self.unit, dpi=self.dpi).rect
         painter.setRenderHint(QPainter.Antialiasing)
 
         # ——— Background ———
         painter.save()
         painter.setClipRect(rect)
         painter.setPen(Qt.NoPen)
+
         if self.background_image:
             img = QImage(self.background_image)
             if not img.isNull():
-                # drawImage(targetRect, image) will scale it to fill rect
+                # Scales image to fill the rect while preserving aspect if needed
                 painter.drawImage(rect, img)
             else:
                 painter.fillRect(rect, Qt.white)
@@ -253,28 +304,32 @@ class ComponentTemplate(QGraphicsObject):
             painter.save()
             painter.setBrush(Qt.NoBrush)
 
-            thickness_px = self.border.px
-            inset = thickness_px / 2.0
+            # Convert border thickness to unit
+            thickness = self.border.to(self.unit, dpi=self.dpi)
+            inset = thickness / 2.0
+
             inner = QRectF(
                 rect.x() + inset,
                 rect.y() + inset,
-                rect.width() - thickness_px,
-                rect.height() - thickness_px
+                rect.width() - thickness,
+                rect.height() - thickness
             )
 
-            # clamp corner radius
-            radius_px = max(0.0, min(self.corner_radius.px - inset,
-                                     min(inner.width(), inner.height()) / 2.0))
+            # Clamp the radius to avoid exceeding available space
+            max_radius = min(inner.width(), inner.height()) / 2.0
+            radius = max(0.0, min(self.corner_radius.to(self.unit, dpi=self.dpi) - inset, max_radius))
 
+            # Rounded or regular rect
             path = QPainterPath()
-            if radius_px > 0.0:
-                path.addRoundedRect(inner, radius_px, radius_px)
+            if radius > 0.0:
+                path.addRoundedRect(inner, radius, radius)
             else:
                 path.addRect(inner)
 
-            painter.setPen(QPen(Qt.black, thickness_px))
+            painter.setPen(QPen(Qt.black, thickness))
             painter.drawPath(path)
             painter.restore()
+
 
     def to_dict(self) -> Dict[str, Any]:
         print("Is this serializing?")
@@ -287,41 +342,48 @@ class ComponentTemplate(QGraphicsObject):
             'background_image': str(self.background_image) if self.background_image else None,
             'items': [e.to_dict() for e in self.items],
             'border': self.border.to_dict(),
-            'corner_radius': self.corner_radius.to_dict()
+            'corner_radius': self.corner_radius.to_dict(),
+            'csv_path': str(self._csv_path),
+            'template_pid': self._template_pid
         }
         return data
 
     @classmethod
-    def from_dict(cls, data: dict, registry, is_clone=False):
+    def from_dict(
+        cls,
+        data: dict,
+        registry: "ProtoRegistry",
+        is_clone: bool = False
+    ) -> "ComponentTemplate":
+        # 1) Core properties & PID
+        pid = issue_pid("cc") if is_clone else data["pid"]
         geom = UnitStrGeometry.from_dict(data["geometry"])
-        pid = data.get("pid")
-        prefix = get_prefix(pid)
-        background_image = data.get("background_image")
-
-        if is_clone:
-            pid = issue_pid("cc") # ComponentClone pid for is_clone
         inst = cls(
-                    pid=pid, 
-                    geometry=geom, 
-                    name=data.get("name") if is_clone is False else None,
-                    border=UnitStr.from_dict(data.get("border")),
-                    corner_radius=data.get("corner_radius"),
+            pid=pid,
+            geometry=geom,
+            name=(None if is_clone else data.get("name")),
+            border=UnitStr.from_dict(data.get("border")),
+            corner_radius=UnitStr.from_dict(data.get("corner_radius")),
         )
-        inst.background_image = Path(background_image) if background_image else None
+        inst._template_pid = None
+        if is_clone:
+            inst._template_pid = data.get("pid")
+        inst.csv_path = data.get("csv_path")
+        # 2) Registry registration
+        inst._registry = registry
         registry.register(inst)
 
+        # 3) Child elements (images/text)
         inst.items = []
         for e in data.get("items", []):
-            item_pid = e.get("pid")
-            prefix = get_prefix(item_pid)
-            if prefix == 'ie':
-                item = ImageElement.from_dict(e, registry, is_clone=is_clone)
-            elif prefix == 'te':
-                item = TextElement.from_dict(e, registry, is_clone=is_clone)
+            prefix = get_prefix(e["pid"])
+            if prefix == "ie":
+                el = ImageElement.from_dict(e, registry, is_clone=is_clone)
+            elif prefix == "te":
+                el = TextElement.from_dict(e, registry, is_clone=is_clone)
             else:
-                raise ValueError(f"Unknown item prefix {prefix!r}")
-
-            item.setParentItem(inst)
-            inst.items.append(item)
+                raise ValueError(f"Unknown prefix {prefix}")
+            el.setParentItem(inst)
+            inst.items.append(el)
 
         return inst

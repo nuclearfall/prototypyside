@@ -29,6 +29,8 @@ class LayoutScene(QGraphicsScene):
         self.tab = tab 
         self._template = tab.template
         self._scene_rect = scene_rect
+        self._preview_mode = False
+        self._pages = []
         print(f"SceneRect set to {self._scene_rect}")
         self.setSceneRect(self._scene_rect)
 
@@ -99,6 +101,28 @@ class LayoutScene(QGraphicsScene):
     def is_valid_mime_data(self, event: QGraphicsSceneDragDropEvent) -> bool:
         return event.mimeData().hasFormat("application/x-component-pid")
 
+    def mousePressEvent(self, event: QGraphicsSceneMouseEvent):
+        item = self.itemAt(event.scenePos(), QTransform())
+        if event.button() == Qt.LeftButton:
+            if self._preview_mode:
+                # Exit preview
+                self.clear()
+                for i, layout in enumerate(self._pages):
+                    layout.setPos(QPointF(0, i * (layout.boundingRect().height() + 50)))
+                    self.addItem(layout)
+                self._preview_mode = False
+                self.tab.view.fitInView(self.sceneRect(), Qt.KeepAspectRatio)
+            else:
+                if item in self._pages:
+                    # Enter preview
+                    self.clear()
+                    self.addItem(item)
+                    item.setPos(QPointF(0, 0))
+                    self._preview_mode = True
+                    self.setSceneRect(item.boundingRect())
+                    self.tab.view.fitInView(self.sceneRect(), Qt.KeepAspectRatio)
+        else:
+            super().mousePressEvent(event)
     def dragEnterEvent(self, event: QGraphicsSceneDragDropEvent):
         if self.is_valid_mime_data(event):
             event.acceptProposedAction()
@@ -119,3 +143,17 @@ class LayoutScene(QGraphicsScene):
             event.acceptProposedAction()
         else:
             super().dropEvent(event)
+
+    def populate_with_clones(self, count: int, base_template, registry):
+        self.clear()
+        spacing = 50  # vertical gap between pages, in scene units
+        y_offset = 0
+        self._pages = []
+        for i in range(count):
+            layout = registry.clone(base_template)
+            layout.setPos(QPointF(0, y_offset))
+            self.addItem(layout)
+            self._pages.append(layout)
+            y_offset += layout.boundingRect().height() + spacing
+        self.setSceneRect(0, 0, layout.boundingRect().width(), y_offset)
+

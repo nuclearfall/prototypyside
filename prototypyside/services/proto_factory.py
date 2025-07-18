@@ -28,7 +28,9 @@ class ProtoFactory:
         "te": TextElement,
         "ie": ImageElement,
         "ct": ComponentTemplate,
+        "cc": ComponentTemplate,
         "lt": LayoutTemplate,
+        "pg": LayoutTemplate,
         "ls": LayoutSlot,
     }
 

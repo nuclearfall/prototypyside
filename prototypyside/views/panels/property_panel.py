@@ -158,7 +158,7 @@ class PropertyPanel(QWidget):
         self.clear_target()
 
     def _connect_signals(self):
-        self.name_edit.editingFinished.connect(lambda: self._handle_property_change("name", self.name_edit.text()))
+        self.name_edit.editingFinishedWithValue.connect(lambda value: self._handle_property_change("name", value))
         self.content_text_edit.editingFinished.connect(self.property_changed.emit)
         self.content_path_button.clicked.connect(self._choose_image_path)
         self.geometry_field.valueChanged.connect(self.property_changed.emit)
@@ -318,7 +318,6 @@ class PropertyPanel(QWidget):
                 self.text_edit.setCurrentFont(new_value)
             print(f"[PROP PANEL] Prop={prop_name}, old={old_value}, new={new_value}, equal={old_value == new_value}")
             self.property_changed.emit(self.target_item, prop_name, new_value, old_value)
-        self.sender().clearFocus()
  
     @Slot()
     def _choose_image_path(self):

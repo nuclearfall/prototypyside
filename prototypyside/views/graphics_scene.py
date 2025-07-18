@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
 
 from prototypyside.services.undo_commands import MoveElementCommand, ChangeItemPropertyCommand
 from prototypyside.utils.graphics_item_helpers import is_movable
-from prototypyside.utils.ustr_helpers import with_pos
+from prototypyside.utils.ustr_helpers import geometry_with_px_pos
 from prototypyside.models.component_elements import ComponentElement
 
 if TYPE_CHECKING:
@@ -172,9 +172,9 @@ class ComponentScene(QGraphicsScene):
         if self._dragging_item and self._dragging_start_pos is not None:
             geom = self._dragging_item.geometry
             old_pos = self._dragging_start_pos
-            old = with_pos(geom, old_pos)
+            old = geometry_with_px_pos(geom, old_pos)
             new_pos = self._dragging_item.pos()
-            new = with_pos(geom, new_pos)
+            new = geometry_with_px_pos(geom, new_pos)
 
             if old_pos != new_pos:
                 self.item_resized.emit(self._dragging_item, "geometry", new, old)

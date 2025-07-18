@@ -13,12 +13,12 @@ from prototypyside.services.app_settings import AppSettings
 from prototypyside.views.panels.layout_property_panel import LayoutPropertyPanel, scene_to_pixmap
 from prototypyside.views.toolbars.layout_toolbar import LayoutToolbar
 from prototypyside.views.palettes.layout_palette import LayoutPalette
-from prototypyside.views.panels.import_panel import ImportPanel
 from prototypyside.widgets.unit_field import UnitField
 from prototypyside.views.layout_scene import LayoutScene
 from prototypyside.views.layout_view import LayoutView
 from prototypyside.utils.unit_converter import to_px
 from prototypyside.config import PAGE_SIZES
+from prototypyside.services.proto_registry import ProtoRegistry
 from prototypyside.services.undo_commands import ChangeItemPropertyCommand, CloneComponentTemplateToSlotCommand
 
 
@@ -63,7 +63,7 @@ class LayoutTab(QWidget):
         print(f"[LAYOUT_TAB] From __init__: Template rows and columns after initially setting grid {template.rows}, {template.columns}")
         self._create_layout_toolbar()
         self._create_layout_palette()
-        self._create_import_panel()
+
         self._create_property_panel()
         self.margin_spacing_panel = self._create_margin_spacing_panel()
         self.remove_item_btn = QPushButton("Remove Assignment")
@@ -73,6 +73,7 @@ class LayoutTab(QWidget):
         # Connect signals to handler methods
         self.scene.component_dropped.connect(self.on_component_dropped)
         self.layout_toolbar.display_flag_changed.connect(self.on_display_flag_changed)
+        self.layout_toolbar.number_of_copies.connect(self.on_layout_copy_count_changed)
         # self._template.marginsChanged.connect(self.on_template_margin_changed)
         # self._template.spacingChanged.connect(self.on_template_spacing_changed)
         self.layout_palette.palette_selection_changed.connect(self.on_palette_selection_change)
@@ -219,15 +220,9 @@ class LayoutTab(QWidget):
         return self.layout_toolbar
 
     def _create_layout_palette(self) -> QWidget:
-        self.layout_palette = LayoutPalette(registry=self.registry, parent=self)
+        self.layout_palette = LayoutPalette(self.main_window.registry, parent=self)
         # print("LayoutPalette sizeHint:", self.layout_palette.sizeHint())
         # Return a widget listing all open component templates
-        pass
-
-    def _create_import_panel(self) -> QWidget:
-        self.import_panel = ImportPanel()
-        # print("ImportPanel sizeHint:", self.import_panel.sizeHint())
-        # Return a widget showing CSV import/merge status
         pass
 
     def _create_property_panel(self) -> QWidget:
@@ -258,13 +253,27 @@ class LayoutTab(QWidget):
     @Slot(bool)
     def on_orientation_changed(self, landscape: bool):
         t = self.template
-        o = self.template.is_landscape
-        n = landscape
-        p = "is_landscape"
-        command = ChangeItemPropertyCommand(t, p, n, o)
+        old = t.orientation
+        new = landscape
+        if old == new:
+            return  # no change, no-op
+
+        # # 🔁 Swap row/col spinbox values (but keep logical count the same)
+        # r = self.layout_toolbar.rows_spin.value()
+        # c = self.layout_toolbar.cols_spin.value()
+        # self.layout_toolbar.rows_spin.blockSignals(True)
+        # self.layout_toolbar.cols_spin.blockSignals(True)
+        # self.layout_toolbar.rows_spin.setValue(c)
+        # self.layout_toolbar.cols_spin.setValue(r)
+        # self.layout_toolbar.rows_spin.blockSignals(False)
+        # self.layout_toolbar.cols_spin.blockSignals(False)
+
+        # 🔁 Push undo and orientation change
+        command = ChangeItemPropertyCommand(t, "orientation", new, old)
         self.undo_stack.push(command)
+
         self.scene.setSceneRect(self.template.boundingRect())
-        # self._refreshGrid()
+        self.view.fitInView(self.scene.sceneRect(), Qt.KeepAspectRatio)
 
     @Slot(int, int)
     def on_grid_size_changed(self, rows: int, cols: int):
@@ -291,6 +300,11 @@ class LayoutTab(QWidget):
                 for item in column:
                     flag = self.template.display_flag
                     item.display_flag = flag
+
+    @Slot(int)
+    def on_layout_copy_count_changed(self, value: int):
+        self.scene.populate_with_clones(value, self.template, self.registry)
+        # self.view.fitInView(self.scene.sceneRect(), Qt.KeepAspectRatio)
 
     # def _refreshGrid(self):
     #     tpl = self.template
@@ -325,16 +339,30 @@ class LayoutTab(QWidget):
     # --- Selection and Placement Logic ---
 
     @Slot(str)
-    def on_palette_selection_change(self, pid):
+    def on_palette_selection_change(self, pid: str):
+        """
+        When a component template is selected in the layout palette,
+        this sets it as the content template used by the layout.
+        """
+        ct = ProtoRegistry.global_get(pid)
+        if ct is None:
+            print(f"[WARN] No ComponentTemplate found for PID: {pid}")
+            return
 
-        ct = self.registry.find(pid)
-        # print(ct.name, ct.pid) # This works
-        scene = self.main_window.get_scene_for_template_pid(pid)
+        try:
+            _ = ct.scene()  # Touch the scene to trigger a RuntimeError if deleted
+        except RuntimeError:
+            print(f"[ERROR] Qt object for ComponentTemplate {pid} has been deleted.")
+            return
 
-        ct_rendered = scene_to_pixmap(scene, ct.width_px, ct.height_px)
-        self.property_panel.display_template(ct, ct_rendered)
-        self.property_panel.update()
-        self.update()
+        # Set the layout template's content reference
+        self.template.content = ct
+        print(f"[INFO] Layout content set to ComponentTemplate: {ct.name} ({ct.pid})")
+
+        # Optionally trigger any UI updates
+        self.template.invalidateCache()
+        self.template.update()
+
 
     @Slot()
     def on_scene_selection_changed(self):
@@ -348,10 +376,12 @@ class LayoutTab(QWidget):
     def select_item(self, row: int, col: int):
         item = self.template.items[row][col]
         self._selected_item = item
+        self._selected_item.hoverEventEffect()
         self.refresh_panels()
 
     def deselect_item(self):
         self._selected_item_pid = None
+        self._selected_item.hoverLeaveEffect()
         self.refresh_panels()
 
     def on_item_selected(self, item_pid: str):
@@ -362,37 +392,18 @@ class LayoutTab(QWidget):
 
     @Slot(str, QPointF)
     def on_component_dropped(self, tpid: str, scene_pos: QPointF):
-        """
-        Called when the user drops a ComponentTemplate onto the layout scene.
-        Delegates to the model to figure out which item that corresponds to.
-        """
-        slot = self.template.get_item_at_position(scene_pos)
         # print(item, scene_pos)
-        template = self.registry.global_get(tpid)
+
+        temp = self.registry.global_get(tpid)
+        item = self.template.get_item_at_position(scene_pos)
+        print(item.pid)
         # print(template.pid)
+        clone = self.template.registry.clone(item)
+        item.content = temp
 
-        if slot is None or template is None:
-            print("Drop failed: no valid item or component found")
-            return
-        self.template.content.append(template)
-        # command = CloneComponentTemplateToSlotCommand(self.registry, template, item)
+
+        # command = CloneComponentTemplateToSlotCommand(self.registry, template, slot)
         # self.undo_stack.push(command)
-        # clone = self.registry.get_last()
-        print(f"ComponentTemplate {template.name} dropped into LayoutTemplate at slot {slot.row, slot.column}")
-
-
-    # --- Export / Print ---
-    def export_pdf(self, *args, **kwargs):
-        # Implement PDF export logic for the current layout
-        pass
-
-    def export_png(self, *args, **kwargs):
-        # Implement PNG export logic for the current layout
-        pass
-
-    def print_layout(self, *args, **kwargs):
-        # Implement printing logic for the current layout
-        pass
 
     # --- Undo/Redo Integration ---
     def push_undo_command(self, command):

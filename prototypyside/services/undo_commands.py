@@ -26,43 +26,62 @@ class AddSlotCommand(QUndoCommand):
 # This method doesn't require adding the template to the scene.
 # Instead when dropped, it also creates a ComponentInstance which will Render
 # and adds that to the scene. The ComponentInstance renders the Template.
-class CreateComponentCommand(QUndoCommand):
-    def __init__(self, component, tab, item, description="Clone Element"):
-        super().__init__(description)
-        self.tab = tab
-        self.component = component
-        self.registry = tab.registry
-        self.scene = tab.scene
-        self.item = item
+# # class CreateComponentCommand(QUndoCommand):
+# #     def __init__(self, component, tab, item, description="Clone Element"):
+# #         super().__init__(description)
+# #         self.tab = tab
+# #         self.component = component
+# #         self.registry = tab.registry
+# #         self.scene = tab.scene
+# #         self.item = item
 
+# #         self.clone = None
+# #         self.clone_items = []
+
+# #     def redo(self):
+# #         if self.clone is None:
+# #             self.clone = self.registry.clone(self.component)
+# #             self.clone.setParentItem(self.item)
+
+# #             self.clone_items = self.registry.clone_all(self.component.items)
+
+# #             for ce in self.clone_items:
+# #                 self.clone.add_item(ce)
+# #                 ce.setParentItem(self.clone)
+# #                 self.scene.addItem(ce)
+# #         else:
+# #             self.registry.reinsert(self.clone.pid)
+# #             for item in self.clone_elemnts:
+# #                 self.registry.reinsert(item.pid)
+
+#     def undo(self):
+#         for ce in self.clone_items:
+#             self.registry.deregister(ce.pid)
+#             self.scene.removeItem(ce)
+
+#         self.item.content = None
+#         self.registry.deregister(self.clone.pid)
+#         self.scene.removeItem(self.clone)
+
+class AddTemplateToLayoutCommand(QUndoCommand):
+    def __init__(self, component, layout, description="Add Element"):
+        super().__init__(description)
+        self.component = component
         self.clone = None
-        self.clone_items = []
+        self.layout = layout
 
     def redo(self):
-        if self.clone is None:
-            self.clone = self.registry.clone(self.component)
-            self.clone.setParentItem(self.item)
+        if self.item is None:
+            self.clone = self.layout.registry.clone(self.component)
+            self.layout.content = self.clone
 
-            self.clone_items = self.registry.clone_all(self.component.items)
-
-            for ce in self.clone_items:
-                self.clone.add_item(ce)
-                ce.setParentItem(self.clone)
-                self.scene.addItem(ce)
-        else:
-            self.registry.reinsert(self.clone.pid)
-            for item in self.clone_elemnts:
-                self.registry.reinsert(item.pid)
+        elif self.clone is not None and self.layout.registry.is_orphan(self.clone.pid):
+            self.layout.registry.reinsert(self.clone.pid)
+            self.layout.content.append(self.clone)
 
     def undo(self):
-        for ce in self.clone_items:
-            self.registry.deregister(ce.pid)
-            self.scene.removeItem(ce)
-
-        self.item.content = None
-        self.registry.deregister(self.clone.pid)
-        self.scene.removeItem(self.clone)
-
+        self.layout.deregister(self.clone)
+        self.layout.content.pop(self.clone)
 
 class AddElementCommand(QUndoCommand):
     def __init__(self, prefix, tab, geometry, description="Add Element"):

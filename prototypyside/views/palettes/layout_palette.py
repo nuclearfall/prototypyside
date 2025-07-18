@@ -1,10 +1,12 @@
 # layout_palette.py
-
+from shiboken6 import isValid
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QListWidget, QListWidgetItem, QLabel
 from PySide6.QtCore import Qt, QMimeData, QEvent, QPoint, Signal
 from PySide6.QtGui import QDrag, QMouseEvent
 
 from prototypyside.utils.proto_helpers import get_prefix
+
+
 class LayoutPalette(QWidget):
     """
     Palette showing all open component templates available for layout assignment.
@@ -12,13 +14,13 @@ class LayoutPalette(QWidget):
     palette_selection_changed = Signal(str)
     palette_deselected = Signal()
 
-    def __init__(self, registry, parent=None):
+    def __init__(self, root_registry, parent=None):
         super().__init__(parent)
-        self.registry = registry
+        self.registry = root_registry
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
         self.label = QLabel("Component Templates", self)
-        self.list_widget = DraggableListWidget(self, registry)
+        self.list_widget = DraggableListWidget(self, self.registry)
         self.list_widget.setDragEnabled(True)        
         self.setMinimumHeight(20)
         self.setMinimumWidth(100) 
@@ -28,44 +30,51 @@ class LayoutPalette(QWidget):
         self.list_widget.itemClicked.connect(self._on_list_item_clicked)
         # Connect signals
         self.registry.object_registered.connect(self._on_component_registered)
+
         self.registry.object_deregistered.connect(self._on_component_deregistered)
 
         self.refresh()
 
     def refresh(self):
-        """(Re)populate the list with all open component templates."""
+        print("[LayoutPalette] Refreshing list of component templates")
         self.list_widget.clear()
-        existing_components = self.registry.global_get_by_prefix("ct")
-        print(existing_components)
-        for obj in existing_components:
+        seen_pids = set()
+        objects = self.registry.global_get_by_prefix("ct")
+        print(f"[LayoutPalette] Found {len(objects)} objects with prefix 'ct'")
+        for obj in objects:
+            if not isValid(obj):
+                print(f"[LayoutPalette] Object {obj.pid} is not valid (Qt object deleted?)")
+                continue
+            if obj.pid in seen_pids:
+                print(f"[LayoutPalette] Duplicate PID: {obj.pid}")
+                continue
+            seen_pids.add(obj.pid)
+            print(f"[LayoutPalette] Adding component: {obj.name} (PID: {obj.pid})")
             self._add_component_item(obj)
 
     def _on_list_item_clicked(self):
         item = self.list_widget.currentItem()
         self.palette_selection_changed.emit(item.data(Qt.UserRole))
 
-
     def _add_component_item(self, obj):
         item = QListWidgetItem(obj.name)
-        item.setData(Qt.ItemDataRole.UserRole, obj.pid)
+        item.setData(Qt.ItemDataRole.UserRole, obj.pid)  # <- store only PID
         self.list_widget.addItem(item)
 
-    def _on_component_registered(self, obj):
-        if get_prefix(obj.pid) == "ct":
-            # Avoid duplicates: only add if not already present
+    def _on_component_registered(self, pid):
+        if get_prefix(pid) == "ct":
             for i in range(self.list_widget.count()):
-                if self.list_widget.item(i).data(Qt.UserRole) == obj.pid:
+                if self.list_widget.item(i).data(Qt.UserRole) == pid:
                     return
+            obj = self.registry.global_get(pid)
             self._add_component_item(obj)
 
-    def _on_component_deregistered(self, obj_to_remove):
-        if get_prefix(obj_to_remove.pid) == "ct":
-            pid_to_remove = obj_to_remove.pid
+    def _on_component_deregistered(self, pid):
+        if get_prefix(pid) == "ct":
             for i in range(self.list_widget.count()):
                 item = self.list_widget.item(i)
-                if item.data(Qt.UserRole) == pid_to_remove:
+                if item.data(Qt.UserRole) == pid:
                     removed_item = self.list_widget.takeItem(i)
-                    print(f"LayoutPalette: Removed item for PID: {pid_to_remove}, '{removed_item.text()}', from list.")
                     return
 
 class DraggableListWidget(QListWidget):
