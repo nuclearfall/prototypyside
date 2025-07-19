@@ -1,13 +1,21 @@
-from PySide6.QtCore import Qt, QRectF, QPointF, QSize, Signal, QObject
-from PySide6.QtGui import (QColor, QFont, QPen, QBrush, QTextDocument, QTextOption, QPainter, QPixmap, QPalette,
-            QAbstractTextDocumentLayout)
-from PySide6.QtWidgets import QGraphicsItem, QGraphicsObject
+# from PySide6.QtCore import Qt, QRectF, QPointF, QSize, Signal, QObject
+# from PySide6.QtGui import (QColor, QFont, QPen, QBrush, QTextDocument, QTextOption, QPainter, QPixmap, QPalette,
+#             QAbstractTextDocumentLayout)
+# from PySide6.QtWidgets import QGraphicsItem, QGraphicsObject
 
 from prototypyside.utils.units.unit_str import UnitStr
 from prototypyside.utils.units.unit_str_geometry import UnitStrGeometry
+
 from prototypyside.models.component_element import ComponentElement
 
 class TextElement(ComponentElement):
+    font: str 
+    content:str
+    super().__init__(self, pid, geometry)
+
+
+
+
     _subclass_serializable = {
         # maps attribute name -> (dict_key, from_fn, to_fn, default)
         "font": (
