@@ -131,7 +131,7 @@
           }
         }
       },
-      "template_pid": "ct_27d3a645bd4848bf9561a31192325ca0",
+      "tpid": "ct_27d3a645bd4848bf9561a31192325ca0",
       "name": "@name",
       "z_order": 0,
       "color": 4278190080,
@@ -215,7 +215,7 @@
           }
         }
       },
-      "template_pid": "ct_27d3a645bd4848bf9561a31192325ca0",
+      "tpid": "ct_27d3a645bd4848bf9561a31192325ca0",
       "name": "@image",
       "z_order": 0,
       "color": 4278190080,
@@ -299,7 +299,7 @@
           }
         }
       },
-      "template_pid": "ct_27d3a645bd4848bf9561a31192325ca0",
+      "tpid": "ct_27d3a645bd4848bf9561a31192325ca0",
       "name": "@text",
       "z_order": 0,
       "color": 4278190080,

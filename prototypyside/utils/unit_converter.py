@@ -3,7 +3,7 @@ from typing import List, Dict, Tuple
 from PySide6.QtCore import QRectF, QPointF
 from PySide6.QtGui import QPageSize
 
-from prototypyside.utils.unit_str import UnitStr
+from prototypyside.utils.units.unit_str import UnitStr
 
 UNITS_TO_INCHES = {
     "in": 1.0,

@@ -10,7 +10,7 @@
     "geometry": {
       "$ref": "unit_str_geometry.json"
     },
-    "template_pid": { "type": ["string","null"] },
+    "tpid": { "type": ["string","null"] },
     "name":         { "type": ["string","null"] },
     "z_order": {
       "type": "integer"
@@ -48,7 +48,7 @@
     "keep_aspect",
     "name",
     "pid",
-    "template_pid",
+    "tpid",
     "z_order"
   ],
   "additionalProperties": false

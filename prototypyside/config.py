@@ -3,7 +3,7 @@
 from PySide6.QtGui import Qt, QColor, QPageSize
 from enum import Enum, auto
 
-from prototypyside.utils.unit_str_geometry import UnitStrGeometry
+from prototypyside.utils.units.unit_str_geometry import UnitStrGeometry
 
 # --- Constants for Resize Handles ---
 HANDLE_SIZE = 8
@@ -115,7 +115,7 @@ MEASURE_INCREMENT = {
         3: 9,
         2: 36,
         1: 72 
-    }
+    },
 }
 
 UNITS_TO_INCHES = {

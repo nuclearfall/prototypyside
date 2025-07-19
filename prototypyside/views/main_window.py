@@ -24,7 +24,7 @@ from prototypyside.utils.proto_helpers import get_prefix
 from prototypyside.services.merge_manager import MergeManager
 from prototypyside.views.panels.import_panel import ImportPanel
 from prototypyside.services.export_manager import ExportManager
-
+from prototypyside.services.mail_room import MailRoom
 from prototypyside.utils.validator import SchemaValidator
 
 def MetaKeySequence(key: str) -> QKeySequence:
@@ -54,16 +54,19 @@ class MainDesignerWindow(QMainWindow):
         super().__init__()
 
         schema_path = Path(__file__).parent.parent / "schemas"
+        
+        # Main application settings, might be shared or passed to tabs
         self.validator = SchemaValidator(schema_path)
-
+        self.settings = AppSettings(display_unit="px", print_dpi=300)
+        self.registry = RootRegistry()
+        self.mail_room = MailRoom(registry=self.registry)
+        self.registry.set_mail_room(self.mail_room)
         self.undo_group = QUndoGroup(self)
         self.setWindowTitle("ProtoTypySide")
         self.resize(1400, 900)
         self.setMinimumSize(800, 600)
 
-        # Main application settings, might be shared or passed to tabs
-        self.settings = AppSettings(display_unit="px", print_dpi=300)
-        self.registry = RootRegistry()
+
         self._tab_map = {}  # pid: tab
 
         self.tab_widget: Optional[QTabWidget] = None
@@ -301,7 +304,7 @@ class MainDesignerWindow(QMainWindow):
         #     # Don’t crash—just log or show a brief warning
         #     print(f"Autosave failed: {e}")
 
-    def get_scene_for_template_pid(self, tpid):
+    def get_scene_for_tpid(self, tpid):
         index = self._tab_map.get(tpid)
         if index is not None and 0 <= index < self.tab_widget.count():
             tab = self.tab_widget.widget(index)

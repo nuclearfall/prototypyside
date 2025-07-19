@@ -2,7 +2,7 @@ from math import ceil
 from PySide6.QtCore import QSizeF
 from PySide6.QtGui  import QPainter, QPdfWriter, QPageSize
 from PySide6.QtWidgets import QGraphicsScene
-from prototypyside.utils.unit_str_geometry import UnitStrGeometry
+from prototypyside.utils.units.unit_str_geometry import UnitStrGeometry
 
 class ExportManager:
     def __init__(self, merge_manager, registry, unit="in", dpi=300):
@@ -28,8 +28,8 @@ class ExportManager:
 
         # ——————————————————————————————
         # 2) Grab every CSV row WITHOUT mutating the master template
-        # template is a clone so will have a non None template_pid
-        all_rows  = self.merge_manager.get_all_rows(template.template_pid)
+        # template is a clone so will have a non None tpid
+        all_rows  = self.merge_manager.get_all_rows(template.tpid)
         print(f"Have csv: {all_rows}")
         total     = len(all_rows)
 

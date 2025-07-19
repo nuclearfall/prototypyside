@@ -1,4 +1,7 @@
-class Page(LayoutTemplate)
+from typing import Dict, Any, TYPE_CHECKING
+
+class PageModel
+    pid: str 
 
     def to_dict(self) -> Dict[str, Any]:
         data = {

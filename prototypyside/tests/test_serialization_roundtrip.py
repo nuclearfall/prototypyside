@@ -14,11 +14,12 @@ from prototypyside.utils.validator import SchemaValidator
 from prototypyside.services.proto_registry import RootRegistry, ProtoRegistry
 
 # ── MODELS & HELPERS ───────────────────────────────────────────────────────
-from prototypyside.models.component_elements import TextElement, ImageElement
+from prototypyside.models.component_element import TextElement, ImageElement
 from prototypyside.models.component_template import ComponentTemplate
-from prototypyside.models.layout_template import LayoutTemplate, LayoutSlot
-from prototypyside.utils.unit_str import UnitStr
-from prototypyside.utils.unit_str_geometry import UnitStrGeometry
+from prototypyside.models.layout_template import LayoutTemplate
+from prototypyside.models.layout_slot import LayoutSlot
+from prototypyside.utils.units.unit_str import UnitStr
+from prototypyside.utils.units.unit_str_geometry import UnitStrGeometry
 from prototypyside.utils.proto_helpers import issue_pid
 
 # ── FIXTURES ────────────────────────────────────────────────────────────────

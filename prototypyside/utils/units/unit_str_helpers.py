@@ -1,6 +1,6 @@
 from PySide6.QtCore import QRectF, QPointF
-from prototypyside.utils.unit_str_geometry import UnitStrGeometry
-from prototypyside.utils.unit_converter import UnitStr
+from prototypyside.utils.units.unit_str_geometry import UnitStrGeometry
+from prototypyside.utils.units.unit_str import UnitStr
 
 def geometry_with_px_rect(
     base: UnitStrGeometry,
@@ -46,7 +46,7 @@ def geometry_with_px_pos(
 
     x = UnitStr.from_px(px_pos.x(), dpi=dpi)
     y = UnitStr.from_px(px_pos.y(), dpi=dpi)
-
+    # units are stored interally as inches. 
     return UnitStrGeometry(
         width=base.width,
         height=base.height,

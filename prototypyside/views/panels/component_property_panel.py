@@ -8,7 +8,7 @@ import inspect
 
 
 class PropertyPanel(QWidget):
-    def __init__(self, target_object=None, property_dict, parent=None):
+    def __init__(self, target_object=None, parent=None):
         super().__init__(parent)
         self.target_object = target_object
         self.property_dict = property_dict

@@ -22,7 +22,7 @@ class CSVData:
 
         self.template = template
         # This is the reference point for access by clones:
-        self.tpid = template.template_pid
+        self.tpid = template.tpid
         if self.tpid is None:
             self.tpid = template.pid
         self.headers: List[str]

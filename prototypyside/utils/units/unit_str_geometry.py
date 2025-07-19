@@ -5,7 +5,7 @@ from decimal import Decimal
 from typing import Optional, Union
 
 from PySide6.QtCore import QRectF, QPointF, QSizeF
-from prototypyside.utils.unit_str import UnitStr
+from prototypyside.utils.units.unit_str import UnitStr
 
 Number = Union[int, float, str, Decimal, UnitStr]
 

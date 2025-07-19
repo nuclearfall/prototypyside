@@ -1,22 +1,21 @@
 # proto_factory.py
-import uuid
-import json
 from typing import Optional, Dict, Type, Union, List
-from pathlib import Path
+import importlib
 
 # Import your model classes
 from prototypyside.models.component_template import ComponentTemplate
-from prototypyside.models.component_elements import TextElement, ImageElement
-from prototypyside.models.layout_template import LayoutSlot, LayoutTemplate
+from prototypyside.models.component_element import TextElement, ImageElement
+from prototypyside.models.layout_template import LayoutTemplate
+from prototypyside.models.layout_slot import LayoutSlot
+
 
 # Import helper functions related to PIDs
-from prototypyside.utils.proto_helpers import (
-    VALID_ID_PREFIXES,
-    parse_pid,
-    issue_pid, # For generating new PIDs
-    get_prefix,
-    is_pid_prefix # For checking if a string is just a prefix
-)
+from prototypyside.utils.proto_helpers import MODEL_ONLY, get_prefix
+
+
+def get_class_from_name(module_path, class_name):
+    module = importlib.import_module(module_path)
+    return getattr(module, class_name)
 
 class ProtoFactory:
     """
@@ -24,6 +23,7 @@ class ProtoFactory:
     based on their PID prefix and data.
     It does NOT manage collections of objects, their relationships, or naming.
     """
+
     _PROTO_OBJECT_CLASSES: Dict[str, Type] = {
         "te": TextElement,
         "ie": ImageElement,
@@ -32,6 +32,8 @@ class ProtoFactory:
         "lt": LayoutTemplate,
         "pg": LayoutTemplate,
         "ls": LayoutSlot,
+        "ug": UnitStrGeometry,
+        "us": UnitStr,
     }
 
     def __init__(self):
@@ -46,8 +48,8 @@ class ProtoFactory:
         """
         if prefix in self._PROTO_OBJECT_CLASSES:
             raise ValueError(f"Prefix '{prefix}' is already registered with {self._PROTO_OBJECT_CLASSES[prefix].__name__}.")
-        if prefix not in VALID_ID_PREFIXES:
-             raise ValueError(f"Prefix '{prefix}' is not a valid ID prefix. Must be one of {VALID_ID_PREFIXES}.")
+        if prefix not in REGISTERED_PREFIXES:
+             raise ValueError(f"Prefix '{prefix}' is not a valid ID prefix. Must be one of {REGISTERED_PREFIXES}.")
         self._PROTO_OBJECT_CLASSES[prefix] = cls
 
     def get_object_type(self, pid_str: str) -> Optional[Type]:

@@ -6,7 +6,7 @@ from PySide6.QtGui import QDrag, QPixmap
 from typing import Optional, List, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from prototypyside.models.game_component_elements import GameComponentElement
+    from prototypyside.models.game_component_element import GameComponentElement
 
 
 class LayersListWidget(QListWidget):

@@ -35,7 +35,8 @@ from __future__ import annotations
 from typing import List, Dict, Literal, Optional, TYPE_CHECKING
 
 if TYPE_CHECKING:  # only for type hints; no runtime dependency
-    from layout_template import LayoutTemplate, LayoutSlot  # uploaded file
+    from layout_template import LayoutTemplate
+    from prototypyside.models.layout_slot import LayoutSlot
     from component_template import ComponentTemplate        # uploaded file
 
 # ---------------------------------------------------------------------------

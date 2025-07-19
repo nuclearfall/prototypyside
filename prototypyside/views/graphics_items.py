@@ -10,7 +10,7 @@ from prototypyside.config import (
 )
 
 if TYPE_CHECKING:
-    from prototypyside.models.game_component_elements import ComponentElement
+    from prototypyside.models.game_component_element import ComponentElement
 else:
     ComponentElement = object
 

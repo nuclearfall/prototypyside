@@ -5,9 +5,9 @@ from PySide6.QtCore import Signal, Slot
 from typing import Optional, Any
 
 # Assuming these are in a sibling directory or accessible via the python path
-from prototypyside.models.component_elements import ComponentElement
-from prototypyside.utils.unit_str import UnitStr
-from prototypyside.utils.unit_str_geometry import UnitStrGeometry
+from prototypyside.models.component_element import ComponentElement
+from prototypyside.utils.units.unit_str import UnitStr
+from prototypyside.utils.units.unit_str_geometry import UnitStrGeometry
 
 
 class UnitField(QLineEdit):
@@ -254,7 +254,7 @@ class UnitStrGeometryField(QWidget):
 # from typing import Optional
 
 # from prototypyside.utils.unit_converter import parse_dimension
-# from prototypyside.utils.unit_str import UnitStr
+# from prototypyside.utils.units.unit_str import UnitStr
 
 
 # class UnitField(QLineEdit):

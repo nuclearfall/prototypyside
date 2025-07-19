@@ -1,7 +1,7 @@
 from PySide6.QtCore   import QRectF, QPointF, Qt, Slot
 from PySide6.QtGui    import QPainter, QColor, QPen
 from PySide6.QtWidgets import QGraphicsItem
-from prototypyside.utils.unit_str import UnitStr
+from prototypyside.utils.units.unit_str import UnitStr
 
 DEFAULT_INCREMENTS = {   # used when caller passes increment=None
     "cm": {3: 0.25, 2: 0.50, 1:  2.0},

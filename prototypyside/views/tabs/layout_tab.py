@@ -8,7 +8,8 @@ from PySide6.QtCore import Qt, Signal, QRectF, QPointF, Slot, QTimer
 from PySide6.QtGui import (QKeySequence, QShortcut, QUndoStack, 
     QUndoGroup, QUndoCommand, QPainter, QPageSize, QPixmap, QImage, QPainter)
 
-from prototypyside.models.layout_template import LayoutTemplate, LayoutSlot
+from prototypyside.models.layout_template import LayoutTemplate
+from prototypyside.models.layout_slot import LayoutSlot
 from prototypyside.services.app_settings import AppSettings
 from prototypyside.views.panels.layout_property_panel import LayoutPropertyPanel, scene_to_pixmap
 from prototypyside.views.toolbars.layout_toolbar import LayoutToolbar
@@ -19,7 +20,7 @@ from prototypyside.views.layout_view import LayoutView
 from prototypyside.utils.unit_converter import to_px
 from prototypyside.config import PAGE_SIZES
 from prototypyside.services.proto_registry import ProtoRegistry
-from prototypyside.services.undo_commands import ChangeItemPropertyCommand, CloneComponentTemplateToSlotCommand
+from prototypyside.services.undo_commands import ChangePropertyCommand, CloneComponentTemplateToSlotCommand
 
 
 class LayoutTab(QWidget):
@@ -245,7 +246,7 @@ class LayoutTab(QWidget):
         o = self.template.page_size
         n = key
         p = "page_size"
-        command = ChangeItemPropertyCommand(t, p, n, o)
+        command = ChangePropertyCommand(t, p, n, o)
         self.undo_stack.push(command)
         self.scene.setSceneRect(self.template.boundingRect())
         # self._refreshGrid()
@@ -269,7 +270,7 @@ class LayoutTab(QWidget):
         # self.layout_toolbar.cols_spin.blockSignals(False)
 
         # 🔁 Push undo and orientation change
-        command = ChangeItemPropertyCommand(t, "orientation", new, old)
+        command = ChangePropertyCommand(t, "orientation", new, old)
         self.undo_stack.push(command)
 
         self.scene.setSceneRect(self.template.boundingRect())
@@ -280,7 +281,7 @@ class LayoutTab(QWidget):
         template = self.template
         old_grid = template.grid
         print(f"rows and cols received from toolbar are {rows}, {cols}")
-        command = ChangeItemPropertyCommand(self.template, "grid", (rows, cols), old_grid)
+        command = ChangePropertyCommand(self.template, "grid", (rows, cols), old_grid)
         self.undo_stack.push(command)
         self.template.setGrid(self.registry, rows=rows, columns=cols)
         print(f"[LAYOUT_TAB] From on_grid_size_changed: Template rows and columns after change are are now {template.rows}, {template.columns}")
@@ -313,7 +314,7 @@ class LayoutTab(QWidget):
 
     def on_template_margin_changed(self, t, p, n, o):
         # For consistency, use a loop to update all margins
-        command = ChangeItemPropertyCommand(t, p, n, o)
+        command = ChangePropertyCommand(t, p, n, o)
 
         self.undo_stack.push(command)
         # self._refreshGrid()
@@ -322,7 +323,7 @@ class LayoutTab(QWidget):
         # This method is called whenever spacing_x or spacing_y changes
         print("Spacing changed, update layout as needed.")
         # self.scene.clear()
-        command = ChangeItemPropertyCommand(t, p, n, o)
+        command = ChangePropertyCommand(t, p, n, o)
         self.undo_stack.push(command)
         # self.template.spacing_x = self.spacing_x.valueChanged()
         # self.template.spacing_y = self.spacing_y.valueChanged()
@@ -392,18 +393,25 @@ class LayoutTab(QWidget):
 
     @Slot(str, QPointF)
     def on_component_dropped(self, tpid: str, scene_pos: QPointF):
-        # print(item, scene_pos)
-
-        temp = self.registry.global_get(tpid)
+        template = self.registry.global_get(tpid)
         item = self.template.get_item_at_position(scene_pos)
-        print(item.pid)
-        # print(template.pid)
-        clone = self.template.registry.clone(item)
-        item.content = temp
+        command = CloneComponentTemplateToSlotCommand(self.registry, template, item)
+        self.undo_stack.push(command)
+
+    # @Slot(str, QPointF)
+    # def on_component_dropped(self, tpid: str, scene_pos: QPointF):
+    #     # print(item, scene_pos)
+
+    #     temp = self.registry.global_get(tpid)
+    #     item = self.template.get_item_at_position(scene_pos)
+    #     print(item.pid)
+    #     # print(template.pid)
+    #     clone = self.template.registry.clone(item)
+    #     item.content = temp
 
 
-        # command = CloneComponentTemplateToSlotCommand(self.registry, template, slot)
-        # self.undo_stack.push(command)
+    #     # command = CloneComponentTemplateToSlotCommand(self.registry, template, slot)
+    #     # self.undo_stack.push(command)
 
     # --- Undo/Redo Integration ---
     def push_undo_command(self, command):

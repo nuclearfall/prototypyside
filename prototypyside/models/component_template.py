@@ -9,24 +9,31 @@ import json
 from pathlib import Path
 from PySide6.QtWidgets import QMessageBox
 
-from prototypyside.models.component_elements import ImageElement, TextElement
-from prototypyside.utils.unit_str import UnitStr
-from prototypyside.utils.unit_str_geometry import UnitStrGeometry
+from prototypyside.models.component_element import ImageElement, TextElement
+from prototypyside.utils.units.unit_str import UnitStr
+from prototypyside.utils.units.unit_str_geometry import UnitStrGeometry
 from prototypyside.utils.ustr_helpers import geometry_with_px_pos, geometry_with_px_rect
 from prototypyside.utils.proto_helpers import get_prefix, issue_pid
 # Use TYPE_CHECKING for type hinting
 if TYPE_CHECKING:
-    from prototypyside.models.component_elements import ComponentElement
     from prototypyside.services.proto_registry import ProtoRegistry
+
 
 class ComponentTemplate(QGraphicsObject):
     template_changed = Signal()
     item_z_order_changed = Signal()
+    property_update = Signal(str, str, dict)  # (tpid, target_pid, packet(dict))
+    structure_changed = Signal(str)                     # (tpid)
+
     # border width and corner_radius are set based on a standard MTG card
     def __init__(self, pid, geometry=UnitStrGeometry(width="2.5in", height="3.5in"), parent = None, 
-        name=None, registry=None, corner_radius=UnitStr("0in"), border=UnitStr("0in")):
+        name=None, registry=None, corner_radius=UnitStr("0.125in"), border=UnitStr("0.125in")):
         super().__init__(parent)
-        self._template_pid = None
+        self._tpid = None
+        self.lpid = None
+        self._path = None
+        # associated layouts if any
+        self._layouts = []
         self._pid = pid
         self._name = name
         self._registry = registry
@@ -41,6 +48,16 @@ class ComponentTemplate(QGraphicsObject):
         self._csv_row = []
         self._csv_path: Path = None 
         self.content = None
+        self.registry.object_registered.connect(self.add_item)
+
+    @property
+    def tpid(self):
+        return self._tpid if self._tpid else None
+
+    @tpid.setter
+    def tpid(self, pid):
+        if self._tpid != pid:
+            self._tpid = pid
 
     @property
     def registry(self):
@@ -106,7 +123,8 @@ class ComponentTemplate(QGraphicsObject):
         # print(f"[SETTER] pos set to {self._geometry.px.pos}")
         self._geometry = new_geom
         super().setPos(self._geometry.px.pos)
-        # self.item_changed.emit()
+        if not self.tpid:
+            self.template_updated.emit(self.tpid)
         self.update()
 
     def boundingRect(self) -> QRectF:
@@ -159,22 +177,73 @@ class ComponentTemplate(QGraphicsObject):
     @property
     def border(self):
         return self._border
-    
-    def add_item(self, item) -> "ComponentElement":
+
+    def add_item(self, item):
         if item in self.items:
             return
         self.items.append(item)
         max_z = max([e.zValue() for e in self.items], default=0)
         item.setZValue(max_z + 100)
-        # item.item_changed.connect(self._on_item_changed)
-        self.template_changed.emit()
+        item.property_changed.connect(self.on_item_property_update)
         self.item_z_order_changed.emit()
+
+    def receive_packet(self, packet: dict):
+        action = packet.get("action", "set_property")
+        if action == "set_property":
+            prop = packet["property"]
+            value = packet["new"]
+            setattr(self, prop, value)
+            # Optionally emit signal for UI/undo
+            return True
+        elif action == "add_item":
+            item = packet["item"]
+            self.add_item(item)
+            return True
+        else:
+            print(f"[ComponentTemplate] Unknown action: {action} in packet {packet}")
+            return False
+
+    def on_item_property_update(self, prop, new, old):
+        sender = self.pid
+        target = self.lpid
+        packet = {
+            "pid": self.pid,
+            "property": prop,
+            "old": old,
+            "new": new,
+        }
+        self.property_update.emit(sender, target, packet)
+
+    def on_template_property_update(self, prop, new, old):
+        self.send_packet_to_layout(prop, new, old)
+
+    def send_packet_to_layout(self, prop, new, old):
+        sender = self.pid
+        target = self.lpid
+        packet = {
+            "pid": self.pid,
+            "property": prop,
+            "old": old,
+            "new": new,
+        }
+        self.property_update.emit(sender, target, packet)
 
     def remove_item(self, item: 'ComponentElement'):
         if item in self.items:
             self.items.remove(item)
             self.template_changed.emit()
             self.item_z_order_changed.emit()
+            if not self.tpid:
+                self.template_updated.emit(self.tpid)
+
+    def update_from_template(self, tpid):
+        if not self.tpid:
+            return
+        registry = self._registry
+        template = self.global_get(tpid)
+        self.geometry = template.geometry
+        self.items = [registry.clone(el) for el in template.items]
+
 
     def reorder_item_z(self, item: 'ComponentElement', direction: int):
         if item not in self.items:
@@ -218,6 +287,8 @@ class ComponentTemplate(QGraphicsObject):
         # Maintain unique z-values by resetting the entire stack
         self._normalize_z_values()
         self.item_z_order_changed.emit()
+        if not self.tpid:
+            self.template_updated.emit(self.tpid)
 
     def _normalize_z_values(self):
         """Ensure all items have unique, ordered z-values"""
@@ -264,6 +335,8 @@ class ComponentTemplate(QGraphicsObject):
         path = Path(path)  # Only now that we know it's not None
         if path.exists():
             self._background_image = path
+            if not self.tpid:
+                self.template_updated.emit(self.tpid)
             self.update()
         else:
             self._background_image = None
@@ -344,7 +417,7 @@ class ComponentTemplate(QGraphicsObject):
             'border': self.border.to_dict(),
             'corner_radius': self.corner_radius.to_dict(),
             'csv_path': str(self._csv_path),
-            'template_pid': self._template_pid
+            'tpid': self._tpid
         }
         return data
 
@@ -365,9 +438,9 @@ class ComponentTemplate(QGraphicsObject):
             border=UnitStr.from_dict(data.get("border")),
             corner_radius=UnitStr.from_dict(data.get("corner_radius")),
         )
-        inst._template_pid = None
+        inst._tpid = None
         if is_clone:
-            inst._template_pid = data.get("pid")
+            inst._tpid = data.get("pid")
         inst.csv_path = data.get("csv_path")
         # 2) Registry registration
         inst._registry = registry

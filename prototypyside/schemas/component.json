@@ -17,7 +17,7 @@
     "background_image": {
       "type": ["string","null"]
     },
-    "template_pid": {
+    "tpid": {
       "type": ["string", "null"],
       "default": "null"
     },
@@ -44,7 +44,7 @@
     "pid",
     "geometry",
     "items",
-    "template_pid"
+    "tpid"
   ],
   "additionalProperties": false
 }

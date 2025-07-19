@@ -1,36 +1,38 @@
 # prototypyside/views/component_tab.py
+
+from typing import Optional, TYPE_CHECKING
 from functools import partial
-from pathlib import Path
-from typing import Optional, List, Dict, Any, Union
 
-from PySide6.QtWidgets import (QWidget, QVBoxLayout, QHBoxLayout, QDockWidget,
-                               QListWidgetItem, QLabel, QPushButton, QComboBox,
-                               QSpinBox, QFileDialog, QMessageBox,
-                               QCheckBox, QGraphicsItem, QGraphicsView,
-                               QGraphicsScene, QToolBar, QLineEdit)
-from PySide6.QtCore import Qt, Signal, Slot, QPointF, QRectF, QSizeF, QObject, QSize, QTimer
-from PySide6.QtGui import (QPainter, QColor, QIcon, 
-                                QKeySequence, QShortcut, QUndoStack)
+from PySide6.QtWidgets import (
+    QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QComboBox, QCheckBox,
+    QLineEdit, QLabel, QToolBar, QListWidgetItem, QMessageBox
+)
+from PySide6.QtCore import Qt, Signal, Slot, QPointF
+from PySide6.QtGui import QColor, QKeySequence, QShortcut, QUndoStack, QPainter
 
-from prototypyside.views.graphics_scene import ComponentScene
+from prototypyside.views.component_scene import ComponentScene
 from prototypyside.views.graphics_view import ComponentView
 from prototypyside.views.panels.property_panel import PropertyPanel
 from prototypyside.views.panels.layers_panel import LayersListWidget
 from prototypyside.views.palettes.palettes import ComponentListWidget
-# Import widgets
-from prototypyside.widgets.unit_field import UnitField, UnitStrGeometryField
+from prototypyside.widgets.unit_field import UnitField
 from prototypyside.utils.ustr_helpers import geometry_with_px_pos
-from prototypyside.utils.unit_str_geometry import UnitStrGeometry
+from prototypyside.utils.units.unit_str_geometry import UnitStrGeometry
 from prototypyside.utils.incremental_grid import IncrementalGrid
-# from prototypyside.widgets.font_toolbar import FontToolbar
 from prototypyside.widgets.pdf_export_dialog import PDFExportDialog
 
-
-from prototypyside.models.component_elements import (ComponentElement, TextElement, ImageElement)
+from prototypyside.models.component_element import ComponentElement, TextElement, ImageElement
 from prototypyside.services.app_settings import AppSettings
-from prototypyside.services.property_setter import PropertySetter
-from prototypyside.services.undo_commands import (AddElementCommand, RemoveElementCommand, 
-            CloneElementCommand, ResizeTemplateCommand, ResizeAndMoveElementCommand, ChangeItemPropertyCommand)
+from prototypyside.services.undo_commands import (
+    AddElementCommand, RemoveElementCommand, CloneElementCommand,
+    ResizeTemplateCommand, ChangePropertyCommand
+)
+
+if TYPE_CHECKING:
+    from PySide6.QtWidgets import QGraphicsItem
+    from prototypyside.models.component_template import ComponentTemplate
+
+
 
 class ComponentTab(QWidget):
     status_message_signal = Signal(str, str, int)
@@ -42,10 +44,7 @@ class ComponentTab(QWidget):
         super().__init__(parent)
         self.main_window = main_window
         presets = self.main_window.settings
-        self.settings = AppSettings(display_dpi=template.geometry.dpi, display_unit=presets.unit, 
-                    print_unit=template.geometry.unit, print_dpi=presets.print_dpi)
-        self.registry = registry
-        self.settings = AppSettings()
+        self.settings = presets
         self._template = template
         self.undo_stack = QUndoStack()
         self.file_path = None
@@ -55,10 +54,7 @@ class ComponentTab(QWidget):
         self._show_grid   = True
         self._snap_grid   = True
 
-        # self.property_setter = PropertySetter(self.undo_stack)
         self.debug_count = 0
-        # Setup scene and view
-        # scene_rect = template.geometry.px.rect
 
         # self.scene = ComponentGraphicsScene(scene_rect=scene_rect, parent=self, tab=self) # Parent is self (ComponentTab)
         # self.view = DesignerGraphicsView(self.scene)
@@ -90,13 +86,13 @@ class ComponentTab(QWidget):
             self._template = new
 
     @property
-    def template_pid(self):
+    def tpid(self):
         return self._template.pid
     
     def focusInEvent(self, event):
         super().focusInEvent(event)
         # Assuming you have a way to get the main window, e.g., self.window()
-        self.main_window = main_window
+        main_window = self.main_window
         if hasattr(main_window, "undo_group"):
             main_window.undo_group.setActiveStack(self.undo_stack)
 
@@ -127,6 +123,10 @@ class ComponentTab(QWidget):
         self.setup_property_editor()
         self.setup_component_palette()
         self.setup_layers_panel()
+
+        # Simple shortcut "Delete" to remove item
+        delete_shortcut = QShortcut(QKeySequence.Delete, self)
+        delete_shortcut.activated.connect(self.remove_selected_item)
 
         self.set_item_controls_enabled(False) # Initial state: no item selected
 
@@ -162,9 +162,6 @@ class ComponentTab(QWidget):
         self.view.setScene(self.scene)
         # self.view.fitInView(self.scene.sceneRect(), Qt.KeepAspectRatio)
 
-    def setup_shortcuts(self):
-        delete_shortcut = QShortcut(QKeySequence.Delete, self)
-        delete_shortcut.activated.connect(self.remove_selected_item)
 
     @Slot()
     def update_component_scene(self):
@@ -323,21 +320,9 @@ class ComponentTab(QWidget):
         self.scene.setSceneRect(target.geometry.px.rect)
         self.view
 
-    def _refresh_scene(self):
-        # Clear old items (grid/background is drawn in drawBackground, not as items)
-        self.scene.clear()
-        self.scene.setSceneRect(self.template.geometry.px.rect)
-        # Add every item back into the QGraphicsScene
-        if not self.template.scene():
-            self.scene.addItem(self.template)
-        for item in self.template.items:
-            if not item.scene():
-                self.scene.addItem(item)
-            item.hide_handles()
-
     @Slot()
     def on_property_changed(self, target, prop, new, old):
-        command = ChangeItemPropertyCommand(target, prop, new, old)
+        command = ChangePropertyCommand(target, prop, new, old)
         self.undo_stack.push(command)
         print(f"[COMPONENT TAB] Target={target}, prop={prop}, old={old}, new={new}")
         print(f"[UNDO STACK] Pushed: {command}")
@@ -543,8 +528,6 @@ class ComponentTab(QWidget):
         else:
             self.show_status_message("No item selected to remove.", "warning")
 
-    def update_color_display(self):
-        self.current_color_display.setStyleSheet(f"background-color: {self._current_drawing_color.name()}; border: 1px solid black;")
 
     @Slot()
     def set_component_background_image(self):

@@ -1,7 +1,7 @@
 from functools import lru_cache
 
-from prototypyside.utils.unit_str_geometry import UnitStrGeometry
-from prototypyside.utils.unit_str import UnitStr
+from prototypyside.utils.units.unit_str_geometry import UnitStrGeometry
+from prototypyside.utils.units.unit_str import UnitStr
 from prototypyside.utils.ustr_helpers import geometry_with_px_pos, geometry_with_px_rect 
 
 class UnitManager:

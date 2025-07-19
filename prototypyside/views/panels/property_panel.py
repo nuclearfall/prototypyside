@@ -9,8 +9,8 @@ from typing import Optional, Any
 
 # Assuming these modules are in the same directory or accessible via python path
 from prototypyside.widgets.unit_field import UnitField, UnitStrGeometryField
-from prototypyside.utils.unit_str_geometry import UnitStrGeometry
-from prototypyside.models.component_elements import ComponentElement, TextElement, ImageElement
+from prototypyside.utils.units.unit_str_geometry import UnitStrGeometry
+from prototypyside.models.component_element import ComponentElement, TextElement, ImageElement
 from prototypyside.views.toolbars.font_toolbar import FontToolbar
 from prototypyside.widgets.color_picker import ColorPickerWidget
 
@@ -105,7 +105,7 @@ class PropertyPanel(QWidget):
 
         # --- Create all possible widgets ---
         self.pid_label = QLabel()
-        self.template_pid_label = QLabel()
+        self.tpid_label = QLabel()
         self.name_edit = FocusLineEdit()
 
         # Content widgets in a stacked layout
@@ -139,7 +139,7 @@ class PropertyPanel(QWidget):
 
         # Add widgets to layout
         self.form_layout.addRow("PID:", self.pid_label)
-        self.form_layout.addRow("Template PID:", self.template_pid_label)
+        self.form_layout.addRow("Template PID:", self.tpid_label)
         self.form_layout.addRow("Name:", self.name_edit)
         self.form_layout.addRow("Content:", self.content_stack)
         self.form_layout.addRow("Geometry:", self.geometry_field)
@@ -181,7 +181,7 @@ class PropertyPanel(QWidget):
 
         # Populate common fields
         self.pid_label.setText(item.pid)
-        self.template_pid_label.setText(item.template_pid or "N/A")
+        self.tpid_label.setText(item.tpid or "N/A")
         self.name_edit.setText(item.name)
         self.content_text_edit.setTarget(item, "content")
         self.geometry_field.setTarget(item, "geometry", display_unit=self._display_unit)
@@ -263,7 +263,7 @@ class PropertyPanel(QWidget):
         """Fill every widget from self.target_item’s current state."""
         el = self.target_item
         self.pid_label.setText(el.pid)
-        self.template_pid_label.setText(el.template_pid or "N/A")
+        self.tpid_label.setText(el.tpid or "N/A")
         self.name_edit.setText(el.name)
 
         # geometry / colors / border

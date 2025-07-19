@@ -11,7 +11,7 @@ _app = QApplication(sys.argv)
 from prototypyside.services.proto_registry import RootRegistry, ProtoRegistry
 from prototypyside.models.component_template import ComponentTemplate
 from prototypyside.models.layout_template import LayoutTemplate
-from prototypyside.utils.unit_str_geometry import UnitStrGeometry
+from prototypyside.utils.units.unit_str_geometry import UnitStrGeometry
 from prototypyside.utils.proto_helpers import issue_pid
 
 # Shared geometry for tests
@@ -24,8 +24,8 @@ GEOM_KEYS = {
     'spacing_x', 'spacing_y'
 }
 
-# Ignore pid, name, and template_pid fields in deep comparison
-IGNORE_KEYS = ('pid', 'name', 'template_pid')
+# Ignore pid, name, and tpid fields in deep comparison
+IGNORE_KEYS = ('pid', 'name', 'tpid')
 
 
 def assert_deep_equal_skip_geometry(a, b, ignore_keys=IGNORE_KEYS):

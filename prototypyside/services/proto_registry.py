@@ -1,55 +1,93 @@
 # proto_registry.py
 
 import json
-from pathlib import Path
-from typing import Any, Dict, List, Optional, Union
+import uuid
+import re
+from typing import Any, Dict, List, Optional, Union, Tuple, TYPE_CHECKING
 
 from PySide6.QtCore import QObject, Signal
 from PySide6.QtGui import QGuiApplication, QClipboard
 from PySide6.QtWidgets import QGraphicsItem
 
 from prototypyside.services.proto_factory import ProtoFactory
-from prototypyside.utils.proto_helpers import get_prefix, issue_pid
+from prototypyside.utils.proto_helpers import issue_pid, get_prefix, MODEL_ONLY, OBJECT_ONLY
 
 
-BASE_NAMES: Dict[str, str] = {
-    "ct": "Component Template",
-    "cc": "Component",
+BASE_NAMES = {
     "ie": "Image Element",
     "te": "Text Element",
+    "ct": "Component Template",
+    "cc": "Component",
     "lt": "Layout Template",
-    "pg": "Layout Page",
+    "pg": "Page",
     "ls": "Layout Slot",
 }
 
 class ProtoRegistry(QObject):
-    object_registered = Signal(str)  # pid, registry
+
+    object_registered = Signal(str)  # pid
     object_deregistered = Signal(str)
 
     def __init__(self, parent=None, root=None):
         super().__init__(parent)
+        self.pid = issue_pid("proto_reg")
         self._factory = ProtoFactory()
         self._is_root = isinstance(self, RootRegistry)
         self.root = self if self._is_root else root
+        self._mail_room = None
+        self._object_registry = None
         self._store: Dict[str, Any] = {}
         self._orphans: Dict[str, Any] = {}
         self._unique_names = set()
         self._name_counts = {prefix: 1 for prefix in BASE_NAMES if prefix != "ls"}
+        self.set_object_registry()
+
+    def set_object_registry(self):
+        self._object_registry = ObjectRegistry()
+
+    @property
+    def mail_room(self):
+        return self._mail_room
+
+    def set_mail_room(self, mail_room):
+        self._maiL_room = mail_room
+
+    def get_registry(self, pid: str):
+        prefix = get_prefix(pid)
+        if prefix in OBJECT_ONLY:
+            return self._object_registry
+        return self
 
     def register(self, obj: Any):
         pid = getattr(obj, "pid", None)
         prefix = get_prefix(pid)
+        if not pid or not prefix:
+            raise TypeError(f"[Registry] {prefix} is invalid for pid {pid}.")
+        # Decide target registry
+        target = self.get_registry(pid)
 
-        target = self.root if self.root and prefix in ("ct", "lt") else self
-        if pid in target._store:
+        # Use the right storage dict
+        store = getattr(target, "_store", None)
+        if store is None:
+            raise RuntimeError("[Registry] Target registry missing _store attribute.")
+
+        if pid in store:
             print(f"[Registry] Skipping duplicate: {pid}")
             return
 
+        # Name generation/uniqueness
         if not hasattr(obj, "name") or not self.has_unique_name(obj):
             self.generate_name(obj)
 
-        target._store[pid] = obj
-        target.object_registered.emit(obj.pid)
+        # Register with mail room if needed
+        if hasattr(self, "mail_room"):
+            self._mail_room.register_target(pid, obj)  # Or whatever the appropriate method is
+
+        store[pid] = obj
+        target.object_registered.emit(pid)
+
+
+
 
     def find_root(self):
         parent = self.parent()
@@ -70,6 +108,8 @@ class ProtoRegistry(QObject):
 
     def generate_name(self, obj: object):
         pid_prefix = get_prefix(obj.pid)
+        if not hasattr(obj, "name"):
+            return
 
         # If name already exists and is unique in this registry, preserve it
         if self.has_unique_name(obj):
@@ -209,14 +249,26 @@ class ProtoRegistry(QObject):
         return vals[0] if vals else None
 
 
+class ObjectRegistry(ProtoRegistry):
+    def __init__(self):
+        super().__init__()
+        self.pid = issue_pid("obj_reg")
+        self._object_registry = None   # Or omit entirely if not needed
+
+    def set_object_registry(self):
+        # Prevent recursion: ObjectRegistry does not need its own object registry
+        self._object_registry = None 
+
 class RootRegistry(ProtoRegistry):
     object_registered = Signal(str)
     object_deregistered = Signal(str)
 
     def __init__(self):
         super().__init__()
+
         self.root = self
         self._children = []
+        self.pid = issue_pid("root_reg")
 
     def add_child(self, child: ProtoRegistry):
         self._children.append(child)
