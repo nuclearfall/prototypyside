@@ -23,6 +23,7 @@ from prototypyside.widgets.pdf_export_dialog import PDFExportDialog
 
 from prototypyside.models.component_element import ComponentElement, TextElement, ImageElement
 from prototypyside.services.app_settings import AppSettings
+<<<<<<< Updated upstream
 from prototypyside.services.undo_commands import (
     AddElementCommand, RemoveElementCommand, CloneElementCommand,
     ResizeTemplateCommand, ChangePropertyCommand
@@ -33,6 +34,10 @@ if TYPE_CHECKING:
     from prototypyside.models.component_template import ComponentTemplate
 
 
+=======
+from prototypyside.services.undo_commands import (AddElementCommand, RemoveElementCommand, 
+            CloneElementCommand, ResizeTemplateCommand, ResizeAndMoveElementCommand, ChangeItemPropertyCommand)
+>>>>>>> Stashed changes
 
 class ComponentTab(QWidget):
     status_message_signal = Signal(str, str, int)
@@ -61,8 +66,7 @@ class ComponentTab(QWidget):
         # self.view.setRenderHints(QPainter.Antialiasing | QPainter.TextAntialiasing | QPainter.SmoothPixmapTransform)
         # self.view.setViewportUpdateMode(QGraphicsView.FullViewportUpdate)
         # self.view.setOptimizationFlag(QGraphicsView.DontSavePainterState)
-        # self.view.setOptimizationFlag(QGraphicsView.DontAdjustForAntialiasing)
-        # self.scene.addItem(self._template)      
+        # self.view.setOptimizationFlag(QGraphicsView.DontAdjustForAntialiasing) 
         self.selected_item: Optional['ComponentElement'] = None
 
         self._current_drawing_color = QColor(0, 0, 0) # For drawing tools
@@ -137,7 +141,10 @@ class ComponentTab(QWidget):
         self.scene.setSceneRect(self.template.geometry.px.rect)
         self.view  = ComponentView(self.scene, self)
         # self.template.setZValue()
-
+        self.view.setRenderHints(QPainter.Antialiasing | QPainter.TextAntialiasing | QPainter.SmoothPixmapTransform)
+        self.view.setViewportUpdateMode(QGraphicsView.FullViewportUpdate)
+        self.view.setOptimizationFlag(QGraphicsView.DontSavePainterState)
+        self.view.setOptimizationFlag(QGraphicsView.DontAdjustForAntialiasing)
         self.scene.addItem(self.inc_grid)
 
         # connect visibility / snapping controls
@@ -295,14 +302,15 @@ class ComponentTab(QWidget):
 
     @Slot()
     def set_template_border(self, t, p, new, old):
-        setattr(t, p, new)
+        self.on_property_changed(t, p, new, old)
+        #setattr(t, p, new)
 
     @Slot()
     def on_template_name_changed(self):
-        new_name = self.template_name_field.text().strip()
-        if new_name:
-            self.template.name = new_name
-            self.tab_title_changed.emit(new_name)
+        new = self.template_name_field.text()
+        self.on_property_changed(self.template, "name", new, self.template.name)
+        print(f"Name changed to {self.template.name}")
+        self.tab_title_changed.emit(new)
 
     @Slot(object, str, object, object)  # The value is a UnitStr
     def on_template_geometry_changed(self, target, prop, new, old):

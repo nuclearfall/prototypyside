@@ -23,6 +23,7 @@ BASE_NAMES = {
     "ls": "Layout Slot",
 }
 
+
 class ProtoRegistry(QObject):
 
     object_registered = Signal(str)  # pid
@@ -40,6 +41,7 @@ class ProtoRegistry(QObject):
         self._orphans: Dict[str, Any] = {}
         self._unique_names = set()
         self._name_counts = {prefix: 1 for prefix in BASE_NAMES if prefix != "ls"}
+<<<<<<< Updated upstream
         self.set_object_registry()
 
     def set_object_registry(self):
@@ -58,6 +60,32 @@ class ProtoRegistry(QObject):
             return self._object_registry
         return self
 
+=======
+        # At registry init:
+        SCHEMA_DIR = Path(__file__).parent / "schemas"
+        _schema_cache: Dict[str, dict] = {}
+        _defaults_cache: Dict[str, dict] = {}
+
+    @property
+    def is_root(self):
+        return True if self.root == self else False
+
+    def create(self, model_cls: type, **overrides) -> object:
+        model = self._factory.create(model_cls, **overrides)
+        self._register(model)
+        return model
+
+    def load(self, model_cls: type, data: dict) -> object:
+        model = self._factory.load(model_cls, data)
+        self._register(model)
+        return model
+
+    def _register(self, model: object):
+        self._store[model.pid] = model
+
+    def get(self, pid: str) -> object:
+        return self._instances[pid]       
+>>>>>>> Stashed changes
     def register(self, obj: Any):
         pid = getattr(obj, "pid", None)
         prefix = get_prefix(pid)
@@ -75,6 +103,7 @@ class ProtoRegistry(QObject):
             print(f"[Registry] Skipping duplicate: {pid}")
             return
 
+<<<<<<< Updated upstream
         # Name generation/uniqueness
         if not hasattr(obj, "name") or not self.has_unique_name(obj):
             self.generate_name(obj)
@@ -88,6 +117,10 @@ class ProtoRegistry(QObject):
 
 
 
+=======
+        target._store[pid] = obj
+        target.object_registered.emit(obj.pid)
+>>>>>>> Stashed changes
 
     def find_root(self):
         parent = self.parent()
@@ -140,16 +173,88 @@ class ProtoRegistry(QObject):
         self._unique_names.add(candidate)
         return candidate
 
-    def create(self, prefix_or_pid: str, **kwargs) -> Any:
+    def create(self,
+               model_cls: Type,
+               overrides: Optional[dict] = None) -> Any:
         """
-        Factory + register in one call.
+        Create a brand-new model instance.
+        Missing fields (pid, name, schema defaults) are auto-generated.
         """
+<<<<<<< Updated upstream
         final_pid = issue_pid(prefix_or_pid)
         # print(f"Object created with final_pid {final_pid}")
         obj = self._factory.create(pid=final_pid, **kwargs)
         self.register(obj)
         print ("Obj registered")
         return obj
+=======
+        overrides = overrides or {}
+        model = self._factory.create_model(
+            model_cls,
+            data=overrides,
+            auto_name=True
+        )
+        self._register(model)
+        return model
+
+    def load_schema(model_name: str) -> dict:
+        if model_name not in _schema_cache:
+            path = SCHEMA_DIR / f"{model_name}.json"
+            _schema_cache[model_name] = json.loads(path.read_text())
+        return _schema_cache[model_name]
+
+    def get_schema_defaults(model_name: str) -> dict:
+        if model_name not in _defaults_cache:
+            schema = load_schema(model_name)
+            _defaults_cache[model_name] = extract_defaults(schema)
+        return _defaults_cache[model_name]
+
+    def get_model_name(self, model_cls):
+        if model_cls in list(self.)
+
+    def load(self,
+             model_cls: Type,
+             data: dict) -> Any:
+        """
+        Load (or reload) from a serialized dict.
+        Preserves any saved 'name' or other explicit fields.
+        """
+        model = self._factory.create_model(
+            model_cls,
+            data=data,
+            auto_name=False
+        )
+        self._register(model)
+        return model
+    # def create(self, model_cls, data: dict = None, auto_name: bool = True):
+    #     # 1) Always generate a PID if it’s not already there
+    #     if data:
+    #         data = data.copy()
+    #         if "pid" not in data
+    #             prefix = self.factory.get_prefix_from_model_cls(model_cls)
+    #             data["pid"] = self._generate_pid()
+
+    #     # 2) Merge in schema defaults (if you’ve extracted them at startup)
+    #     defaults = get_schema_defaults(model_cls.__name__)
+    #     merged = {**defaults, **data}
+
+    #     # 3) Only auto-name if no “name” at all
+    #     if auto_name and not merged.get("name"):
+    #         merged["name"] = self.generate_name(model_cls)
+
+    #     # 4) Build and register
+    #     model = model_cls.from_dict(merged)
+    #     self.register(model)
+    #     return model
+
+    def get_model_cls_from_model_cls(self, schema):
+
+
+
+    def _generate_pid(self, model_cls):
+        prefix = self.factory.get_prefix_from_model_cls
+        return issue_pid(prefix)
+>>>>>>> Stashed changes
 
     def deregister(self, pid: str):
         """
@@ -165,7 +270,14 @@ class ProtoRegistry(QObject):
 
     @classmethod
     def from_dict(cls, data, registry, is_clone=False):
+<<<<<<< Updated upstream
+=======
+        logger.debug("ProtoRegistry.deserialize: input dict: %s", data)
+>>>>>>> Stashed changes
         pid = data.get("pid")
+        name = data.get("name")
+        print(f"Registry opening {pid}: {name}")
+
         if pid and registry.global_get(pid) and not is_clone:
             return registry.global_get(pid)
         obj = registry._factory.from_dict(data, registry=registry, is_clone=is_clone)

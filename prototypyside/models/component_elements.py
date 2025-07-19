@@ -30,8 +30,13 @@ class ComponentElement(QGraphicsObject):
     property_changed = Signal(str, str, str, object)   # (parent_pid, element_pid, property_name, value)
     structure_changed = Signal(str)               # (element_pid)
 
+<<<<<<< Updated upstream
     def __init__(self, pid, geometry: UnitStrGeometry, tpid = None, 
             parent: Optional[QGraphicsObject] = None, name: str = None):
+=======
+    def __init__(self, model, view, pid, geometry: UnitStrGeometry, name: str = None, 
+            template_pid = None, parent: Optional[QGraphicsObject] = None, ):
+>>>>>>> Stashed changes
         super().__init__(parent)
         self._pid = pid
         self._tpid = tpid
@@ -357,7 +362,11 @@ class ComponentElement(QGraphicsObject):
     def to_dict(self) -> Dict[str, Any]:
         data = {
             "pid":      self._pid,
+<<<<<<< Updated upstream
             "geometry": self._geometry.to_dict(),
+=======
+            "geometry": self._geometry.to_dict()
+>>>>>>> Stashed changes
         }
         for key, (_, to_fn, default) in self._serializable_fields.items():
             val = getattr(self, f"_{key}", default)

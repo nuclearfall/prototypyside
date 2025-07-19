@@ -10,9 +10,6 @@
     "dpi": {
       "type": "integer"
     },
-    "print_dpi": {
-      "type": "integer"
-    },
     "pos": {
       "type": "object",
       "properties": {
@@ -247,7 +244,6 @@
   "required": [
     "dpi",
     "pos",
-    "print_dpi",
     "rect",
     "unit"
   ]

@@ -1,14 +1,15 @@
 {
   "$schema": "http://json-schema.org/draft-07/schema#",
   "$id": "component_template.json",
-  "title": "ComponentTemplate",
+  "title": "ComponentTemplateModel",
   "type": "object",
   "properties": {
     "pid": {
       "type": "string"
     },
     "name": {
-      "type": ["string","null"]
+      "type": ["string"],
+      "default": "Untitled Component Template"
     },
     "geometry": {
       "$ref": "unit_str_geometry.json"

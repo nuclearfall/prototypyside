@@ -2,7 +2,7 @@
 # prototypyside/views/designer_graphics_view.py
 from PySide6.QtWidgets import QGraphicsView, QPinchGesture, QGestureEvent
 from PySide6.QtGui import QWheelEvent, QPainter, QTransform, QMouseEvent, QColor
-from PySide6.QtCore import Qt, QPointF, QEvent, QRectF, QSizeF, QSize, QObject, QVariantAnimation, QEasingCurve, QTimer
+from PySide6.QtCore import Qt, QPointF, QEvent, QRectF, QSizeF, QSize, QObject, QMarginsF, QVariantAnimation, QEasingCurve, QTimer
 import sys
 
 IS_MAC = sys.platform == 'darwin'
@@ -33,7 +33,7 @@ class LayoutView(QGraphicsView):
         self._gesture_active = False
         self.PINCH_SENSITIVITY = 1.3
         self._pinch_direction = None  # 'in', 'out', or None
-
+        self._panning = False
         # Always initialize MIN_SCALE and MAX_SCALE
         # Provide sensible default values, then update if scene/view are valid
         self.MIN_SCALE = 0.001 # A small default value
@@ -62,8 +62,8 @@ class LayoutView(QGraphicsView):
 
     def resizeEvent(self, event):
         super().resizeEvent(event)
-        # Recalculate MIN_SCALE on resize, and optionally refit
         self._update_min_scale()
+        self._update_padded_scene_rect()
 
     def gestureEvent(self, event: QGestureEvent) -> bool:
         pinch = event.gesture(Qt.PinchGesture)
@@ -115,49 +115,70 @@ class LayoutView(QGraphicsView):
             self._pinch_last_factor = 1.0
 
 
-    # def wheelEvent(self, event: QWheelEvent):
-    #     if event.modifiers() == Qt.ControlModifier or IS_MAC:
-    #         degrees = event.angleDelta().y() / 8
-    #         steps = degrees / 15  # 15 degrees = 1 "notch"
-    #         factor = 1.0 + steps * 0.05  # 5% zoom per notch
+    def wheelEvent(self, event: QWheelEvent):
+        if event.modifiers() == Qt.ControlModifier or IS_MAC:
+            degrees = event.angleDelta().y() / 8
+            steps = degrees / 15  # 15 degrees = 1 "notch"
+            factor = 1.0 + steps * 0.05  # 5% zoom per notch
 
-    #         # Clamp for safety
-    #         if factor > 0:
-    #             self.scaleView(factor)
+            # Clamp for safety
+            if factor > 0:
+                self.scaleView(factor)
 
-    #         event.accept()
-    #     else:
-    #         super().wheelEvent(event)
+            event.accept()
+        else:
+            super().wheelEvent(event)
 
     def scaleView(self, factor: float):
         proposed_scale = self.current_scale * factor
         clamped_scale = max(self.MIN_SCALE, min(proposed_scale, self.MAX_SCALE))
 
         # Adjust actual factor to only apply the portion that stays within bounds
-        actual_factor = clamped_scale / self.current_scale
+        actual = clamped_scale / self.current_scale
 
         self.current_scale = clamped_scale
-        self.scale(actual_factor, actual_factor)
+        self.scale(actual, actual)
+        # now expand:
+        self._update_padded_scene_rect()
 
-    def startZoomAnimation(self, start_scale: float, end_scale: float, duration: int = 150):
-        if hasattr(self, "_zoom_anim") and self._zoom_anim:
-            self._zoom_anim.stop()
+    # Right click to pan
 
-        anim = QVariantAnimation(self)
-        anim.setStartValue(start_scale)
-        anim.setEndValue(end_scale)
-        anim.setDuration(duration)
-        anim.setEasingCurve(QEasingCurve.InOutQuad)
+    def mousePressEvent(self, event: QMouseEvent):
+            if event.button() == Qt.RightButton:
+                self._panning = True
+                self._pan_start = event.pos()
+                self.setCursor(Qt.ClosedHandCursor)
+                event.accept()
+                return
+            super().mousePressEvent(event)
 
-        def on_value_changed(value):
-            scale_factor = value / self.current_scale
-            self.scaleView(scale_factor)
+    def mouseMoveEvent(self, event: QMouseEvent):
+        if self._panning:
+            delta = self._pan_start - event.pos()
+            self._pan_start = event.pos()
+            self.horizontalScrollBar().setValue(
+                self.horizontalScrollBar().value() + delta.x()
+            )
+            self.verticalScrollBar().setValue(
+                self.verticalScrollBar().value() + delta.y()
+            )
+            event.accept()
+            return
+        super().mouseMoveEvent(event)
 
-        anim.valueChanged.connect(on_value_changed)
+    def mouseReleaseEvent(self, event: QMouseEvent):
+        if event.button() == Qt.RightButton and self._panning:
+            self._panning = False
+            self.setCursor(Qt.ArrowCursor)
+            event.accept()
+            return
+        super().mouseReleaseEvent(event)
 
-        def on_finished():
-            self._zoom_anim = None  # clear ref
-
-        anim.finished.connect(on_finished)
-        self._zoom_anim = anim
-        anim.start()
+    def _update_padded_scene_rect(self):
+        """Expand the logical sceneRect to give blank margins for panning."""
+        bounds = self.scene().itemsBoundingRect()
+        # how much blank space? half the viewport, in scene units:
+        w = self.viewport().width()  / self.current_scale
+        h = self.viewport().height() / self.current_scale
+        padded = bounds.marginsAdded(QMarginsF(w/2, h/2, w/2, h/2))
+        super().setSceneRect(padded)

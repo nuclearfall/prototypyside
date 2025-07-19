@@ -12,7 +12,11 @@ class AppSettings(QObject):
     unit_changed = Signal(str)
     print_unit_and_dpi_changed = Signal(str)
 
+<<<<<<< Updated upstream
     def __init__(self, display_unit="px", print_unit="in", display_dpi=144, print_dpi=300):
+=======
+    def __init__(self, display_unit="pt", print_unit="in", display_dpi=300, print_dpi=300):
+>>>>>>> Stashed changes
         super().__init__()
         self._display_unit = display_unit
         self._display_dpi = display_dpi

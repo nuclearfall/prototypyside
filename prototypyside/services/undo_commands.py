@@ -220,8 +220,13 @@ class ResizeAndMoveElementCommand(QUndoCommand):
     #     self.item.geometry = self.new_geometry
 
 
+<<<<<<< Updated upstream
 class ChangePropertyCommand(QUndoCommand):
     def __init__(self, item, prop, new_value, old_value, description="Change Element Property"):
+=======
+class ChangeItemPropertyCommand(QUndoCommand):
+    def __init__(self, item, prop, new_value, old_value, description="Change Item Property"):
+>>>>>>> Stashed changes
         super().__init__(description)
         self.item = item
         self.prop = prop 

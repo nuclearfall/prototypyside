@@ -25,6 +25,7 @@ ROUNDING_INCREMENT = {
 }
 
 class UnitStr:
+<<<<<<< Updated upstream:prototypyside/utils/units/unit_str.py
     """
     Stores any dimension *internally* in inches, based on a given DPI.
 
@@ -36,6 +37,11 @@ class UnitStr:
     """
 
     __items__ = ("_raw", "_value", "_unit", "_dpi", "_cache")
+=======
+    value: float
+    unit: str
+    dpi: float
+>>>>>>> Stashed changes:prototypyside/utils/unit_str.py
 
     def __init__(
         self,
@@ -162,11 +168,27 @@ class UnitStr:
         rounded_val = round(value_in_unit / inc) * inc
         return UnitStr(f"{rounded_val} {self.unit}", dpi=self._dpi)
 
+@dataclass
+class UnitStr:
+
+    def to_dict(self) -> dict:
+        # only persist the semantic bits
+        return {
+            "value": self.value,
+            "unit":  self.unit,
+        }
+
+    @classmethod
+    def from_dict(cls, data: dict) -> "UnitStr":
+        # re-attach the current DPI (or pass it in from context)
+        return cls(
+            value=data["value"],
+            unit=data["unit"],
+            dpi=AppSettings.dpi,
+        )
     def to_dict(self) -> dict:
         """JSON-friendly dump of the value in all supported units."""
         data = {u: self.to(u) for u in ("in", "mm", "cm", "pt", "px")}
-        data['unit'] = self._unit
-        data['dpi'] = self._dpi
         return data
 
     @classmethod

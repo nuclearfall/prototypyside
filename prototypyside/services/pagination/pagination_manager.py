@@ -24,11 +24,11 @@ from typing import Iterable, List, Optional, Tuple, Dict, Any
 # ──────────────────────────────────────────────────────────────────────────────
 # Forward declarations / light aliases (replace with real imports in app)
 # ──────────────────────────────────────────────────────────────────────────────
-LayoutTemplate = Any     # TODO: real class
-LayoutSlot = Any         # TODO: real class
-ComponentInstance = Any  # TODO: real class
-MergeManager = Any       # TODO: real class
-ProtoRegistry = Any      # TODO: real class (factory for ComponentInstance)
+# LayoutTemplate = Any     # TODO: real class
+# LayoutSlot = Any         # TODO: real class
+# ComponentInstance = Any  # TODO: real class
+# MergeManager = Any       # TODO: real class
+# ProtoRegistry = Any      # TODO: real class (factory for ComponentInstance)
 
 from .pagination_policy import PaginationPolicyFactory, Placement, PaginationPolicy  # type: ignore
 

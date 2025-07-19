@@ -9,9 +9,8 @@
     "cm":   { "type": "number" },
     "pt":   { "type": "number" },
     "px":   { "type": "number" },
-    "unit": { "type": "string", "enum": ["in","mm","cm","pt","px"] },
-    "dpi":  { "type": "integer", "minimum": 1 }
+    "unit": { "type": "string", "enum": ["in","mm","cm","pt"] },
   },
-  "required": ["in","mm","cm","pt","px","unit","dpi"],
+  "required": ["in","mm","cm","pt","unit"],
   "additionalProperties": false
 }

@@ -36,6 +36,7 @@ STRING_TO_CLASS = {
     # "Toolbar": Toolbar,
 }
 
+<<<<<<< Updated upstream
 
 ELEMENT_PREFIXES = {"te", "ie"}
 CHILD_PREFIXES = {"te", "ie", "ls", "pg", "cc"}
@@ -45,6 +46,12 @@ S
 
 REGISTERED_PREFIXES = set(MODEL_ONLY) | set(OBJECT_ONLY)
 
+=======
+def parse_pid(pid_str: str) -> Tuple[Optional[str], Optional[str]]:
+    pattern = r"^([a-zA-Z0-9]+)(?:_(.*))?$"
+    match = re.match(pattern, pid_str)
+    return (match.group(1), match.group(2)) if match else (None, None)
+>>>>>>> Stashed changes
 
 def issue_pid(prefix: str) -> str:
     if prefix not in REGISTERED_PREFIXES:

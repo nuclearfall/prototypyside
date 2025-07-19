@@ -8,6 +8,10 @@ from PySide6.QtCore import Qt, Signal, QRectF, QPointF, Slot, QTimer
 from PySide6.QtGui import (QKeySequence, QShortcut, QUndoStack, 
     QUndoGroup, QUndoCommand, QPainter, QPageSize, QPixmap, QImage, QPainter)
 
+<<<<<<< Updated upstream
+=======
+from prototypyside.utils.incremental_grid import IncrementalGrid
+>>>>>>> Stashed changes
 from prototypyside.models.layout_template import LayoutTemplate
 from prototypyside.models.layout_slot import LayoutSlot
 from prototypyside.services.app_settings import AppSettings
@@ -31,12 +35,14 @@ class LayoutTab(QWidget):
     template_selected = Signal(str)  # tpid
     status_message_signal = Signal(str, str, int) # message, type, timeout_ms
     tab_title_changed = Signal(str) # For updating the tab title if needed
+    grid_visibility_changed = Signal(bool)
+    grid_snap_changed = Signal(bool)
 
     def __init__(self, parent, main_window, template, registry):
         super().__init__(parent)
         self.main_window = main_window
         presets = self.main_window.settings
-        self.settings = AppSettings(display_dpi=template.geometry.dpi, display_unit=presets.unit, 
+        self.settings = AppSettings(display_dpi=template.geometry.dpi, display_unit="pt", 
                     print_unit=template.geometry.unit, print_dpi=presets.print_dpi)
         self.registry = registry
         self._template = template
@@ -45,10 +51,13 @@ class LayoutTab(QWidget):
         self.undo_stack = QUndoStack()
         # self.pagination_manager = PaginationManager(template, registry, merge_mgr)
         
+        self._show_grid   = True
+        self._snap_grid   = True
         self._selected_item_pid: Optional[str] = None
 
         # --- 2. Setup the central widget for the tab's main area ---
-        self.scene = LayoutScene(scene_rect=self.template.boundingRect(), tab=self)
+        self.inc_grid = IncrementalGrid(self.settings, snap_enabled=self._snap_grid, parent=template)
+        self.scene = LayoutScene(self.settings, template=template, grid=self.inc_grid)
         self.view = LayoutView(self.scene)
         self.view.setRenderHints(QPainter.Antialiasing | QPainter.TextAntialiasing | QPainter.SmoothPixmapTransform)
         self.view.setViewportUpdateMode(QGraphicsView.FullViewportUpdate)
@@ -57,6 +66,13 @@ class LayoutTab(QWidget):
         self.view.setScene(self.scene)
         self.view.fitInView(self.scene.sceneRect(), Qt.KeepAspectRatio)
         self.view.show()
+        # connect visibility / snapping controls
+        self.grid_visibility_changed.connect(self.inc_grid.setVisible)
+        self.grid_snap_changed.connect(self.inc_grid.setSnapEnabled)
+        self.update_grid(self.template.rows, self.template.columns)
+
+        # initialise from current flags
+        self.inc_grid.setVisible(self._show_grid)
         self.scene.addItem(self._template)
         print(f"Scene rect is: {self.scene.sceneRect()}")
         print(f"[LAYOUT_TAB] From __init__: Template rows and columns prior to initially setting grid {template.rows}, {template.columns}")
@@ -82,10 +98,17 @@ class LayoutTab(QWidget):
         main_layout = QHBoxLayout(self)
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.addWidget(self.view)
-        # --- 4. Load data and connect signals ---
-        #self.load_template(self.template) # Make sure this is called!
-        self.update_grid() # This method currently does nothing in your provided code for LayoutTab
+
         self.refresh_panels()
+
+    # called from menu/toolbar checkboxes:
+    def toggle_grid(self, checked: bool):
+        self._show_grid = checked
+        self.grid_visibility_changed.emit(checked)
+
+    def toggle_snap(self, checked: bool):
+        self._snap_grid = checked
+        self.grid_snap_changed.emit(checked)
 
     @property
     def dpi(self): return self._dpi
@@ -147,22 +170,22 @@ class LayoutTab(QWidget):
         top, bottom, left, right = self.template.get_margins()
 
         # Top margin
-        self.margin_top = UnitField(self.template, "margin_top", display_unit=self.template.geometry.unit, )
+        self.margin_top = UnitField(self.template, "margin_top", display_unit=self.settings.display_unit, )
         margin_grid.addWidget(QLabel("Top:"), 0, 0)
         margin_grid.addWidget(self.margin_top, 0, 1)
         
         # Bottom margin
-        self.margin_bottom = UnitField(self.template, "margin_bottom", display_unit=self.template.geometry.unit, )
+        self.margin_bottom = UnitField(self.template, "margin_bottom", display_unit=self.settings.display_unit, )
         margin_grid.addWidget(QLabel("Bottom:"), 1, 0)
         margin_grid.addWidget(self.margin_bottom, 1, 1)
         
         # Left margin
-        self.margin_left = UnitField(self.template, "margin_left", display_unit=self.template.geometry.unit, )
+        self.margin_left = UnitField(self.template, "margin_left", display_unit=self.settings.display_unit, )
         margin_grid.addWidget(QLabel("Left:"), 2, 0)
         margin_grid.addWidget(self.margin_left, 2, 1)
         
         # Right margin
-        self.margin_right = UnitField(self.template, "margin_right", display_unit=self.template.geometry.unit, )
+        self.margin_right = UnitField(self.template, "margin_right", display_unit=self.settings.display_unit, )
         margin_grid.addWidget(QLabel("Right:"), 3, 0)
         margin_grid.addWidget(self.margin_right, 3, 1)
         
@@ -176,12 +199,12 @@ class LayoutTab(QWidget):
         spacing_grid.setSpacing(5)
         
         # Horizontal spacing
-        self.spacing_x = UnitField(self.template, "spacing_x", display_unit=self.template.geometry.unit, )
+        self.spacing_x = UnitField(self.template, "spacing_x", display_unit=self.settings.display_unit, )
         spacing_grid.addWidget(QLabel("Horizontal:"), 0, 0)
         spacing_grid.addWidget(self.spacing_x, 0, 1)
         
         # Vertical spacing
-        self.spacing_y = UnitField(self.template, "spacing_y", display_unit=self.template.geometry.unit, )
+        self.spacing_y = UnitField(self.template, "spacing_y", display_unit=self.settings.display_unit, )
         spacing_grid.addWidget(QLabel("Vertical:"), 1, 0)
         spacing_grid.addWidget(self.spacing_y, 1, 1)
         spacing_grid.sizeHint()
@@ -234,10 +257,19 @@ class LayoutTab(QWidget):
         pass
 
     # --- Grid/Scene Logic ---
+    @Slot(str)
+    def on_unit_change(self, unit: str):
+        self.settings.unit = unit
+        self.template_width_field.on_unit_change(unit)
+        self.template_height_field.on_unit_change(unit)
+        self.layout_toolbar.update()
+        self.property_panel.on_unit_change(unit)
 
-    def update_grid(self):
+    def update_grid(self, rows=None, columns=None):
         """Refresh the scene grid based on template settings."""
-        # Rebuild scene items for each item; gray out empty items, assign templates as needed
+        if rows and columns:
+            self.template.setGrid(self.registry, rows=rows, columns=columns)
+        self.template.updateGrid()
         pass
 
     @Slot(str)
@@ -256,6 +288,7 @@ class LayoutTab(QWidget):
         t = self.template
         old = t.orientation
         new = landscape
+        command = ChangeItemPropertyCommand(t, "orientation", new, old)
         if old == new:
             return  # no change, no-op
 
@@ -270,7 +303,11 @@ class LayoutTab(QWidget):
         # self.layout_toolbar.cols_spin.blockSignals(False)
 
         # 🔁 Push undo and orientation change
+<<<<<<< Updated upstream
         command = ChangePropertyCommand(t, "orientation", new, old)
+=======
+        command = ChangeItemPropertyCommand(t, "orientation", new, old)
+>>>>>>> Stashed changes
         self.undo_stack.push(command)
 
         self.scene.setSceneRect(self.template.boundingRect())

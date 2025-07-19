@@ -9,7 +9,9 @@ class SchemaValidator:
     # map pid prefixes → schema filenames
     PREFIX_MAP = {
         "ct": "component_template.json",
+        "cc": "component_template.json",
         "lt": "layout_template.json",
+        "pg": "layout_template.json",
         "ie": "image_element.json",
         "te": "text_element.json",
         "ls": "layout_slot.json",
@@ -95,74 +97,3 @@ class SchemaValidator:
             # build a human-friendly path like "items->0->geometry->unit"
             path = "->".join(map(str, e.path)) or "(root)"
             return False, f"Validation Error in {path}: {e.message}"
-
-
-# # validator.py
-# import json
-# from pathlib import Path
-# from jsonschema import RefResolver, validate
-# from jsonschema.exceptions import ValidationError
-
-
-# class SchemaValidator:
-#     def __init__(self, schema_dir: Path):
-#         self.schema_dir = schema_dir
-#         self.schema_store = self._load_schemas()
-
-#     def _load_schemas(self):
-#         """Loads all schemas from the schema directory."""
-#         store = {}
-#         for schema_file in self.schema_dir.glob("*.json"):
-#             with open(schema_file, "r", encoding="utf-8") as f:
-#                 schema = json.load(f)
-#                 # The store uses the schema's "$id" as the key
-#                 # Use schema_file.name for the store key if $id is not always present,
-#                 # or ensure $id matches the filename for easier lookup
-#                 if "$id" in schema:
-#                     store[schema["$id"]] = schema
-#                 else:
-#                     # Fallback: use filename as ID if $id is missing
-#                     store[schema_file.name] = schema
-#         return store
-
-#     def validate(self, data: dict):
-#         """Validates data against the appropriate schema."""
-#         pid = data.get("pid")
-#         if not pid:
-#             raise ValueError("Data must have a 'pid' to determine the schema.")
-
-#         prefix = pid[:2]
-#         if prefix == 'ct':
-#             schema_key = "component_template.json" # Use the key you store
-#         elif prefix == "lt":
-#             schema_key = "layout_template.json" # Use the key you store
-#         elif prefix == "ie":
-#             schema_key = "image_element.json" # Use the key you store
-#         elif prefix == "te":
-#             schema_key = "text_element.json" # Use the key you store
-#         elif prefix == "ls":
-#             schema_key = "layout_slot.json" # Use the key you store
-#         else:
-#             raise ValueError(f"Unknown PID prefix: {prefix}")
-
-#         # Ensure the schema exists in the store before proceeding
-#         if schema_key not in self.schema_store:
-#             raise FileNotFoundError(f"Schema '{schema_key}' not found in the loaded schemas.")
-
-#         main_schema = self.schema_store[schema_key]
-
-#         # The resolver needs the store to find referenced schemas
-#         # Provide the main_schema as the referrer
-#         resolver = RefResolver(
-#             base_uri=self.schema_dir.resolve().as_uri() + "/",
-#             referrer=main_schema, # THIS IS THE KEY CHANGE
-#             store=self.schema_store
-#         )
-
-#         try:
-#             validate(instance=data, schema=main_schema, resolver=resolver)
-#             return True, None # Indicates success
-#         except ValidationError as e:
-#             # Return failure and a user-friendly error message
-#             error_path = "->".join(map(str, e.path))
-#             return False, f"Validation Error in '{error_path}': {e.message}"

@@ -66,7 +66,13 @@ class MainDesignerWindow(QMainWindow):
         self.resize(1400, 900)
         self.setMinimumSize(800, 600)
 
+<<<<<<< Updated upstream
 
+=======
+        # Main application settings, might be shared or passed to tabs
+        self.settings = AppSettings(display_unit="pt", print_dpi=300)
+        self.registry = RootRegistry()
+>>>>>>> Stashed changes
         self._tab_map = {}  # pid: tab
 
         self.tab_widget: Optional[QTabWidget] = None
@@ -90,7 +96,10 @@ class MainDesignerWindow(QMainWindow):
 
         # Add initial tabs
         self.add_new_tab(ComponentTab, "ct")
+<<<<<<< Updated upstream
 
+=======
+>>>>>>> Stashed changes
         self.add_new_tab(LayoutTab, "lt")
 
 

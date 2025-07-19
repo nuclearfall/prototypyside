@@ -8,10 +8,17 @@ import csv
 import json
 from pathlib import Path
 from PySide6.QtWidgets import QMessageBox
+<<<<<<< Updated upstream
 
 from prototypyside.models.component_element import ImageElement, TextElement
 from prototypyside.utils.units.unit_str import UnitStr
 from prototypyside.utils.units.unit_str_geometry import UnitStrGeometry
+=======
+from prototypyside.models.component_template_model import ComponentTemplateModel
+from prototypyside.models.component_elements import ImageElement, TextElement
+from prototypyside.utils.unit_str import UnitStr
+from prototypyside.utils.unit_str_geometry import UnitStrGeometry
+>>>>>>> Stashed changes
 from prototypyside.utils.ustr_helpers import geometry_with_px_pos, geometry_with_px_rect
 from prototypyside.utils.proto_helpers import get_prefix, issue_pid
 # Use TYPE_CHECKING for type hinting
@@ -417,8 +424,13 @@ class ComponentTemplate(QGraphicsObject):
             'border': self.border.to_dict(),
             'corner_radius': self.corner_radius.to_dict(),
             'csv_path': str(self._csv_path),
+<<<<<<< Updated upstream
             'tpid': self._tpid
+=======
+            'template_pid': self._template_pid,
+>>>>>>> Stashed changes
         }
+        print(f"On save, name is {self._name}")
         return data
 
     @classmethod
@@ -457,6 +469,11 @@ class ComponentTemplate(QGraphicsObject):
             else:
                 raise ValueError(f"Unknown prefix {prefix}")
             el.setParentItem(inst)
+<<<<<<< Updated upstream
             inst.items.append(el)
 
+=======
+            inst.add_item(el)
+            
+>>>>>>> Stashed changes
         return inst

@@ -4,6 +4,7 @@ from enum import Enum, auto
 import json
 from PySide6.QtWidgets import QGraphicsObject, QGraphicsItem, QStyleOptionGraphicsItem
 from PySide6.QtCore import Qt, QRectF, QPointF, QSizeF, QMarginsF, Signal
+<<<<<<< Updated upstream
 from PySide6.QtGui import QPainter, QPixmap, QColor, QImage, QPen, QBrush,  QPageLayout, QPageSize
 from prototypyside.models.component_template import ComponentTemplate
 from prototypyside.models.component_element import ImageElement
@@ -11,15 +12,26 @@ from prototypyside.utils.unit_converter import to_px, page_in_px, page_in_units,
 from prototypyside.utils.units.unit_str import UnitStr
 from prototypyside.utils.units.unit_str_geometry import UnitStrGeometry
 from prototypyside.models.layout_slot import LayoutSlot
+=======
+from PySide6.QtGui import QPainter, QPixmap, QColor, QImage, QPen, QBrush,  QPageLayout
+
+from prototypyside.models.layout_slot import LayoutSlot
+from prototypyside.utils.unit_str import UnitStr
+from prototypyside.utils.unit_str_geometry import UnitStrGeometry
+>>>>>>> Stashed changes
 from prototypyside.utils.ustr_helpers import geometry_with_px_rect, geometry_with_px_pos
 from prototypyside.config import PAGE_SIZES, DISPLAY_MODE_FLAGS, PAGE_UNITS
 from prototypyside.utils.proto_helpers import get_prefix, issue_pid
 if TYPE_CHECKING:
     from prototypyside.services.proto_registry import ProtoRegistry
+    from prototypyside.models.component_template import ComponentTemplate
 
 
 
+<<<<<<< Updated upstream
 
+=======
+>>>>>>> Stashed changes
 class LayoutTemplate(QGraphicsObject):
     template_changed = Signal()
     marginsChanged = Signal()
@@ -48,11 +60,16 @@ class LayoutTemplate(QGraphicsObject):
         self._margins = [UnitStr(m, dpi=self._dpi) for m in (margin_top, margin_bottom, margin_left, margin_right)]
         self._spacing = [UnitStr(s, dpi=self._dpi) for s in (spacing_x, spacing_y)]
         self._orientation = orientation
+<<<<<<< Updated upstream
         self.items = self.initGrid(self._registry, rows=self._rows, columns=self._columns)
 
     @property
     def content(self):
         return self.get_template()
+=======
+        self.items = []
+        self.setAcceptHoverEvents(True)
+>>>>>>> Stashed changes
 
     def add_template(self, template):
         self._content.append(template)
@@ -64,7 +81,7 @@ class LayoutTemplate(QGraphicsObject):
         tpid: Optional[str]    = None,
         first:        bool             = False,
         last:         bool             = True
-    ) -> Optional[ComponentTemplate]:
+    ) -> Optional["ComponentTemplate"]:
         """
         Remove and return an item from self.content by:
           1. tpid – if provided, pop the first item whose .pid matches
@@ -107,7 +124,7 @@ class LayoutTemplate(QGraphicsObject):
         pid:   Optional[str] = None,
         first: bool = False,
         last:  bool = True
-    ) -> Optional[ComponentTemplate]:
+    ) -> Optional["ComponentTemplate"]:
         """
         Retrieve an item from self.content by:
           1. pid  — if provided, return the first item whose `.pid` matches
@@ -172,14 +189,24 @@ class LayoutTemplate(QGraphicsObject):
 
     @property
     def geometry(self) -> UnitStrGeometry: return self._geometry.to(self.unit, dpi=self.dpi)
-
     @geometry.setter
     def geometry(self, new_geom: UnitStrGeometry):
         if self._geometry == new_geom:
             return
         self.prepareGeometryChange()
         self._geometry = new_geom
+
+        # block the itemChange override
+        self.blockSignals(True)
         super().setPos(self._geometry.to(self.unit, dpi=self.dpi).pos)
+        self.blockSignals(False)
+
+    # def geometry(self, new_geom: UnitStrGeometry):
+    #     if self._geometry == new_geom:
+    #         return
+    #     self.prepareGeometryChange()
+    #     self._geometry = new_geom
+    #     super().setPos(self._geometry.to(self.unit, dpi=self.dpi).pos)
 
 
     def boundingRect(self) -> QRectF: 
@@ -388,8 +415,14 @@ class LayoutTemplate(QGraphicsObject):
         if target_rows < 1 or target_cols < 1:
             return  # Nothing to do
         # Precompute the slot dimensions and positions for the new grid
+<<<<<<< Updated upstream
         t, b, l, r, sx, sy = self.get_whitespace()  # px
         w, h = self._geometry.to(self.unit, dpi=self.dpi).size.width(), self._geometry.to(self.unit, dpi=self.dpi).size.height()
+=======
+        t, b, l, r, sx, sy = self.get_whitespace(unit='in')  
+        pg = self._geometry.to("in", dpi=self.dpi)
+        w, h = pg.size.width(), pg.size.height() 
+>>>>>>> Stashed changes
         avail_width = w - l - r - (target_cols - 1) * sx
         avail_height = h - t - b - (target_rows - 1) * sy
         item_width_px = max(avail_width / target_cols, 0)
@@ -428,17 +461,26 @@ class LayoutTemplate(QGraphicsObject):
                 pos = QPointF(x_px, y_px)
                 if item is not None:
                     # Update existing item
+<<<<<<< Updated upstream
                     item.geometry = UnitStrGeometry(rect=rect, pos=pos, dpi=self._dpi)
+=======
+                    item.geometry = UnitStrGeometry(width=item_width, height=item_height, x=x, y=y, unit="in", dpi=self._dpi)
+>>>>>>> Stashed changes
                     item.update()
                 else:
                     # Create new item and add to scene
                     item = registry.create(
                         "ls",
+<<<<<<< Updated upstream
                         geometry=UnitStrGeometry.from_px(rect=rect, pos=pos, dpi=self._dpi),
+=======
+                        geometry=UnitStrGeometry(width=item_width, height=item_height, x=x, y=y, unit="in", dpi=self._dpi),
+>>>>>>> Stashed changes
                         row=r,
                         column=c,
                         parent=self,
                     )
+                    print(f"USG.rect for Slot {r}, {c} in pixels {item.geometry.px.rect}")
                     self.items[r][c] = item
                     if item.scene() is None:
                         self.scene().addItem(item)
@@ -483,7 +525,13 @@ class LayoutTemplate(QGraphicsObject):
                 slot.row      = r
                 slot.column   = c
                 slot.invalidate_cache()   # so that its rendered thumbnail will be rebuilt
+<<<<<<< Updated upstream
 
+=======
+                if slot.scene() is None and self.scene() is not None:
+                    self.scene().addItem(slot)
+                print(f"From updateGrid, slot {r},{c}: {new_geom}\nslot is in scene? {True if slot.scene() else False}")
+>>>>>>> Stashed changes
         # 4. Redraw the page and notify listeners
         self.update()
         self.template_changed.emit()
@@ -535,7 +583,7 @@ class LayoutTemplate(QGraphicsObject):
         """
         item_size = self.items[row][col].geometry.to(self.unit, dpi=self.dpi).size
 
-    def get_item_at_position(self, scene_pos: QPointF) -> Optional[LayoutSlot]:
+    def get_item_at_position(self, scene_pos: QPointF) -> Optional["LayoutSlot"]:
         """
         Given a scene-coordinate point, return the LayoutSlot whose rect contains it,
         or None if no item matches.
@@ -577,6 +625,10 @@ class LayoutTemplate(QGraphicsObject):
             "spacing_x": self.spacing_x.to_dict(),
             "spacing_y": self.spacing_y.to_dict(),
             "orientation": self._orientation,
+<<<<<<< Updated upstream
+=======
+            # "dpi": self._dpi,
+>>>>>>> Stashed changes
             "content": content,
             #"items": items,
         }
@@ -606,7 +658,6 @@ class LayoutTemplate(QGraphicsObject):
             
         # 2) Determine PID (new one for clones)
         pid = issue_pid("pg") if is_clone else data["pid"]
-
         # 3) Build the LayoutTemplate instance
         geom = UnitStrGeometry.from_dict(data["geometry"])
         inst = cls(
@@ -628,8 +679,13 @@ class LayoutTemplate(QGraphicsObject):
         )
 
         # 4) Wire up registry, set content, register self
+        if is_clone:
+            inst._name = data.get("name")
         inst._registry = registry
+<<<<<<< Updated upstream
         inst._content  = content
+=======
+>>>>>>> Stashed changes
         registry.register(inst)
         # 5) Create new slots
         # print(f"Layout Template instance created. Creating slots with initGrid: {rows}, {columns} in registry: {registry}...")

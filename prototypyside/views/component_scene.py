@@ -17,7 +17,6 @@ from prototypyside.models.component_element import ComponentElement
 
 if TYPE_CHECKING:
     from prototypyside.utils.incremental_grid import IncrementalGrid
-    from prototypyside.views.component_tab import ComponentTab  
     from prototypyside.models.component_template import ComponentTemplate
 
 # -------------------------------------------------------------------------

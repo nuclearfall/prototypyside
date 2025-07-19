@@ -112,6 +112,7 @@ class PropertyPanel(QWidget):
         self.content_stack = QStackedWidget()
         self.content_text_edit = FocusTextEdit()
         self.content_path_button = QPushButton("Select Image...") # For image path
+        self.content_path_button.setMaximumHeight(32)
         self.content_stack.addWidget(self.content_text_edit)
         self.content_stack.addWidget(self.content_path_button)
 
@@ -119,7 +120,7 @@ class PropertyPanel(QWidget):
         self.color_picker = ColorPickerWidget()
         self.bg_color_picker = ColorPickerWidget()
         self.border_color_picker = ColorPickerWidget()
-        self.border_width_field = UnitField()
+        self.border_width_field = UnitField(property_name="border_width", display_unit=display_unit)
         
         # Alignment ComboBox
         self.alignment_map = {
@@ -246,18 +247,6 @@ class PropertyPanel(QWidget):
             display_unit=self._display_unit
         )
 
-    # def clear_target(self):
-    #     # Disconnect change signal
-    #     if self.target_item and self._item_changed_conn:
-    #         try:
-    #             self.target_item.item_changed.disconnect(self.refresh)
-    #         except (AttributeError, TypeError):
-    #             pass
-    #     self._item_changed_conn = False
-
-    #     self.target_item = None
-    #     # Hide or clear your widgets as before…
-    #     # e.g. self.main_frame.setVisible(False)
 
     def _populate_fields(self):
         """Fill every widget from self.target_item’s current state."""
@@ -293,7 +282,9 @@ class PropertyPanel(QWidget):
             self.content_text_edit.setTarget(el, "content")
             self.content_text_edit.setText(el.content or "")
         elif isinstance(el, ImageElement):
+
             self.content_stack.setCurrentWidget(self.content_path_button)
+            self.content_stack.setMaximumHeight(20)
         else:
             self.form_layout.labelForField(self.content_stack).hide()
             self.content_stack.hide()
