@@ -149,7 +149,8 @@ class ComponentTab(QWidget):
         self.scene.addItem(self.template)
 
         # Connect signals specific to this tab's template and scene
-        self.template.template_changed.connect(self.update_component_scene)
+        if hasattr(self.template, "template_refresh"):
+            self.template.template_refresh.connect(self.update_component_scene)
         self.template.item_z_order_changed.connect(self.update_layers_panel)
         self.scene.selectionChanged.connect(self.on_selection_changed)
         self.scene.item_dropped.connect(self.add_item_from_drop)
@@ -167,7 +168,7 @@ class ComponentTab(QWidget):
         delete_shortcut.activated.connect(self.remove_selected_item)
 
     @Slot()
-    def update_component_scene(self):
+    def update_component_scene(self, _pid=None):
         """Updates the scene dimensions and view based on the current template."""
         if not self.scene or not self.template:
             return
