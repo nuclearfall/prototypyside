@@ -22,6 +22,7 @@ if TYPE_CHECKING:
 class ComponentTemplate(QGraphicsObject):
     template_changed = Signal()
     item_z_order_changed = Signal()
+    template_refresh = Signal(str)
     # border width and corner_radius are set based on a standard MTG card
     def __init__(self, pid, geometry=UnitStrGeometry(width="2.5in", height="3.5in"), parent = None, 
         name=None, registry=None, corner_radius=UnitStr("0in"), border=UnitStr("0in")):
@@ -39,8 +40,11 @@ class ComponentTemplate(QGraphicsObject):
         self._border = border
         self._corner_radius = corner_radius
         self._csv_row = []
-        self._csv_path: Path = None 
+        self._csv_path: Path = None
         self.content = None
+
+        # Propagate structural changes to template_refresh
+        self.template_changed.connect(self._emit_refresh)
 
     @property
     def registry(self):
@@ -166,13 +170,19 @@ class ComponentTemplate(QGraphicsObject):
         self.items.append(item)
         max_z = max([e.zValue() for e in self.items], default=0)
         item.setZValue(max_z + 100)
-        # item.item_changed.connect(self._on_item_changed)
+        if hasattr(item, "item_changed"):
+            item.item_changed.connect(self._on_item_changed)
         self.template_changed.emit()
         self.item_z_order_changed.emit()
 
     def remove_item(self, item: 'ComponentElement'):
         if item in self.items:
             self.items.remove(item)
+            try:
+                if hasattr(item, "item_changed"):
+                    item.item_changed.disconnect(self._on_item_changed)
+            except (TypeError, RuntimeError):
+                pass
             self.template_changed.emit()
             self.item_z_order_changed.emit()
 
@@ -250,6 +260,12 @@ class ComponentTemplate(QGraphicsObject):
         item.setZValue(min_z - 100)
         self._normalize_z_values()
         self.item_z_order_changed.emit()
+
+    def _emit_refresh(self):
+        self.template_refresh.emit(self.pid)
+
+    def _on_item_changed(self):
+        self.template_refresh.emit(self.pid)
 
     @property
     def background_image(self):
@@ -368,10 +384,18 @@ class ComponentTemplate(QGraphicsObject):
         inst._template_pid = None
         if is_clone:
             inst._template_pid = data.get("pid")
+        else:
+            inst._template_pid = data.get("template_pid")
         inst.csv_path = data.get("csv_path")
         # 2) Registry registration
         inst._registry = registry
         registry.register(inst)
+
+        # Listen for template changes from the source
+        if inst._template_pid:
+            original = registry.global_get(inst._template_pid)
+            if original and hasattr(original, "template_refresh"):
+                original.template_refresh.connect(inst.refresh_from_template)
 
         # 3) Child elements (images/text)
         inst.items = []
@@ -384,6 +408,53 @@ class ComponentTemplate(QGraphicsObject):
             else:
                 raise ValueError(f"Unknown prefix {prefix}")
             el.setParentItem(inst)
+            if hasattr(el, "item_changed"):
+                el.item_changed.connect(inst._on_item_changed)
             inst.items.append(el)
 
         return inst
+
+    def refresh_from_template(self, tpid: str):
+        if tpid != self._template_pid:
+            return
+        if not self._registry:
+            return
+        template = self._registry.global_get(tpid)
+        if not template:
+            return
+        data = template.to_dict()
+
+        # Update core properties (keep our own pid/name)
+        self.geometry = UnitStrGeometry.from_dict(data["geometry"])
+        self.background_image = data.get("background_image")
+        self._border = UnitStr.from_dict(data.get("border"))
+        self._corner_radius = UnitStr.from_dict(data.get("corner_radius"))
+        self.csv_path = data.get("csv_path")
+
+        # Remove existing items
+        for itm in list(self.items):
+            try:
+                if hasattr(itm, "item_changed"):
+                    itm.item_changed.disconnect(self._on_item_changed)
+            except (TypeError, RuntimeError):
+                pass
+            if self._registry:
+                self._registry.deregister(itm.pid)
+            if itm.scene():
+                itm.scene().removeItem(itm)
+        self.items = []
+
+        for e in data.get("items", []):
+            prefix = get_prefix(e["pid"])
+            if prefix == "ie":
+                el = ImageElement.from_dict(e, self._registry, is_clone=True)
+            elif prefix == "te":
+                el = TextElement.from_dict(e, self._registry, is_clone=True)
+            else:
+                continue
+            el.setParentItem(self)
+            if hasattr(el, "item_changed"):
+                el.item_changed.connect(self._on_item_changed)
+            self.items.append(el)
+
+        self.template_changed.emit()

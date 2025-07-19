@@ -41,13 +41,9 @@ class ImportPanel(QWidget):
         self.update_csv_file_list(template)
         self.update_fields(template)
 
-        # Reconnect to new template signals
-        if hasattr(template, "template_changed"):
-            template.template_changed.connect(self._on_template_changed)
-
-        for item in getattr(template, "items", []):
-            if hasattr(item, "item_changed"):
-                item.item_changed.connect(self._on_item_changed)
+        # Listen for refresh notifications from the template
+        if hasattr(template, "template_refresh"):
+            template.template_refresh.connect(self._on_template_refresh)
 
     def _disconnect_signals(self):
         """Disconnect signals from the previous template and its elements."""
@@ -55,31 +51,15 @@ class ImportPanel(QWidget):
             return
 
         try:
-            if hasattr(self._current_template, "template_changed"):
-                self._current_template.template_changed.disconnect(self._on_template_changed)
+            if hasattr(self._current_template, "template_refresh"):
+                self._current_template.template_refresh.disconnect(self._on_template_refresh)
         except TypeError:
             pass  # signal already disconnected
 
-        for item in getattr(self._current_template, "items", []):
-            try:
-                if hasattr(item, "item_changed"):
-                    item.item_changed.disconnect(self._on_item_changed)
-            except TypeError:
-                pass
-
         self._current_template = None
 
-    def _on_template_changed(self):
-        """Triggered when elements are added/removed to the template."""
-        self.update_fields(self._current_template)
-
-        # Reconnect to any new items
-        for item in getattr(self._current_template, "items", []):
-            if hasattr(item, "item_changed"):
-                item.item_changed.connect(self._on_item_changed)
-
-    def _on_item_changed(self):
-        """Triggered when an element is renamed."""
+    def _on_template_refresh(self, _pid:str):
+        """Triggered when the template or one of its elements changes."""
         self.update_fields(self._current_template)
 
     def update_csv_file_list(self, selected_template):

@@ -56,7 +56,8 @@ class ComponentScene(QGraphicsScene):
         self.inc_grid = grid
 
         # React to template-size changes
-        self.template.template_changed.connect(self._on_template_rect_changed)
+        if hasattr(self.template, "template_refresh"):
+            self.template.template_refresh.connect(self._on_template_rect_changed)
 
         # internal drag / resize bookkeeping
         self._resizing            = False
@@ -77,7 +78,7 @@ class ComponentScene(QGraphicsScene):
         self.setSceneRect(r)
 
     @Slot()
-    def _on_template_rect_changed(self):
+    def _on_template_rect_changed(self, _pid=None):
         """Keep scene and grid in sync when the template is resized."""
         self._sync_scene_rect()
         self.inc_grid.prepareGeometryChange()
