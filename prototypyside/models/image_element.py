@@ -1,10 +1,19 @@
 # image_element.py
-from PySide6.QtCore import QRectF, QPointF, 
-from PySide6.QtWidgets import QGraphicsItem, QGraphicsObject, QGraphicsSceneDragDropEvent
+from __future__ import annotations
 
-from prototypyside.models.component_element import ComponentElement
-from prototypyside.utils.units.unit_str import UnitStr
-from prototypyside.utils.unit_str_geometry
+from pathlib import Path
+from typing import Optional
+
+from PySide6.QtCore import Qt, QRectF, QPointF
+from PySide6.QtGui import QPainter, QPixmap, QPen
+from PySide6.QtWidgets import (
+    QGraphicsItem,
+    QGraphicsObject,
+    QGraphicsSceneDragDropEvent,
+)
+
+from prototypyside.models.component_elements import ComponentElement
+from prototypyside.utils.units.unit_str_geometry import UnitStrGeometry
 
 class ImageElement(ComponentElement):
     _subclass_serializable = {

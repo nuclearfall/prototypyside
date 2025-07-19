@@ -6,7 +6,7 @@ from PySide6.QtGui import QUndoStack # Import QUndoStack
 from prototypyside.services.undo_commands import MoveElementCommand, ResizeElementCommand
 from typing import TYPE_CHECKING
 if TYPE_CHECKING:
-    from prototypyside.models.component_element import ComponentElement
+    from prototypyside.models.component_elements import ComponentElement
 
 class GeometrySetter:
     def __init__(self, undo_stack: QUndoStack):

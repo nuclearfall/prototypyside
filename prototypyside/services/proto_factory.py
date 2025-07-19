@@ -4,7 +4,7 @@ import importlib
 
 # Import your model classes
 from prototypyside.models.component_template import ComponentTemplate
-from prototypyside.models.component_element import TextElement, ImageElement
+from prototypyside.models.component_elements import TextElement, ImageElement
 from prototypyside.models.layout_template import LayoutTemplate
 from prototypyside.models.layout_slot import LayoutSlot
 

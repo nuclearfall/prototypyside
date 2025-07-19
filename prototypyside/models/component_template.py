@@ -9,7 +9,7 @@ import json
 from pathlib import Path
 from PySide6.QtWidgets import QMessageBox
 
-from prototypyside.models.component_element import ImageElement, TextElement
+from prototypyside.models.component_elements import ImageElement, TextElement
 from prototypyside.utils.units.unit_str import UnitStr
 from prototypyside.utils.units.unit_str_geometry import UnitStrGeometry
 from prototypyside.utils.ustr_helpers import geometry_with_px_pos, geometry_with_px_rect

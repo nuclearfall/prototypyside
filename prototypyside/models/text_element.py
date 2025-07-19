@@ -1,19 +1,31 @@
 # text_element.py
-from pathlib import Path
-from PySide6.QtCore import Qt, QRectF, QPointF, QSize, Signal, QObject
-from PySide6.QtGui import (QColor, QFont, QPen, QBrush, QTextDocument, QTextOption, QPainter, QPixmap, QPalette,
-            QAbstractTextDocumentLayout)
-from PySide6.QtWidgets import QGraphicsItem, QGraphicsObject, QGraphicsSceneDragDropEvent
-from typing import Optional, Dict, Any, Union
-from prototypyside.views.graphics_items import ResizeHandle
-from prototypyside.utils.qt_helpers import qrectf_to_list, list_to_qrectf, qfont_from_string
+from __future__ import annotations
+
+from typing import Optional
+
+from PySide6.QtCore import Qt, QRectF, QPointF, QSize, Signal
+from PySide6.QtGui import (
+    QColor,
+    QFont,
+    QPen,
+    QBrush,
+    QTextDocument,
+    QTextOption,
+    QPainter,
+    QPixmap,
+    QPalette,
+    QAbstractTextDocumentLayout,
+)
+from PySide6.QtWidgets import QGraphicsItem, QGraphicsObject
+
+from prototypyside.utils.qt_helpers import qfont_from_string
 from prototypyside.utils.units.unit_str import UnitStr
 from prototypyside.utils.units.unit_str_geometry import UnitStrGeometry
 from prototypyside.utils.ustr_helpers import geometry_with_px_rect, geometry_with_px_pos
 from prototypyside.utils.style_serialization_helpers import save_style, load_style
 from prototypyside.config import HandleType, ALIGNMENT_MAP
 from prototypyside.utils.proto_helpers import get_prefix, issue_pid
-from prototypyside.models.component_element
+from prototypyside.models.component_elements import ComponentElement
 
 
 class TextElement(ComponentElement):
