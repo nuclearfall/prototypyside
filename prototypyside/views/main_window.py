@@ -1,7 +1,7 @@
 # prototypyside/views/main_window.py
 
 import sys
-import json, jsonschema
+import json
 from pathlib import Path
 from typing import Optional, List, Dict, Any
 
@@ -25,7 +25,6 @@ from prototypyside.services.merge_manager import MergeManager
 from prototypyside.views.panels.import_panel import ImportPanel
 from prototypyside.services.export_manager import ExportManager
 from prototypyside.services.mail_room import MailRoom
-from prototypyside.utils.validator import SchemaValidator
 
 def MetaKeySequence(key: str) -> QKeySequence:
     """
@@ -53,10 +52,8 @@ class MainDesignerWindow(QMainWindow):
     def __init__(self):
         super().__init__()
 
-        schema_path = Path(__file__).parent.parent / "schemas"
-        
-        # Main application settings, might be shared or passed to tabs
-        self.validator = SchemaValidator(schema_path)
+        # Main application settings
+        # Validation temporarily disabled pending schema updates
         self.settings = AppSettings(display_unit="px", print_dpi=300)
         self.registry = RootRegistry()
         self.mail_room = MailRoom(registry=self.registry)
@@ -474,12 +471,7 @@ class MainDesignerWindow(QMainWindow):
             with open(path, "r", encoding="utf-8") as f:
                 data = json.load(f)
 
-                # --- VALIDATION STEP ---
-                is_valid, error_msg = self.validator.validate(data)
-                if not is_valid:
-                    QMessageBox.critical(self, "Invalid Template File", error_msg)
-                    return
-                # --- END VALIDATION ---
+                # Validation temporarily disabled
 
             registry = ProtoRegistry(parent=self.registry, root=self.registry)
             self.registry.add_child(registry)
@@ -566,21 +558,7 @@ class MainDesignerWindow(QMainWindow):
         try:
             data = registry.to_dict(template)
             
-            # --- VALIDATION STEP ---
-            is_valid, error_msg = self.validator.validate(data)
-            if not is_valid:
-                # Ask the user if they want to save anyway
-                reply = QMessageBox.warning(
-                    self,
-                    "Validation Failed",
-                    f"{error_msg}\n\nDo you want to save the file anyway?",
-                    QMessageBox.Yes | QMessageBox.No,
-                    QMessageBox.No
-                )
-                if reply == QMessageBox.No:
-                    self.show_status_message("Save cancelled due to validation error.", "warning")
-                    return
-            # --- END VALIDATION ---
+            # Validation temporarily disabled
 
             saver = QSaveFile(path, self)
             if not saver.open(QSaveFile.WriteOnly | QSaveFile.Text):

@@ -5,7 +5,7 @@ from PySide6.QtCore import Signal, Slot
 from typing import Optional, Any
 
 # Assuming these are in a sibling directory or accessible via the python path
-from prototypyside.models.component_element import ComponentElement
+from prototypyside.models.component_elements import ComponentElement
 from prototypyside.utils.units.unit_str import UnitStr
 from prototypyside.utils.units.unit_str_geometry import UnitStrGeometry
 

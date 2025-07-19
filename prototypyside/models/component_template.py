@@ -10,7 +10,7 @@ from pathlib import Path
 from PySide6.QtWidgets import QMessageBox
 <<<<<<< Updated upstream
 
-from prototypyside.models.component_element import ImageElement, TextElement
+from prototypyside.models.component_elements import ImageElement, TextElement
 from prototypyside.utils.units.unit_str import UnitStr
 from prototypyside.utils.units.unit_str_geometry import UnitStrGeometry
 =======

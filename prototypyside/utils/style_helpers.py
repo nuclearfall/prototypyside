@@ -17,5 +17,5 @@ def split_alignment(alignment: Qt.AlignmentFlag):
     return horiz, vert
 
 def combine_alignment(a1, a2):
-    if isinstance(a1, Qt.Alignment) and isinstance(a2, Qt.Alignment)
+    if isinstance(a1, Qt.Alignment) and isinstance(a2, Qt.Alignment):
         return a1 | a2

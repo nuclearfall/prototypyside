@@ -10,7 +10,11 @@ from typing import Optional, Any
 # Assuming these modules are in the same directory or accessible via python path
 from prototypyside.widgets.unit_field import UnitField, UnitStrGeometryField
 from prototypyside.utils.units.unit_str_geometry import UnitStrGeometry
-from prototypyside.models.component_element import ComponentElement, TextElement, ImageElement
+from prototypyside.models.component_elements import (
+    ComponentElement,
+    TextElement,
+    ImageElement,
+)
 from prototypyside.views.toolbars.font_toolbar import FontToolbar
 from prototypyside.widgets.color_picker import ColorPickerWidget
 

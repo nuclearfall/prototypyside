@@ -7,7 +7,7 @@ from PySide6.QtCore import Qt, QRectF, QPointF, QSizeF, QMarginsF, Signal
 <<<<<<< Updated upstream
 from PySide6.QtGui import QPainter, QPixmap, QColor, QImage, QPen, QBrush,  QPageLayout, QPageSize
 from prototypyside.models.component_template import ComponentTemplate
-from prototypyside.models.component_element import ImageElement
+from prototypyside.models.component_elements import ImageElement
 from prototypyside.utils.unit_converter import to_px, page_in_px, page_in_units, compute_scale_factor
 from prototypyside.utils.units.unit_str import UnitStr
 from prototypyside.utils.units.unit_str_geometry import UnitStrGeometry

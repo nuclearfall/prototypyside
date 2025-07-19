@@ -13,7 +13,7 @@ from PySide6.QtWidgets import (
 from prototypyside.services.undo_commands import MoveElementCommand, ChangePropertyCommand
 from prototypyside.utils.graphics_item_helpers import is_movable
 from prototypyside.utils.ustr_helpers import geometry_with_px_pos
-from prototypyside.models.component_element import ComponentElement
+from prototypyside.models.component_elements import ComponentElement
 
 if TYPE_CHECKING:
     from prototypyside.utils.incremental_grid import IncrementalGrid

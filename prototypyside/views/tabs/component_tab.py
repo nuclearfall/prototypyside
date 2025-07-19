@@ -21,7 +21,11 @@ from prototypyside.utils.units.unit_str_geometry import UnitStrGeometry
 from prototypyside.utils.incremental_grid import IncrementalGrid
 from prototypyside.widgets.pdf_export_dialog import PDFExportDialog
 
-from prototypyside.models.component_element import ComponentElement, TextElement, ImageElement
+from prototypyside.models.component_elements import (
+    ComponentElement,
+    TextElement,
+    ImageElement,
+)
 from prototypyside.services.app_settings import AppSettings
 <<<<<<< Updated upstream
 from prototypyside.services.undo_commands import (
