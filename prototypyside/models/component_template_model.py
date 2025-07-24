@@ -17,12 +17,12 @@ class ProtoModel:
 
 
 class ComponentTemplateModel(ProtoModel):
-    pid: str = issue_pid("ct")
+    pid: str = resolve_pid("ct")
     name: str = None
     border: UnitStr =UnitStr("0.125in")
     radius: UnitStr = UnitStr("0.125in")
     corner_radius: UnitStr = UnitStr("0.125in")
-    geometry UnitStrGeometry = UnitStrGeometry(width="2.5in", height="3.5in")
+    geometry: UnitStrGeometry = UnitStrGeometry(width="2.5in", height="3.5in")
     items: List["CompentElement"]
 
     # def set_registry(self, registry):
@@ -41,7 +41,7 @@ class ComponentTemplateModel(ProtoModel):
     #     self._name = name
     #     self._registry = registry
     #     self._geometry = geometry
-    #     self._dpi = 144
+    #     self._dpi = 300
     #     self._unit = "px"
     #     self._pixmap = None
     #     self.items: List['ComponentElement'] = []

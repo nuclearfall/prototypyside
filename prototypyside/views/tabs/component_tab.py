@@ -5,7 +5,7 @@ from functools import partial
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QComboBox, QCheckBox,
-    QLineEdit, QLabel, QToolBar, QListWidgetItem, QMessageBox
+    QLineEdit, QLabel, QToolBar, QListWidgetItem, QMessageBox, QGraphicsView
 )
 from PySide6.QtCore import Qt, Signal, Slot, QPointF
 from PySide6.QtGui import QColor, QKeySequence, QShortcut, QUndoStack, QPainter
@@ -18,36 +18,30 @@ from prototypyside.views.palettes.palettes import ComponentListWidget
 from prototypyside.widgets.unit_field import UnitField
 from prototypyside.utils.ustr_helpers import geometry_with_px_pos
 from prototypyside.utils.units.unit_str_geometry import UnitStrGeometry
-from prototypyside.utils.incremental_grid import IncrementalGrid
-from prototypyside.widgets.pdf_export_dialog import PDFExportDialog
+from prototypyside.views.overlays.incremental_grid import IncrementalGrid
+# from prototypyside.views.overlays.print_lines import PrintLines
 
-from prototypyside.models.component_elements import (
-    ComponentElement,
-    TextElement,
-    ImageElement,
-)
+from prototypyside.models.component_element import ComponentElement
+from prototypyside.models.text_element import TextElement
+from prototypyside.models.image_element import ImageElement
+
 from prototypyside.services.app_settings import AppSettings
-<<<<<<< Updated upstream
+
 from prototypyside.services.undo_commands import (
     AddElementCommand, RemoveElementCommand, CloneElementCommand,
-    ResizeTemplateCommand, ChangePropertyCommand
+    ResizeTemplateCommand, ChangePropertyCommand, ChangePropertyCommand
 )
 
 if TYPE_CHECKING:
     from PySide6.QtWidgets import QGraphicsItem
     from prototypyside.models.component_template import ComponentTemplate
 
-
-=======
-from prototypyside.services.undo_commands import (AddElementCommand, RemoveElementCommand, 
-            CloneElementCommand, ResizeTemplateCommand, ResizeAndMoveElementCommand, ChangeItemPropertyCommand)
->>>>>>> Stashed changes
-
 class ComponentTab(QWidget):
     status_message_signal = Signal(str, str, int)
     tab_title_changed = Signal(str)
     grid_visibility_changed = Signal(bool)
     grid_snap_changed = Signal(bool)
+    print_line_visibility_changed = Signal(bool)
 
     def __init__(self, parent, main_window, template, registry):
         super().__init__(parent)
@@ -57,20 +51,15 @@ class ComponentTab(QWidget):
         self._template = template
         self.undo_stack = QUndoStack()
         self.file_path = None
-
+        self.registry = registry
         self._unit = self.settings.display_unit
         self._dpi = self.settings.display_dpi
         self._show_grid   = True
         self._snap_grid   = True
+        # self._print_lines = True
 
         self.debug_count = 0
 
-        # self.scene = ComponentGraphicsScene(scene_rect=scene_rect, parent=self, tab=self) # Parent is self (ComponentTab)
-        # self.view = DesignerGraphicsView(self.scene)
-        # self.view.setRenderHints(QPainter.Antialiasing | QPainter.TextAntialiasing | QPainter.SmoothPixmapTransform)
-        # self.view.setViewportUpdateMode(QGraphicsView.FullViewportUpdate)
-        # self.view.setOptimizationFlag(QGraphicsView.DontSavePainterState)
-        # self.view.setOptimizationFlag(QGraphicsView.DontAdjustForAntialiasing) 
         self.selected_item: Optional['ComponentElement'] = None
 
         self._current_drawing_color = QColor(0, 0, 0) # For drawing tools
@@ -114,9 +103,6 @@ class ComponentTab(QWidget):
 
         # self.create_font_toolbar()
         self.create_measure_toolbar()
-
-        # Add toolbars to the container (adjust as per desired layout)
-        # toolbar_container.addWidget(self.font_toolbar_widget)
         toolbar_container.addWidget(self.measure_toolbar)
   
 
@@ -140,16 +126,23 @@ class ComponentTab(QWidget):
 
     def build_scene(self):
         # create grid
+        rect = self.template.geometry.to("px", dpi=self.dpi).rect
         self.inc_grid = IncrementalGrid(self.settings, snap_enabled=self._snap_grid, parent=self.template)
-        self.scene = ComponentScene(self.settings, grid=self.inc_grid, template=self.template, parent=self)
-        self.scene.setSceneRect(self.template.geometry.px.rect)
-        self.view  = ComponentView(self.scene, self)
-        # self.template.setZValue()
+        # self.print_lines = PrintLines(parent=self.template)
+        self.scene = ComponentScene(self.settings, template=self.template, grid=self.inc_grid) #print_lines=self.print_lines)
+        self.scene.addItem(self.template)
+        self.scene.addItem(self.inc_grid)
+        # self.scene.addItem(self.print_lines)
+        self.scene.setSceneRect(rect)
+        # print(f"Scene rect in pixels is {self.template.geometry.to("px", dpi=self.settings.dpi).rect}")
+        self.view  = ComponentView(self.scene)
         self.view.setRenderHints(QPainter.Antialiasing | QPainter.TextAntialiasing | QPainter.SmoothPixmapTransform)
         self.view.setViewportUpdateMode(QGraphicsView.FullViewportUpdate)
         self.view.setOptimizationFlag(QGraphicsView.DontSavePainterState)
         self.view.setOptimizationFlag(QGraphicsView.DontAdjustForAntialiasing)
-        self.scene.addItem(self.inc_grid)
+        self.view.setScene(self.scene)
+        self.view.fitInView(self.scene.sceneRect(), Qt.KeepAspectRatio)
+        self.view.show()
 
         # connect visibility / snapping controls
         self.grid_visibility_changed.connect(self.inc_grid.setVisible)
@@ -157,7 +150,7 @@ class ComponentTab(QWidget):
 
         # initialise from current flags
         self.inc_grid.setVisible(self._show_grid)
-        self.scene.addItem(self.template)
+
 
         # Connect signals specific to this tab's template and scene
         self.template.template_changed.connect(self.update_component_scene)
@@ -166,13 +159,8 @@ class ComponentTab(QWidget):
         self.scene.item_dropped.connect(self.add_item_from_drop)
         self.scene.item_cloned.connect(self.clone_item)
         self.scene.item_resized.connect(self.on_property_changed)
-        self.view.setRenderHints(QPainter.Antialiasing | QPainter.TextAntialiasing | QPainter.SmoothPixmapTransform)
-        self.view.setViewportUpdateMode(QGraphicsView.FullViewportUpdate)
-        self.view.setOptimizationFlag(QGraphicsView.DontSavePainterState)
-        self.view.setOptimizationFlag(QGraphicsView.DontAdjustForAntialiasing)
-        self.view.setScene(self.scene)
-        # self.view.fitInView(self.scene.sceneRect(), Qt.KeepAspectRatio)
 
+        
 
     @Slot()
     def update_component_scene(self):
@@ -242,11 +230,15 @@ class ComponentTab(QWidget):
         self.grid_checkbox.setChecked(True)
         self.grid_checkbox.stateChanged.connect(self.toggle_grid)
 
+        # self.print_line_checkbox = QCheckBox("Print Lines")
+        # self.print_line_checkbox.setChecked(True)
+        # self.print_line_checkbox.stateChanged.connect(self.toggle_print_lines)
 
         self.template_name_field = QLineEdit()
         self.template_name_field.setPlaceholderText(self.template.name)
         self.template_name_field.editingFinished.connect(self.on_template_name_changed)
         self.template_name_field.setMaximumWidth(150)
+
         width = self.template.geometry.width # Unit Str value
         height = self.template.geometry.height # Unit Str value
         self.template_width_field = UnitField(self.template, "width", display_unit=self.unit)
@@ -271,6 +263,7 @@ class ComponentTab(QWidget):
         self.measure_toolbar.addWidget(QLabel("Unit:"))
         self.measure_toolbar.addWidget(self.unit_selector)
         self.measure_toolbar.addWidget(self.grid_checkbox)
+        # self.measure_toolbar.addWidget(self.print_line_checkbox)
         self.measure_toolbar.addWidget(self.template_width_field)
         self.measure_toolbar.addWidget(self.template_height_field)
         self.measure_toolbar.addWidget(self.snap_checkbox)
@@ -288,8 +281,6 @@ class ComponentTab(QWidget):
         self.template_height_field.on_unit_change(unit)
         self.measure_toolbar.update()
         self.property_panel.on_unit_change(unit)
-        # self.scene.on_unit_change(unit)
-        # self.scene.update()  # force grid redraw
 
     @Slot(int)
     def on_corner_radius_change(self, new_value: int):
@@ -303,6 +294,10 @@ class ComponentTab(QWidget):
     def toggle_snap(self, checked: bool):
         self._snap_grid = checked
         self.grid_snap_changed.emit(checked)
+
+    # def toggle_print_lines(self, show:bool):
+    #     self._print_lines = show
+    #     self.print_lines.toggle_print_lines()
 
     @Slot()
     def set_template_border(self, t, p, new, old):
@@ -463,8 +458,8 @@ class ComponentTab(QWidget):
         # Reuse existing logic
         self.adjust_z_order_of_selected(direction)
 
-    @Slot(QGraphicsItem)
-    def select_item_from_layers_list(self, item: QGraphicsItem):
+    @Slot("QGraphicsItem")
+    def select_item_from_layers_list(self, item: "QGraphicsItem"):
         if isinstance(item, ComponentElement):
             self.scene.blockSignals(True)
             self.scene.clearSelection()

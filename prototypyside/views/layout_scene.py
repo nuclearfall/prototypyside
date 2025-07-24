@@ -17,7 +17,7 @@ from typing import Optional, TYPE_CHECKING
 import math
 
 if TYPE_CHECKING:
-    from prototypyside.utils.incremental_grid import IncrementalGrid
+    from prototypyside.views.overlays.incremental_grid import IncrementalGrid
     from prototypyside.models.layout_template import LayoutTemplate
 
 
@@ -29,13 +29,7 @@ class LayoutScene(QGraphicsScene):
     """
     component_dropped = Signal(object, QPointF)
     selectionChanged = Signal(str)
-<<<<<<< Updated upstream
-    def __init__(self, scene_rect, tab, parent=None):
-        super().__init__(scene_rect, parent) 
-        self.tab = tab 
-        self._template = tab.template
-        self._scene_rect = scene_rect
-=======
+
     def __init__(
         self,
         settings,
@@ -48,7 +42,6 @@ class LayoutScene(QGraphicsScene):
         self.settings     = settings
         self.template  = template  
         self.inc_grid = grid       
->>>>>>> Stashed changes
         self._preview_mode = False
         self._pages = []
         self._sync_scene_rect()

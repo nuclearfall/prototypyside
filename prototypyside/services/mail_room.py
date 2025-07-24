@@ -1,8 +1,8 @@
-from prototypyside.utils.proto_helpers import issue_pid
+from prototypyside.utils.proto_helpers import resolve_pid
 
 class MailRoom:
     def __init__(self, registry):
-        self.pid = issue_pid("mail")
+        self.pid = resolve_pid("mail")
         self._registry = registry
         self._object_registry = getattr(registry, "object_registry", None)
         self._targets = {}

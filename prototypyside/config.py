@@ -22,6 +22,12 @@ ALIGNMENT_MAP = {
     "Bottom Right": Qt.AlignBottom | Qt.AlignRight,
 }
 
+HORIZONTAL_ALIGNMENT = {
+    "left": Qt.AlignLeft,
+    "center": Qt.AlignCenter,
+    "right": Qt.AlignRight
+}
+
 PAGE_UNITS = {
     "in": QPageSize.Unit.Inch,
     "mm": QPageSize.Unit.Millimeter,
@@ -118,21 +124,6 @@ MEASURE_INCREMENT = {
     },
 }
 
-UNITS_TO_INCHES = {
-    "in": 1.0,
-    "cm": 1 / 2.54,
-    "mm": 1 / 25.4,
-    "pt": 1 / 72.0,
-    "px": None  # special case
-}
-
-
-INCHES_TO_UNITS = {
-    "in": 1.0,
-    "cm": 2.54,
-    "mm": 25.4,
-    "pt": 72.0,
-}
 
 
 VALID_MEASURES = [e for e in MEASURE_INCREMENT]

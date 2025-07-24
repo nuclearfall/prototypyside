@@ -38,7 +38,7 @@ class UnitStrGeometry:
         rect_y: Number | None   = None,
         width:  Number | None   = None,
         height: Number | None   = None,
-        dpi:    int             = 144,
+        dpi:    int             = 300,
         print_dpi: int          = 300,
         unit: Optional[str] = None,
     ):
@@ -55,9 +55,11 @@ class UnitStrGeometry:
 
         raw_x, raw_y = (pos.x(), pos.y()) if pos else (x or 0, y or 0)
 
-        # Ensure all components become UnitStr objects.
-        # Numeric inputs are treated as 'px' by default in UnitStr constructor.
-        mk = lambda v: v if isinstance(v, UnitStr) else UnitStr(v, dpi=self._dpi)
+        # change: bare floats become UnitStr(v, unit=unit, dpi) → use the geometry’s unit
+        mk = lambda v: (
+            v if isinstance(v, UnitStr)
+            else UnitStr(v, unit=unit, dpi=dpi))
+      
 
         self._rect_x = mk(raw_rx)
         self._rect_y = mk(raw_ry)
@@ -153,7 +155,7 @@ class UnitStrGeometry:
     def pt(self)   -> UnitStrGeometry: return self.to("pt")
 
     @classmethod
-    def from_px(cls, rect: QRectF, pos: QPointF, dpi: int = 144) -> UnitStrGeometry:
+    def from_px(cls, rect: QRectF, pos: QPointF, dpi: int = 300) -> UnitStrGeometry:
         """Build a UnitStrGeometry by interpreting the given QRectF and QPointF as pixels."""
         return cls(
             x=pos.x(), y=pos.y(),
@@ -180,7 +182,7 @@ class UnitStrGeometry:
     @classmethod
     def from_dict(cls, blob: dict) -> UnitStrGeometry:
         """Reconstructs a UnitStrGeometry from its dictionary representation."""
-        dpi = blob.get("dpi", 144)
+        dpi = blob.get("dpi", 300)
         pos_data = blob.get("pos", {})
         rect_data = blob.get("rect", {})
 

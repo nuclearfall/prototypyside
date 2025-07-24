@@ -2,7 +2,7 @@
 
 These helpers are deliberately *framework‑free*: they accept plain model
 objects (LayoutTemplate, ComponentTemplate) and numbers; no Qt classes are
-imported here.  They provide all the numerical data that PaginationManager
+imported here.  They provide all the numerical data that PageManager
 needs so its core algorithm can remain small and unit‑testable.
 
 Assumptions
@@ -92,7 +92,7 @@ def rows_for(template: "ComponentTemplate") -> List[Dict[str, str]]:
     """Return the list of *row dictionaries* driving instance generation.
 
     For *static* templates, we synthesise ``{}`` placeholders repeated
-    ``copies`` times so PaginationManager can treat both modes uniformly.
+    ``copies`` times so PageManager can treat both modes uniformly.
     """
     mode = get_component_mode(template)
     if mode == "merge":

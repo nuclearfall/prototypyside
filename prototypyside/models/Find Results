@@ -1,0 +1,479 @@
+Searching 97 files for "self._unit =" (case sensitive)
+
+~/Desktop/prototypyside/prototypyside/models/component_element.py:
+   37          self._geometry = geometry
+   38          self._dpi = geometry.dpi
+   39:         self._unit = "px"
+   40          self._name = name
+   41          # Set the QGraphicsItem position (scene expects px)
+   ..
+   80      def unit(self, new: str):
+   81          if self._unit != new:
+   82:             self._unit = new
+   83  
+   84      @property
+
+~/Desktop/prototypyside/prototypyside/models/component_template.py:
+   40          self._geometry = geometry
+   41          self._dpi = 144
+   42:         self._unit = "px"
+   43          self._bleed = UnitStr("0.125in", unit="in", dpi=144)
+   44          self._pixmap = None
+   ..
+  112      def unit(self, new: str):
+  113          if self._unit != new:
+  114:             self._unit = new
+  115              for item in self.items:
+  116                  item.unit = self._unit
+
+~/Desktop/prototypyside/prototypyside/models/component_template_model.py:
+   43      #     self._geometry = geometry
+   44      #     self._dpi = 144
+   45:     #     self._unit = "px"
+   46      #     self._pixmap = None
+   47      #     self.items: List['ComponentElement'] = []
+
+~/Desktop/prototypyside/prototypyside/models/layout_slot.py:
+   28          self._column = column
+   29          self._content = None
+   30:         self._unit = "px"
+   31          self._dpi = 144
+   32          self._display_flag = DISPLAY_MODE_FLAGS.get("stretch").get("aspect")
+   ..
+   54      def unit(self, new: str):
+   55          if self._unit != new:
+   56:             self._unit = new
+   57              for item in self.content:
+   58                  item.unit = new
+
+~/Desktop/prototypyside/prototypyside/models/layout_template.py:
+   51  
+   52          self._dpi = 144
+   53:         self._unit = "px"
+   54          self._content = None
+   55          self.items = []
+   ..
+  121      def unit(self, new: str):
+  122          if self._unit != new:
+  123:             self._unit = new
+  124              for item in self.items:
+  125                  item.unit = self._unit
+
+~/Desktop/prototypyside/prototypyside/utils/units/unit_str.py:
+   69              self._raw = raw._raw
+   70              self._value = raw._value
+   71:             self._unit = internal_unit
+   72              self._dpi = dpi  # Allow overriding DPI on clone
+   73              return
+   ..
+  100              raise ValueError(f"Unsupported unit: {input_unit}")
+  101  
+  102:         self._unit = internal_unit
+  103  
+  104      @classmethod
+
+~/Desktop/prototypyside/prototypyside/utils/units/unit_str_geometry.py:
+   45          self._dpi = dpi
+   46          self._print_dpi = print_dpi
+   47:         self._unit = (unit or "in").lower().replace('"', "in")
+   48  
+   49          # Unpack Qt types. These values are assumed to be in pixels unless they
+
+~/Desktop/prototypyside/prototypyside/views/tabs/component_tab.py:
+   53          self.file_path = None
+   54          self.registry = registry
+   55:         self._unit = self.settings.display_unit
+   56          self._dpi = self.settings.display_dpi
+   57          self._show_grid   = True
+
+~/Desktop/prototypyside/prototypyside/widgets/settings_dialog.py:
+    7          self.setWindowTitle("Application Settings")
+    8  
+    9:         self._unit = unit
+   10          self._display_dpi = display_dpi
+   11          self._print_dpi = print_dpi
+
+14 matches across 9 files
+
+
+Searching 97 files for "unit =" (case sensitive)
+
+~/Desktop/prototypyside/prototypyside/models/component_element.py:
+   37          self._geometry = geometry
+   38          self._dpi = geometry.dpi
+   39:         self._unit = "px"
+   40          self._name = name
+   41          # Set the QGraphicsItem position (scene expects px)
+   ..
+   80      def unit(self, new: str):
+   81          if self._unit != new:
+   82:             self._unit = new
+   83  
+   84      @property
+
+~/Desktop/prototypyside/prototypyside/models/component_template.py:
+   40          self._geometry = geometry
+   41          self._dpi = 144
+   42:         self._unit = "px"
+   43          self._bleed = UnitStr("0.125in", unit="in", dpi=144)
+   44          self._pixmap = None
+   ..
+  103              self._dpi = new
+  104              for item in self.items:
+  105:                 item.unit = self._unit
+  106  
+  107      @property
+  ...
+  112      def unit(self, new: str):
+  113          if self._unit != new:
+  114:             self._unit = new
+  115              for item in self.items:
+  116:                 item.unit = self._unit
+  117  
+  118      @property
+
+~/Desktop/prototypyside/prototypyside/models/component_template_model.py:
+   43      #     self._geometry = geometry
+   44      #     self._dpi = 144
+   45:     #     self._unit = "px"
+   46      #     self._pixmap = None
+   47      #     self.items: List['ComponentElement'] = []
+
+~/Desktop/prototypyside/prototypyside/models/layout_slot.py:
+   28          self._column = column
+   29          self._content = None
+   30:         self._unit = "px"
+   31          self._dpi = 144
+   32          self._display_flag = DISPLAY_MODE_FLAGS.get("stretch").get("aspect")
+   ..
+   54      def unit(self, new: str):
+   55          if self._unit != new:
+   56:             self._unit = new
+   57              for item in self.content:
+   58:                 item.unit = new
+   59  
+   60      @property
+
+~/Desktop/prototypyside/prototypyside/models/layout_template.py:
+   51  
+   52          self._dpi = 144
+   53:         self._unit = "px"
+   54          self._content = None
+   55          self.items = []
+   ..
+  121      def unit(self, new: str):
+  122          if self._unit != new:
+  123:             self._unit = new
+  124              for item in self.items:
+  125:                 item.unit = self._unit
+  126  
+  127      @property
+
+~/Desktop/prototypyside/prototypyside/models/page_model.py:
+   10  #     geometry = PAGE_SIZES[page_size]["geometry"] or UnitStrGeometry(width="8.5in", height="11in")
+   11  #     dpi = 144
+   12: #     unit = "inch"
+   13  #     pagination_policy: str
+   14  #     rows = rows
+
+~/Desktop/prototypyside/prototypyside/services/app_settings.py:
+   16      def __init__(self, display_unit="pt", print_unit="in", display_dpi=144, print_dpi=144):
+   17          super().__init__()
+   18:         self._display_unit = display_unit
+   19          self._display_dpi = display_dpi
+   20          self._print_dpi = print_dpi
+   21:         self._print_unit = print_unit
+   22  
+   23      @Property(str)
+   ..
+   28      def unit(self, unit):       
+   29          if self._display_unit != unit:
+   30:             self._display_unit = unit
+   31              self.unit_changed.emit(unit)
+   32  
+   ..
+   60      def display_unit(self, unit):
+   61          if self._display_unit != unit:
+   62:             self._display_unit = unit
+   63              self.unit_changed.emit(unit)
+   64  
+   ..
+   70      def print_unit(self, unit):
+   71          if self._print_unit != unit:
+   72:             self._print_unit = unit
+   73              self.unit_changed.emit(unit)
+   74  
+
+~/Desktop/prototypyside/prototypyside/services/geometry_setter.py:
+   31      def set_pos_and_rect(self, item, new_pos, new_rect):
+   32          old_geo = item.geometry
+   33:         unit = old_geo.unit
+   34          dpi = old_geo.dpi
+   35          new_geo = UnitStrGeometry(rect=new_rect, pos=new_pos, unit=old_geo.unit, dpi=old_geo.dpi)
+
+~/Desktop/prototypyside/prototypyside/utils/unit_converter.py:
+   27      """
+   28      # Normalize unit (for output)
+   29:     to_unit = to_unit.lower().replace('"', "in").strip()
+   30      if to_unit not in UNITS_TO_INCHES:
+   31          raise ValueError(f"Unsupported target unit: {to_unit}")
+   ..
+   41          if not match:
+   42              raise ValueError(f"Invalid dimension format: '{value}'")
+   43:         num, unit = match.groups()
+   44          num = float(num)
+   45:         unit = (unit or "in").strip()
+   46          if unit not in UNITS_TO_INCHES:
+   47              raise ValueError(f"Unsupported input unit: {unit}")
+   48:         if unit == "px":
+   49              px_val = num
+   50          else:
+   ..
+   54  
+   55      # Now px_val holds the dimension in px
+   56:     if to_unit == "px":
+   57          return px_val
+   58:     elif to_unit == "in":
+   59          return px_val / dpi
+   60      else:
+   ..
+   67  
+   68  def format_dimension(pixels: float, unit: str = "in", dpi: int = 144) -> str:
+   69:     if unit == "in":
+   70          return f"{pixels_to_inches(pixels, dpi):.2f} in"
+   71:     elif unit == "cm":
+   72          return f"{pixels_to_cm(pixels, dpi):.2f} cm"
+   73:     elif unit == "px":
+   74          return f"{pixels:.0f} px"
+   75      else:
+   ..
+  208      If unit or dpi is not provided, uses self.tab.settings.
+  209      """
+  210:     unit = unit
+  211      dpi = dpi
+  212  
+  ...
+  214      y_px = scene_pos.y()
+  215  
+  216:     if unit == "in":
+  217          logical_x = x_px / dpi
+  218          logical_y = y_px / dpi
+  219:     elif unit == "mm":
+  220          logical_x = (x_px / dpi) * 25.4
+  221          logical_y = (y_px / dpi) * 25.4
+  222:     elif unit == "cm":
+  223          logical_x = (x_px / dpi) * 2.54
+  224          logical_y = (y_px / dpi) * 2.54
+  225:     elif unit == "pt":
+  226          logical_x = (x_px / dpi) * 72.0
+  227          logical_y = (y_px / dpi) * 72.0
+  ...
+  240      Supported units: 'in', 'mm', 'cm', 'pt'
+  241      """
+  242:     if target_unit == "in":
+  243          return px_value / dpi
+  244:     elif target_unit == "mm":
+  245          return (px_value / dpi) * 25.4
+  246:     elif target_unit == "cm":
+  247          return (px_value / dpi) * 2.54
+  248:     elif target_unit == "pt":
+  249          return (px_value / dpi) * 72.0
+  250      else:
+
+~/Desktop/prototypyside/prototypyside/utils/units/unit_str.py:
+   64          self._dpi = dpi
+   65          self._cache = {}
+   66:         internal_unit = "in"  # Internal storage is always inches
+   67  
+   68          if isinstance(raw, UnitStr):
+   69              self._raw = raw._raw
+   70              self._value = raw._value
+   71:             self._unit = internal_unit
+   72              self._dpi = dpi  # Allow overriding DPI on clone
+   73              return
+   ..
+   83              val_decimal = Decimal(value_str)
+   84              if unit_from_str:
+   85:                 input_unit = unit_from_str.lower().replace('"', "in")
+   86          elif isinstance(raw, (int, float, Decimal)):
+   87              val_decimal = Decimal(str(raw))
+   ..
+   91          # If unit wasn't in the string, use the `unit` param, or default to 'px'.
+   92          if input_unit is None:
+   93:             input_unit = (unit or "px").lower().replace('"', "in")
+   94  
+   95:         if input_unit == "px":
+   96              self._value = self._px_to_physical(val_decimal, internal_unit, self._dpi)
+   97          elif input_unit in UNITS_TO_INCHES:
+   ..
+  100              raise ValueError(f"Unsupported unit: {input_unit}")
+  101  
+  102:         self._unit = internal_unit
+  103  
+  104      @classmethod
+  ...
+  157      def fmt(self, fmt: str = "g", unit: str | None = None, dpi: int | None = None) -> str:
+  158          """Return a formatted string (fmt) in unit (default self.unit), using given DPI for px."""
+  159:         unit = (unit or self.unit).lower().replace('"', "in")
+  160          val = self.to(unit, dpi=dpi or self._dpi)
+  161          return f"{format(val, fmt)} {unit}"
+  ...
+  166          inc = ROUNDING_INCREMENT.get(self.unit, Decimal("0.01"))
+  167          # Round the value in its native unit (inches)
+  168:         value_in_unit = self.value
+  169          rounded_val = round(value_in_unit / inc) * inc
+  170          return UnitStr(f"{rounded_val} {self.unit}", dpi=self._dpi)
+  ...
+  198      ) -> "UnitStr":
+  199          """Rebuild a UnitStr from a dictionary, preferring physical units."""
+  200:         unit = unit.lower().replace('"', "in")
+  201  
+  202          if unit in data:
+  ...
+  223              raise ValueError("DPI must be > 0 when converting from px")
+  224          inches = px / Decimal(dpi)
+  225:         if phys_unit == "in":
+  226              return inches
+  227          return (inches * INCHES_TO_UNITS[phys_unit]).quantize(Decimal("1E-6"), rounding=ROUND_HALF_UP)
+
+~/Desktop/prototypyside/prototypyside/utils/units/unit_str_geometry.py:
+   45          self._dpi = dpi
+   46          self._print_dpi = print_dpi
+   47:         self._unit = (unit or "in").lower().replace('"', "in")
+   48  
+   49          # Unpack Qt types. These values are assumed to be in pixels unless they
+   ..
+   97          g._pos_y  = self._pos_y.round()
+   98          g._dpi = self._dpi
+   99:         g._unit = self._unit
+  100          return g
+  101  
+  ...
+  142          g._pos_x, g._pos_y = self._pos_x, self._pos_y
+  143          g._dpi = dpi
+  144:         g._unit = du
+  145          return g
+  146  
+  ...
+  219          
+  220          # Ensure comparison is based on canonical values and DPI
+  221:         return self._value == other._value and self.unit == other.unit and self._dpi == other._dpi
+  222  
+  223      def __ne__(self, other: object) -> bool:
+
+~/Desktop/prototypyside/prototypyside/views/layout_scene.py:
+   80      #         return
+   81  
+   82:     #     unit = self.tab.settings.unit
+   83      #     levels = sorted(MEASURE_INCREMENT[unit].keys(), reverse=True)
+   84      #     num_levels = len(levels)
+   ..
+  111  
+  112      # def get_grid_spacing(self, level: int) -> int:
+  113:     #     unit = self.tab.settings.unit
+  114      #     dpi = self.tab.settings.dpi
+  115      #     base = parse_dimension("1 " + unit, dpi)
+
+~/Desktop/prototypyside/prototypyside/views/overlays/incremental_grid.py:
+   49      #     painter.setRenderHint(QPainter.Antialiasing, False)
+   50  
+   51:     #     unit = self._settings.unit
+   52      #     increments = self._increments.get(unit, {})
+   53      #     levels = sorted(increments.keys(), reverse=True)
+   ..
+   89              painter.setRenderHint(QPainter.Antialiasing, False)
+   90  
+   91:             unit = self._settings.unit
+   92              increments = self._increments.get(unit, {})
+   93              levels = sorted(increments.keys(), reverse=True)
+
+~/Desktop/prototypyside/prototypyside/views/panels/property_panel.py:
+   92          super().__init__(parent)
+   93          self.target_item: Optional[ComponentElement] = None
+   94:         self._display_unit = display_unit
+   95          self.undo_stack = getattr(parent, "undo_stack", None)
+   96          # Main layout
+   ..
+  232          re-fetch their model values and reformat in the new unit.
+  233          """
+  234:         self._display_unit = display_unit
+  235  
+  236          # if nothing is selected → nothing to do
+
+~/Desktop/prototypyside/prototypyside/views/tabs/component_tab.py:
+   53          self.file_path = None
+   54          self.registry = registry
+   55:         self._unit = self.settings.display_unit
+   56          self._dpi = self.settings.display_dpi
+   57          self._show_grid   = True
+   ..
+  277      @Slot(str)
+  278      def on_unit_change(self, unit: str):
+  279:         self.settings.unit = unit
+  280          self.template_width_field.on_unit_change(unit)
+  281          self.template_height_field.on_unit_change(unit)
+
+~/Desktop/prototypyside/prototypyside/views/tabs/layout_tab.py:
+  266      @Slot(str)
+  267      def on_unit_change(self, unit: str):
+  268:         self.settings.unit = unit
+  269          self.template_width_field.on_unit_change(unit)
+  270          self.template_height_field.on_unit_change(unit)
+
+~/Desktop/prototypyside/prototypyside/widgets/settings_dialog.py:
+    7          self.setWindowTitle("Application Settings")
+    8  
+    9:         self._unit = unit
+   10          self._display_dpi = display_dpi
+   11          self._print_dpi = print_dpi
+
+~/Desktop/prototypyside/prototypyside/widgets/unit_field.py:
+   42          self.target_item = target_item
+   43          self.property_name = property_name
+   44:         self.display_unit = display_unit
+   45          self._dpi = None
+   46          if target_item:
+   ..
+   50  
+   51          if target_item and property_name:
+   52:             self.setTarget(target_item, property_name, display_unit = self.display_unit)
+   53  
+   54          self.editingFinished.connect(self._on_editing_finished)
+   ..
+   58          self.target_item = target_item
+   59          self.property_name = property_name
+   60:         self.display_unit = display_unit
+   61          if self.target_item and self.property_name:
+   62              initial_value = getattr(self.target_item, self.property_name, None)
+   ..
+   71  
+   72      def on_unit_change(self, display_unit):
+   73:         self.display_unit = display_unit
+   74          self.setTarget(self.target_item, self.property_name, display_unit)
+   75  
+   ..
+   93          Corrects common input errors like missing leading zeros.
+   94          """
+   95:         unit = self.display_unit
+   96          current_text = super().text().strip()
+   97  
+   ..
+  166          self.property_name = None
+  167          self._old_geometry: Optional[UnitStrGeometry] = None
+  168:         self._display_unit = display_unit
+  169  
+  170          layout = QGridLayout(self)
+  ...
+  194          self.target_item = target_item
+  195          self.property_name = property_name
+  196:         self._display_unit = display_unit
+  197          if isinstance(self.target_item, ComponentElement):
+  198              self.target_item.item_changed.connect(self.update_from_item)
+  ...
+  209  
+  210      def on_unit_change(self, display_unit):
+  211:         self._display_unit = display_unit
+  212          if self.target_item:
+  213              self._update_display(self.target_item.geometry)
+
+70 matches across 18 files

@@ -3,14 +3,14 @@ import re
 from typing import Optional, Union, Tuple
 from decimal import Decimal
 from PySide6.QtCore import QRectF, QPointF
-from prototypyside.utils.unit_str import UnitStr
-from prototypyside.utils.unit_str_geometry import UnitStrGeometry
+from prototypyside.utils.units.unit_str import UnitStr
+from prototypyside.utils.units.unit_str_geometry import UnitStrGeometry
 
 Number = Union[int, float, str, Decimal, UnitStr]
 
 from PySide6.QtCore import QPointF, QRectF
-from prototypyside.utils.unit_str import UnitStr
-from prototypyside.utils.unit_str_geometry import UnitStrGeometry
+from prototypyside.utils.units.unit_str import UnitStr
+from prototypyside.utils.units.unit_str_geometry import UnitStrGeometry
 
 
 UNIT_RE = re.compile(r"^\s*(-?[0-9]+(?:\.[0-9]+)?)\s*([a-zA-Z]+)?\s*$")

@@ -6,20 +6,21 @@ from PySide6.QtWidgets import QGraphicsObject, QGraphicsItem, QStyleOptionGraphi
 from PySide6.QtCore import Qt, QRectF, QPointF, QSizeF, QMarginsF, Signal
 from PySide6.QtGui import QPainter, QPixmap, QColor, QImage, QPen, QBrush,  QPageLayout, QPageSize
 from prototypyside.models.component_template import ComponentTemplate
-from prototypyside.models.component_elements import ImageElement
+from prototypyside.models.image_element import ImageElement
 from prototypyside.utils.unit_converter import to_px, page_in_px, page_in_units, compute_scale_factor
 from prototypyside.utils.units.unit_str import UnitStr
 from prototypyside.utils.units.unit_str_geometry import UnitStrGeometry
 from prototypyside.utils.ustr_helpers import geometry_with_px_rect, geometry_with_px_pos
 from prototypyside.config import PAGE_SIZES, DISPLAY_MODE_FLAGS, PAGE_UNITS
-from prototypyside.utils.proto_helpers import get_prefix, issue_pid
+from prototypyside.utils.proto_helpers import get_prefix, resolve_pid
 if TYPE_CHECKING:
     from prototypyside.services.proto_registry import ProtoRegistry
 
 class LayoutSlot(QGraphicsObject):
     item_changed = Signal()
-    def __init__(self, pid, geometry=None, row=3, column=3, parent=None):
+    def __init__(self, pid, geometry, registry=None, row=0, column=0, parent=None):
         super().__init__(parent)
+        self._registry = registry
         self._pid = pid
         self._tpid = None # This will hold a reference to the template which will be instanced to fill it.
         self._hovered = False
@@ -28,12 +29,10 @@ class LayoutSlot(QGraphicsObject):
         self._column = column
         self._content = None
         self._unit = "px"
-        self._dpi = 144
+        self._dpi = 300
         self._display_flag = DISPLAY_MODE_FLAGS.get("stretch").get("aspect")
         self._cache_image = None
-        if geometry is None:
-            # initGrid, doesn't set position. Once we have a scene we'll setGrid
-            self._geometry = UnitStrGeometry(width="0.25in", height="0.25in", dpi=self._dpi)
+        self._geometry = geometry
         self.setAcceptHoverEvents(True)
 
     # --- Geometric Property Getter/Setters ---#
@@ -45,9 +44,12 @@ class LayoutSlot(QGraphicsObject):
     def dpi(self, new: int):
         if self._dpi != new:
             self._dpi = new
-            for item in self.content:
-                item.dpi = new
-
+            if self._content:
+                self._content.dpi = new
+                for item in self._content.items:
+                    item.dpi = new
+                self._invalidate_cache()
+                self.update()
     @property
     def unit(self) -> str:
         return self._unit
@@ -148,9 +150,15 @@ class LayoutSlot(QGraphicsObject):
         if geometry:
             print(f"Slot {self._pid} has content sized: {geometry.rect.width()}x{geometry.rect.height()}")
         # print(f"Slot content items are {self._content.items}")
-
+        self.invalidate_cache()
         self.update()
 
+    @property
+    def image(self):
+        if self._cache_image is None:
+            self._cache_image = self._render_to_image()
+        return self._cache_image
+        
     @property 
     def display_flag(self):
         return self._display_flag
@@ -263,9 +271,9 @@ class LayoutSlot(QGraphicsObject):
             item_bounds = item.boundingRect()
             img_painter.setClipRect(QRectF(0, 0, item_bounds.width(), item_bounds.height()))
 
-            rotation = getattr(item, "rotation", lambda: 0)()
-            if rotation:
-                img_painter.rotate(rotation)
+            # rotation = getattr(item, "rotation", lambda: 0)()
+            # if rotation:
+            #     img_painter.rotate(rotation)
 
             item.paint(img_painter, option, widget=None)
             img_painter.restore()
@@ -344,31 +352,21 @@ class LayoutSlot(QGraphicsObject):
         self._cache_image = None
         self.update()
 
-    def merge_csv_row(self):
-        """
-        Updates items with values from csv_row, only if their name is a data binding.
-        If the item already has static content, it is left unchanged unless overridden by csv data.
-        """
-        for item in self._content.items:
-            if item.name.startswith("@"):
-                col = item.name
-                if col in csv_row:
-                    value = csv_row[col]
-                    setattr(item, "content", value)
-
-    def apply_data(self, row):
-        for item in self._content.items:
-            if hasattr(item, "update_from_merge_data"):
-                item.update_from_merge_data(row)
-        self.invalidate_cache()
-
     def to_dict(self):
+        content_data = None
+        if self._content:
+            # Create a copy without parent references
+            content_data = self._content.to_dict()
+            # Remove recursive references
+            for item in content_data.get("items", []):
+                item.pop("parent", None)
+        
         return {
             "pid": self._pid,
             "geometry": self._geometry.to_dict(),
             "row": self._row,
             "column": self._column,
-            # "content": self._content.to_dict() if self._content else None
+            "content": content_data
         }
 
     @classmethod
@@ -376,35 +374,41 @@ class LayoutSlot(QGraphicsObject):
         cls,
         data: Dict[str, Any],
         registry: "ProtoRegistry",
-        is_clone: bool = False
+        is_clone: bool = False,
     ) -> "LayoutSlot":
         """
         Hydrate or clone a LayoutSlot. Regenerates pid on clone,
         restores geometry, flags, and re‐registers in the registry.
         """
-        # 1) PID logic
-        original_pid = data["pid"]
-        prefix = get_prefix(original_pid)
-        pid = issue_pid(prefix) if is_clone else original_pid
+        # PID logic
+        pid = resolve_pid("sl") if is_clone else data.get("pid")
 
-        # 2) Geometry
-        geom = UnitStrGeometry.from_dict(data["geometry"])
-        pos = QPointF(geom.pos_x.px, geom.pos_y.px)
+        # Geometry
+        geom = UnitStrGeometry.from_dict(data.get("geometry"))
 
-        # 3) Instantiate
-        inst = cls(pid=pid,
-                   geometry=geom,
-                   row=data.get("row", 3),
-                   column=data.get("column", 3),
-                   parent=None)
-        inst.setPos(pos)
+        # Instantiate with registry set explicitly
+        inst = cls(
+            pid=pid,
+            geometry=geom,
+            registry=registry,
+            row=data.get("row", 0),
+            column=data.get("column", 0),
+            parent=None,
+        )
+        
+        # Assign registry immediately after instantiation
+        inst._registry = registry
 
-        # 4) Restore any display flags, cached images, etc.
-        inst._hovered = data.get("hovered", False)
+        # Rehydrate content explicitly after setting registry
+        content_data = data.get("content", None)
+        if content_data:
+            content_template = ComponentTemplate.from_dict(content_data, registry=registry, is_clone=is_clone)
+            inst.content = content_template
+
+        # Restore display flags if needed
         inst._display_flag = data.get("display_flag", inst._display_flag)
 
-        # 5) Wire registry & register
-        inst._registry = registry
+        # Register the fully initialized instance at the end
         registry.register(inst)
 
         return inst

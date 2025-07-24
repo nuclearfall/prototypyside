@@ -2,7 +2,7 @@ from PySide6.QtWidgets import QDialog, QVBoxLayout, QLabel, QComboBox, QSpinBox,
 from PySide6.QtCore import Qt
 
 class SettingsDialog(QDialog):
-    def __init__(self, parent=None, unit="in", display_dpi=72, print_dpi=144):
+    def __init__(self, parent=None, unit="in", display_dpi=72, print_dpi=300):
         super().__init__(parent)
         self.setWindowTitle("Application Settings")
 

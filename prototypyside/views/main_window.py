@@ -18,13 +18,13 @@ from prototypyside.views.tabs.layout_tab import LayoutTab
 # Other imports that are still needed for MainDesignerWindow's global concerns
 # (e.g., AppSettings if it's truly global, not per-tab)
 from prototypyside.services.app_settings import AppSettings
-from prototypyside.widgets.page_size_dialog import PageSizeDialog # Used in New Template dialog
 from prototypyside.services.proto_registry import ProtoRegistry, RootRegistry
+from prototypyside.views.tabs.editable_tab_bar import EditableTabBar
 from prototypyside.utils.proto_helpers import get_prefix
 from prototypyside.services.merge_manager import MergeManager
 from prototypyside.views.panels.import_panel import ImportPanel
 from prototypyside.services.export_manager import ExportManager
-from prototypyside.services.mail_room import MailRoom
+# from prototypyside.services.mail_room import MailRoom
 
 def MetaKeySequence(key: str) -> QKeySequence:
     """
@@ -54,23 +54,14 @@ class MainDesignerWindow(QMainWindow):
 
         # Main application settings
         # Validation temporarily disabled pending schema updates
-        self.settings = AppSettings(display_unit="px", print_dpi=300)
+        self.settings = AppSettings()
         self.registry = RootRegistry()
-        self.mail_room = MailRoom(registry=self.registry)
-        self.registry.set_mail_room(self.mail_room)
+        # self.mail_room = MailRoom(registry=self.registry)
+        # self.registry.set_mail_room(self.mail_room)
         self.undo_group = QUndoGroup(self)
         self.setWindowTitle("ProtoTypySide")
         self.resize(1400, 900)
         self.setMinimumSize(800, 600)
-
-<<<<<<< Updated upstream
-
-=======
-        # Main application settings, might be shared or passed to tabs
-        self.settings = AppSettings(display_unit="pt", print_dpi=300)
-        self.registry = RootRegistry()
->>>>>>> Stashed changes
-        self._tab_map = {}  # pid: tab
 
         self.tab_widget: Optional[QTabWidget] = None
         self.palette_dock: Optional[QDockWidget] = None
@@ -92,21 +83,25 @@ class MainDesignerWindow(QMainWindow):
         self.setup_actions_and_menus()
 
         # Add initial tabs
-        self.add_new_tab(ComponentTab, "ct")
-<<<<<<< Updated upstream
-
-=======
->>>>>>> Stashed changes
         self.add_new_tab(LayoutTab, "lt")
+        self.add_new_tab(ComponentTab, "ct")
+
 
 
 
     ### --- GUI Setup --- ###
     def setup_ui(self):
+        tabs = QTabWidget()
+        editable_bar = EditableTabBar()
+
+        # connect to update your model (e.g. ComponentTemplate.name) too:
         self.tab_widget = QTabWidget()
+        self.tab_widget.setTabBar(editable_bar)
         self.tab_widget.setTabsClosable(True)
         self.tab_widget.tabCloseRequested.connect(self.close_tab)
         self.tab_widget.currentChanged.connect(self.on_tab_changed)
+        editable_bar.nameChanged.connect(self.on_tab_title_changed)
+
         self.setCentralWidget(self.tab_widget)
         self._create_import_panel()
         self.setup_dock_widgets()
@@ -310,12 +305,6 @@ class MainDesignerWindow(QMainWindow):
         #     # Don’t crash—just log or show a brief warning
         #     print(f"Autosave failed: {e}")
 
-    def get_scene_for_tpid(self, tpid):
-        index = self._tab_map.get(tpid)
-        if index is not None and 0 <= index < self.tab_widget.count():
-            tab = self.tab_widget.widget(index)
-            return tab.scene
-        return None
 
     @Slot(int)
     def on_tab_changed(self, index: int):
@@ -393,13 +382,13 @@ class MainDesignerWindow(QMainWindow):
             self.properties_dock.setWidget(prop_container)
             active_tab.layout_palette.refresh()
 
-    @Slot(str)
-    def on_tab_title_changed(self, title: str):
-        sender_tab = self.sender()
-        if isinstance(sender_tab, ComponentTab):
-            index = self.tab_widget.indexOf(sender_tab)
-            if index != -1:
-                self.tab_widget.setTabText(index, title)
+    @Slot(int, str)
+    # def on_tab_renamed(index: int, new_name: str):
+    def on_tab_title_changed(self, index, new_name: str):
+        sender_tab = self.get_tab_at_index(index)
+        template = sender_tab.template
+        old_name = template.name
+        sender_tab.on_property_changed(template, "name", new_name, old_name)
 
     def get_current_tab(self) -> Optional[ComponentTab]:
         tw = getattr(self, "tab_widget")
@@ -407,11 +396,12 @@ class MainDesignerWindow(QMainWindow):
 
     def get_tab_at_index(self, index):
         tab_widget = getattr(self, "tab_widget")
-        return self.tab_widget.widget(index) if isinstance(tw, QTabWidget) else None
+        return self.tab_widget.widget(index) if isinstance(tab_widget, QTabWidget) else None
 
     @Slot()
     def add_new_tab(self, tab, prefix):
         registry = ProtoRegistry(parent=self.registry, root=self.registry)
+        self.registry.add_child(registry)
         print ("registry created")
         self.registry.add_child(registry)
         template = self.registry.create(prefix, registry=registry)
@@ -422,7 +412,6 @@ class MainDesignerWindow(QMainWindow):
         new_tab.status_message_signal.connect(self.show_status_message)
         new_tab.tab_title_changed.connect(self.on_tab_title_changed)
         index = self.tab_widget.addTab(new_tab, template.name)
-        self._tab_map[template.pid] = index
         self.tab_widget.setCurrentIndex(index)
         self.show_status_message("New template tab created.", "info")
         # self.on_tab_changed(index) # Manually trigger update for new tab
@@ -487,13 +476,9 @@ class MainDesignerWindow(QMainWindow):
                                        main_window=self,
                                        registry=registry,
                                        template=obj)
-            if (
-                hasattr(obj, "csv_path")
-                and obj.csv_path is not None
-                and isinstance(obj.csv_path, (str, Path))
-                and Path(obj.csv_path).exists()
-            ):
-                self.merge_manager.load_csv(obj.csv_path, obj)       
+            if hasattr(obj, "csv_path"):
+                self.merge_manager.load_csv(obj.csv_path, obj)
+                print(f"Template {obj.name} successfully loaded csv at path: {obj.csv_path}")      
             idx = self.tab_widget.addTab(new_tab, Path(path).stem)
             self.tab_widget.setCurrentIndex(idx)
         except Exception as e:
@@ -752,36 +737,31 @@ class MainDesignerWindow(QMainWindow):
 
     def import_csv_to_merge_manager(self):
         active_tab = self.tab_widget.currentWidget()
-        if not hasattr(active_tab, "template"):
-            QMessageBox.warning(self, "No Template", "No component template is active.")
+        if not active_tab or not hasattr(active_tab, 'template'):
+            QMessageBox.warning(self, "No Template", "No active template found")
             return
 
-        template = active_tab.template
-        if not template.pid:
-            QMessageBox.warning(self, "Invalid Template", "Active template has no PID.")
+        # Create custom dialog with checkbox
+        dialog = QFileDialog(self, "Import CSV for Template", "", "CSV Files (*.csv);;All Files (*)")
+        
+        # Create checkbox widget
+        checkbox = QCheckBox("Link to current template", dialog)
+        checkbox.setChecked(True)  # Default to checked
+        
+        # Add checkbox to dialog's layout
+        layout = dialog.layout()
+        layout.addWidget(checkbox)
+        
+        # Execute dialog
+        if dialog.exec() != QFileDialog.Accepted:
             return
+        
+        csv_path = dialog.selectedFiles()[0]
+        link_to_template = checkbox.isChecked()
 
-        csv_path, _ = QFileDialog.getOpenFileName(
-            self,
-            "Import CSV for Template",
-            "",
-            "CSV Files (*.csv);;All Files (*)"
-        )
-        if not csv_path:
-            return
-
-        try:
-            csv_data = self.merge_manager.load_csv(csv_path, template)
-            self.import_panel.update_for_template(template)
-            # csv_data.rows is always a list
-            QMessageBox.information(
-                self,
-                "CSV Loaded",
-                f"Loaded {len(csv_data.rows)} rows from:\n{csv_data.file_path}"
-            )
-        except Exception as e:
-            QMessageBox.critical(self, "Import Failed", f"Failed to load CSV:\n{e}")
-
+        csv_data = self.merge_manager.load_csv(csv_path, active_tab.template)
+                
+        self.import_panel.update_for_template(active_tab.template)
 
     @Slot()
     def export_current_tab_png(self):
@@ -816,7 +796,7 @@ class MainDesignerWindow(QMainWindow):
             output_path += ".pdf"
 
         try:
-            export_manager = ExportManager(self.merge_manager, registry=self.registry)
+            export_manager = ExportManager(self.merge_manager)
             export_manager.export_to_pdf(template, output_path)
             QMessageBox.information(self, "Export Complete", f"PDF successfully saved:\n{output_path}")
         except Exception as e:
@@ -866,3 +846,4 @@ class MainDesignerWindow(QMainWindow):
             current_tab.export_pdf_cli(output_dir)
         else:
             print("No active tab for CLI PDF export.")
+

@@ -8,19 +8,14 @@ import csv
 import json
 from pathlib import Path
 from PySide6.QtWidgets import QMessageBox
-<<<<<<< Updated upstream
 
-from prototypyside.models.component_elements import ImageElement, TextElement
+from prototypyside.models.component_element import ComponentElement
+from prototypyside.models.image_element import ImageElement
+from prototypyside.models.text_element import TextElement
 from prototypyside.utils.units.unit_str import UnitStr
 from prototypyside.utils.units.unit_str_geometry import UnitStrGeometry
-=======
-from prototypyside.models.component_template_model import ComponentTemplateModel
-from prototypyside.models.component_elements import ImageElement, TextElement
-from prototypyside.utils.unit_str import UnitStr
-from prototypyside.utils.unit_str_geometry import UnitStrGeometry
->>>>>>> Stashed changes
 from prototypyside.utils.ustr_helpers import geometry_with_px_pos, geometry_with_px_rect
-from prototypyside.utils.proto_helpers import get_prefix, issue_pid
+from prototypyside.utils.proto_helpers import get_prefix, resolve_pid
 # Use TYPE_CHECKING for type hinting
 if TYPE_CHECKING:
     from prototypyside.services.proto_registry import ProtoRegistry
@@ -29,12 +24,10 @@ if TYPE_CHECKING:
 class ComponentTemplate(QGraphicsObject):
     template_changed = Signal()
     item_z_order_changed = Signal()
-    property_update = Signal(str, str, dict)  # (tpid, target_pid, packet(dict))
-    structure_changed = Signal(str)                     # (tpid)
 
-    # border width and corner_radius are set based on a standard MTG card
-    def __init__(self, pid, geometry=UnitStrGeometry(width="2.5in", height="3.5in"), parent = None, 
-        name=None, registry=None, corner_radius=UnitStr("0.125in"), border=UnitStr("0.125in")):
+    # border_width width and corner_radius are set based on a standard MTG card
+    def __init__(self, pid, geometry=UnitStrGeometry(width="2.5in", height="3.5in", dpi=300), parent = None, 
+        name=None, registry=None, corner_radius=UnitStr("0.125in", dpi=300), border_width=UnitStr("0.125in", dpi=300)):
         super().__init__(parent)
         self._tpid = None
         self.lpid = None
@@ -45,18 +38,26 @@ class ComponentTemplate(QGraphicsObject):
         self._name = name
         self._registry = registry
         self._geometry = geometry
-        self._dpi = 144
+        self._dpi = 300
         self._unit = "px"
+        self._bleed = UnitStr("0.125in", unit="in", dpi=300)
         self._pixmap = None
         self.items: List['ComponentElement'] = []
         self._background_image: Optional[str] = None
-        self._border = border
+        self._border_width = border_width
         self._corner_radius = corner_radius
         self._csv_row = []
         self._csv_path: Path = None 
         self.content = None
-        self.registry.object_registered.connect(self.add_item)
 
+    @property
+    def name(self):
+        return self._name
+    @name.setter
+    def name(self, value):
+        if self._name != value:
+            self._name = value
+    
     @property
     def tpid(self):
         return self._tpid if self._tpid else None
@@ -85,12 +86,12 @@ class ComponentTemplate(QGraphicsObject):
 
     @csv_path.setter
     def csv_path(self, value):
-        if value is None:
-            self._csv_path = None
-        else:
-            path_value = Path(value)
-            if path_value != self._csv_path:
-                self._csv_path = path_value
+        if value != self._csv_path:
+            try:
+                path = Path(value)
+                self._csv_path = path
+            except Exception:
+                self._csv_path = None
                 
     @property
     def dpi(self) -> int:
@@ -163,6 +164,15 @@ class ComponentTemplate(QGraphicsObject):
         return super().itemChange(change, value)
 
     @property
+    def bleed(self):
+        return self._bleed
+
+    @bleed.setter
+    def bleed(self, new):
+        self._bleed = new if self._bleed != new else self,_bleed
+        self.update()
+    
+    @property
     def width(self):
         return self._geometry.px.width
 
@@ -182,58 +192,22 @@ class ComponentTemplate(QGraphicsObject):
             self.update()
 
     @property
-    def border(self):
-        return self._border
+    def border_width(self):
+        return self._border_width
+
+    @border_width.setter
+    def border_width(self, value):
+        if self._border_width != value:
+            self._border_width = value
+            self.template_changed.emit()
 
     def add_item(self, item):
         if item in self.items:
             return
-        self.items.append(item)
         max_z = max([e.zValue() for e in self.items], default=0)
         item.setZValue(max_z + 100)
-        item.property_changed.connect(self.on_item_property_update)
+        self.items.append(item)
         self.item_z_order_changed.emit()
-
-    def receive_packet(self, packet: dict):
-        action = packet.get("action", "set_property")
-        if action == "set_property":
-            prop = packet["property"]
-            value = packet["new"]
-            setattr(self, prop, value)
-            # Optionally emit signal for UI/undo
-            return True
-        elif action == "add_item":
-            item = packet["item"]
-            self.add_item(item)
-            return True
-        else:
-            print(f"[ComponentTemplate] Unknown action: {action} in packet {packet}")
-            return False
-
-    def on_item_property_update(self, prop, new, old):
-        sender = self.pid
-        target = self.lpid
-        packet = {
-            "pid": self.pid,
-            "property": prop,
-            "old": old,
-            "new": new,
-        }
-        self.property_update.emit(sender, target, packet)
-
-    def on_template_property_update(self, prop, new, old):
-        self.send_packet_to_layout(prop, new, old)
-
-    def send_packet_to_layout(self, prop, new, old):
-        sender = self.pid
-        target = self.lpid
-        packet = {
-            "pid": self.pid,
-            "property": prop,
-            "old": old,
-            "new": new,
-        }
-        self.property_update.emit(sender, target, packet)
 
     def remove_item(self, item: 'ComponentElement'):
         if item in self.items:
@@ -349,18 +323,16 @@ class ComponentTemplate(QGraphicsObject):
             self._background_image = None
             print(f"[Warning] Background image not found: {path}")
 
-    def paint(self, painter: QPainter, option, widget=None, unit='px', dpi=144):
+    def paint(self, painter: QPainter, option, widget=None):
         """
-        Paints the template's background and border using the specified unit and dpi.
+        Paints the template's background and border_width using the specified unit and dpi.
 
         Parameters:
             painter (QPainter): Painter object used by the scene or exporter.
             option: QStyleOptionGraphicsItem from the scene (unused).
             widget: Optional QWidget; unused.
-            unit (str): Unit such as 'px', 'in', or 'mm'.
-            dpi (int): Dots-per-inch resolution to use for physical units.
         """
-        rect = self.geometry.to(self.unit, dpi=self.dpi).rect
+        rect = self.geometry.to("px", dpi=self.dpi).rect
         painter.setRenderHint(QPainter.Antialiasing)
 
         # ——— Background ———
@@ -380,12 +352,12 @@ class ComponentTemplate(QGraphicsObject):
         painter.restore()
 
         # ——— Border ———
-        if self.border.value > 0:
+        if self.border_width.value > 0:
             painter.save()
             painter.setBrush(Qt.NoBrush)
 
-            # Convert border thickness to unit
-            thickness = self.border.to(self.unit, dpi=self.dpi)
+            # Convert border_width thickness to unit
+            thickness = self.border_width.to("px", dpi=self.dpi)
             inset = thickness / 2.0
 
             inner = QRectF(
@@ -397,7 +369,7 @@ class ComponentTemplate(QGraphicsObject):
 
             # Clamp the radius to avoid exceeding available space
             max_radius = min(inner.width(), inner.height()) / 2.0
-            radius = max(0.0, min(self.corner_radius.to(self.unit, dpi=self.dpi) - inset, max_radius))
+            radius = max(0.0, min(self.corner_radius.to("px", dpi=self.dpi) - inset, max_radius))
 
             # Rounded or regular rect
             path = QPainterPath()
@@ -412,25 +384,21 @@ class ComponentTemplate(QGraphicsObject):
 
 
     def to_dict(self) -> Dict[str, Any]:
-        print("Is this serializing?")
         self._geometry
-        self._border
+        self._border_width
+        
+
         data = {
             'pid': self._pid,
             'name': self._name,
             'geometry': self._geometry.to_dict(),
             'background_image': str(self.background_image) if self.background_image else None,
             'items': [e.to_dict() for e in self.items],
-            'border': self.border.to_dict(),
+            'border_width': self.border_width.to_dict(),
             'corner_radius': self.corner_radius.to_dict(),
-            'csv_path': str(self._csv_path),
-<<<<<<< Updated upstream
+            'csv_path': str(self.csv_path) if self.csv_path.exists() else None,
             'tpid': self._tpid
-=======
-            'template_pid': self._template_pid,
->>>>>>> Stashed changes
         }
-        print(f"On save, name is {self._name}")
         return data
 
     @classmethod
@@ -438,42 +406,38 @@ class ComponentTemplate(QGraphicsObject):
         cls,
         data: dict,
         registry: "ProtoRegistry",
-        is_clone: bool = False
+        is_clone: bool = False,
     ) -> "ComponentTemplate":
         # 1) Core properties & PID
-        pid = issue_pid("cc") if is_clone else data["pid"]
+
+        pid = resolve_pid("cc") if is_clone else data["pid"]
         geom = UnitStrGeometry.from_dict(data["geometry"])
         inst = cls(
             pid=pid,
             geometry=geom,
             name=(None if is_clone else data.get("name")),
-            border=UnitStr.from_dict(data.get("border")),
+            border_width=UnitStr.from_dict(data.get("border_width")),
             corner_radius=UnitStr.from_dict(data.get("corner_radius")),
         )
-        inst._tpid = None
-        if is_clone:
-            inst._tpid = data.get("pid")
-        inst.csv_path = data.get("csv_path")
-        # 2) Registry registration
+
+        inst._tpid = data.get("pid") if is_clone else None
+        # CSV Data loads properly on open now.
+        csv_path = data.get("csv_path")
+        inst._csv_path = Path(csv_path) if csv_path else None
         inst._registry = registry
         registry.register(inst)
-
         # 3) Child elements (images/text)
         inst.items = []
         for e in data.get("items", []):
-            prefix = get_prefix(e["pid"])
+            prefix = get_prefix(e.get("pid"))
             if prefix == "ie":
-                el = ImageElement.from_dict(e, registry, is_clone=is_clone)
+                el = ImageElement.from_dict(e, registry=registry, is_clone=is_clone)
             elif prefix == "te":
-                el = TextElement.from_dict(e, registry, is_clone=is_clone)
+                el = TextElement.from_dict(e, registry=registry, is_clone=is_clone)
             else:
                 raise ValueError(f"Unknown prefix {prefix}")
-            el.setParentItem(inst)
-<<<<<<< Updated upstream
-            inst.items.append(el)
-
-=======
             inst.add_item(el)
+            el.setParentItem(inst)
+
             
->>>>>>> Stashed changes
         return inst

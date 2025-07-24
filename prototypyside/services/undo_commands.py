@@ -3,7 +3,7 @@ from PySide6.QtCore import QPointF, QRectF
 
 from prototypyside.models.component_template import ComponentTemplate
 from prototypyside.utils.unit_converter import pos_to_unit_str
-from prototypyside.utils.proto_helpers import issue_pid, get_prefix 
+from prototypyside.utils.proto_helpers import resolve_pid, get_prefix 
 from prototypyside.utils.units.unit_str import UnitStr
 from prototypyside.utils.units.unit_str_geometry import UnitStrGeometry
 
@@ -21,67 +21,6 @@ class AddSlotCommand(QUndoCommand):
             self.item = self.registry.create("ls", tpid=self.template.pid, cpid=None, parent=self.template)
         else:
             self.registry.reinsert(self.item)
-
-
-# This method doesn't require adding the template to the scene.
-# Instead when dropped, it also creates a ComponentInstance which will Render
-# and adds that to the scene. The ComponentInstance renders the Template.
-# # class CreateComponentCommand(QUndoCommand):
-# #     def __init__(self, component, tab, item, description="Clone Element"):
-# #         super().__init__(description)
-# #         self.tab = tab
-# #         self.component = component
-# #         self.registry = tab.registry
-# #         self.scene = tab.scene
-# #         self.item = item
-
-# #         self.clone = None
-# #         self.clone_items = []
-
-# #     def redo(self):
-# #         if self.clone is None:
-# #             self.clone = self.registry.clone(self.component)
-# #             self.clone.setParentItem(self.item)
-
-# #             self.clone_items = self.registry.clone_all(self.component.items)
-
-# #             for ce in self.clone_items:
-# #                 self.clone.add_item(ce)
-# #                 ce.setParentItem(self.clone)
-# #                 self.scene.addItem(ce)
-# #         else:
-# #             self.registry.reinsert(self.clone.pid)
-# #             for item in self.clone_elemnts:
-# #                 self.registry.reinsert(item.pid)
-
-#     def undo(self):
-#         for ce in self.clone_items:
-#             self.registry.deregister(ce.pid)
-#             self.scene.removeItem(ce)
-
-#         self.item.content = None
-#         self.registry.deregister(self.clone.pid)
-#         self.scene.removeItem(self.clone)
-
-class AddTemplateToLayoutCommand(QUndoCommand):
-    def __init__(self, component, layout, description="Add Element"):
-        super().__init__(description)
-        self.component = component
-        self.clone = None
-        self.layout = layout
-
-    def redo(self):
-        if self.item is None:
-            self.clone = self.layout.registry.clone(self.component)
-            self.layout.content = self.clone
-
-        elif self.clone is not None and self.layout.registry.is_orphan(self.clone.pid):
-            self.layout.registry.reinsert(self.clone.pid)
-            self.layout.content.append(self.clone)
-
-    def undo(self):
-        self.layout.deregister(self.clone)
-        self.layout.content.pop(self.clone)
 
 class AddElementCommand(QUndoCommand):
     def __init__(self, prefix, tab, geometry, description="Add Element"):
@@ -220,13 +159,9 @@ class ResizeAndMoveElementCommand(QUndoCommand):
     #     self.item.geometry = self.new_geometry
 
 
-<<<<<<< Updated upstream
+
 class ChangePropertyCommand(QUndoCommand):
-    def __init__(self, item, prop, new_value, old_value, description="Change Element Property"):
-=======
-class ChangeItemPropertyCommand(QUndoCommand):
     def __init__(self, item, prop, new_value, old_value, description="Change Item Property"):
->>>>>>> Stashed changes
         super().__init__(description)
         self.item = item
         self.prop = prop 
@@ -254,96 +189,121 @@ class ResizeTemplateCommand(QUndoCommand):
     def undo(self):
         self.template.geometry = self.old_geometry
 
-# class CloneComponentTemplateToSlotCommand(QUndoCommand):
-#     def __init__(self, registry, template, item, description="Add Template to Slot"):
-#         super().__init__(description)
-#         self.registry = registry
-#         self.item = item
-#         self.template = template
-#         self.clone = None
-#         self.clone_pid = None
-
-#     def redo(self):
-#         if self.clone is None:
-#             self.clone = self.registry.clone(self.template)
-#             self.clone_pid = self.clone.pid
-#             setattr(self.item, "content", self.clone)
-#         else:
-#             self.registry.reinsert(self.clone_pid)
-#             self.item.content = self.clone
-
-#     def undo(self):
-#         self.deregister(self.clone_pid)
-#         self.item.content = None
-
 class CloneComponentTemplateToSlotCommand(QUndoCommand):
-    def __init__(self, registry, template, item, mail_room, description="Add Template to Slot"):
+    def __init__(self, registry, template, item, description="Add Template to Slot"):
         super().__init__(description)
         self.registry = registry
         self.item = item
         self.template = template
-        self.mail_room = mail_room
         self.clone = None
         self.clone_pid = None
-        self.previous_content = item.content
-        self.previous_content_pid = getattr(self.previous_content, "pid", None)
 
     def redo(self):
-        # Clone the template and set as content
         if self.clone is None:
             self.clone = self.registry.clone(self.template)
             self.clone_pid = self.clone.pid
+            setattr(self.item, "content", self.clone)
         else:
             self.registry.reinsert(self.clone_pid)
-        # Build packet
-        packet = {
-            "action": "clone_and_insert",
-            "template_pid": self.template.pid,
-            "slot_pid": self.item.pid,
-            "clone_pid": self.clone_pid,
-            "previous_content_pid": self.previous_content_pid,
-        }
-        self.mail_room.send_packet(
-            sender_pid=self.template.pid,
-            target_pid=self.item.pid,
-            packet=packet
-        )
+            self.item.content = self.clone
 
     def undo(self):
-        # Build packet to restore previous content
-        packet = {
-            "action": "restore_previous_content",
-            "slot_pid": self.item.pid,
-            "clone_pid": self.clone_pid,
-            "previous_content_pid": self.previous_content_pid,
-        }
-        self.mail_room.send_packet(
-            sender_pid=self.template.pid,
-            target_pid=self.item.pid,
-            packet=packet
-        )
+        self.deregister(self.clone_pid)
+        self.item.content = None
 
-        
-class PropertyChangeCommand:
-    def __init__(self, sender_pid, target_pid, packet, mail_room):
-        self.sender_pid = sender_pid
-        self.target_pid = target_pid
-        self.packet = packet
-        self.mail_room = mail_room
-        self.undo_packet = generate_undo_packet(packet)
+class CloneComponentToEmptySlotsCommand(QUndoCommand):
+    def __init__(self, registry, template, comp, description="Autofill Template with Component"):
+        super().__init__(description)
+        self.registry = registry
+        self.template = template
+        self.comp = comp
+        # Save initial state
+        self.old_items = [row[:] for row in template.items]  # deep-ish copy
+        self.old_content = template.content
+        self.old_slot_contents = [slot.content for row in template.items for slot in row]
+        # This will be filled with new clones (only once)
+        self.new_clones = []
 
     def redo(self):
-        self.mail_room.send_packet(self.sender_pid, self.target_pid, self.packet)
+        flat_slots = [slot for row in self.template.items for slot in row]
+
+        if not self.new_clones:
+            # First execution: generate clones and assign
+            self.new_clones = []
+            for slot in flat_slots:
+                clone = self.registry.clone(self.comp)
+                slot.content = clone
+                self.new_clones.append(clone)
+        else:
+            # Redo after undo: reinsert and reassign
+            for clone, slot in zip(self.new_clones, flat_slots):
+                self.registry.reinsert(clone.pid)
+                slot.content = clone
+
+        # Set template-level CSV reference
+        self.template.content = self.comp.pid
+        print(f"CLONED: Slots are {[s.pid for row in self.template.items for s in row]}")
 
     def undo(self):
-        self.mail_room.send_packet(self.sender_pid, self.target_pid, self.undo_packet)
+        flat_slots = [slot for row in self.template.items for slot in row]
+
+        # Deregister and clear slot content
+        for slot, clone in zip(flat_slots, self.new_clones):
+            self.registry.deregister(clone.pid)
+            slot.content = None
+
+        # Restore old content per slot
+        for slot, old in zip(flat_slots, self.old_slot_contents):
+            slot.content = old
+
+        # Restore previous template-wide content ref
+        self.template.content = self.old_content
+        self.template.items = [row[:] for row in self.old_items]
 
 
 
-def generate_undo_packet(packet: dict) -> dict:
-    # Make a shallow copy so we don't mutate the original packet
-    undo_packet = packet.copy()
-    # Swap new and old values
-    undo_packet["new"], undo_packet["old"] = packet["old"], packet["new"]
-    return undo_packet
+class ChangePropertiesCommand(QUndoCommand):
+    def __init__(self, item, props, new_values, old_values,
+                 description="Change Item Property"):
+        super().__init__(description)
+        self.item = item
+        # store tuples of (item, prop_name, new, old)
+        self._commands = list(zip(props, new_values, old_values))
+
+    def undo(self):
+        for prop, new, old in self._commands:
+            # only restore if it’s out of sync
+            if getattr(self.item, prop) != old:
+                setattr(self.item, prop, old)
+
+    def redo(self):
+        for prop, new, old in self._commands:
+            # only apply if it’s out of sync
+            if getattr(self.item, prop) != new:
+                setattr(self.item, prop, new)
+
+
+        
+# class PropertyChangeCommand:
+#     def __init__(self, sender_pid, target_pid, packet, mail_room):
+#         self.sender_pid = sender_pid
+#         self.target_pid = target_pid
+#         self.packet = packet
+#         self.mail_room = mail_room
+#         self.undo_packet = generate_undo_packet(packet)
+
+#     def redo(self):
+#         self.mail_room.send_packet(self.sender_pid, self.target_pid, self.packet)
+
+#     def undo(self):
+#         self.mail_room.send_packet(self.sender_pid, self.target_pid, self.undo_packet)
+
+
+
+# def generate_undo_packet(packet: dict) -> dict:
+#     # Make a shallow copy so we don't mutate the original packet
+#     undo_packet = packet.copy()
+#     # Swap new and old values
+#     undo_packet["new"], undo_packet["old"] = packet["old"], packet["new"]
+#     return undo_packet
 

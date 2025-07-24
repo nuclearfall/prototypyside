@@ -1,7 +1,7 @@
 from PySide6.QtCore import Qt, Signal, QMimeData
 from PySide6.QtGui import QDrag, QMouseEvent
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QPushButton, QListWidget, QListWidgetItem
+    QWidget, QVBoxLayout, QListWidget, QListWidgetItem
 )
 
 

@@ -13,7 +13,7 @@ _app = QApplication(sys.argv)
 from prototypyside.services.proto_registry import RootRegistry, ProtoRegistry
 
 # ── MODELS & HELPERS ───────────────────────────────────────────────────────
-from prototypyside.models.component_elements import TextElement, ImageElement
+from prototypyside.models.component_element import TextElement, ImageElement
 from prototypyside.models.component_template import ComponentTemplate
 from prototypyside.models.layout_template import LayoutTemplate
 from prototypyside.models.layout_slot import LayoutSlot
@@ -21,10 +21,10 @@ from prototypyside.models.layout_slot import LayoutSlot
 from prototypyside.utils.units.unit_str import UnitStr
 from prototypyside.utils.units.unit_str_geometry import UnitStrGeometry
 =======
-from prototypyside.utils.unit_str import UnitStr
-from prototypyside.utils.unit_str_geometry import UnitStrGeometry
+from prototypyside.utils.units.unit_str import UnitStr
+from prototypyside.utils.units.unit_str_geometry import UnitStrGeometry
 >>>>>>> Stashed changes
-from prototypyside.utils.proto_helpers import issue_pid
+from prototypyside.utils.proto_helpers import resolve_pid
 
 # ── FIXTURES ────────────────────────────────────────────────────────────────
 @pytest.fixture(scope="module")
@@ -42,7 +42,7 @@ def registry():
     return ProtoRegistry(parent=root, root=root)
 
 # ── SHARED GEOMETRY FOR MODELS ───────────────────────────────────────────────
-usg = UnitStrGeometry(x=0.0, y=0.0, width=2.5, height=3.5, unit="in", dpi=144)
+usg = UnitStrGeometry(x=0.0, y=0.0, width=2.5, height=3.5, unit="in", dpi=300)
 
 # ── UTILITY: deep compare _ignoring_ geometry keys ───────────────────────────
 GEOM_KEYS = {
@@ -72,7 +72,7 @@ def assert_deep_equal_skip_geometry(a, b, ignore_keys=("pid","name")):
 
 # ── TEST 1: Units (no PID) ──────────────────────────────────────────────────
 UNIT_SAMPLES = [
-    ("unit_str",         UnitStr("3.5in", dpi=144)),
+    ("unit_str",         UnitStr("3.5in", dpi=300)),
     ("unit_str_geometry",UnitStrGeometry(x=0.0,y=0.0,width=0.02,height=0.02,unit="in",dpi=72)),
 ]
 
@@ -88,11 +88,11 @@ def test_units_schema_and_roundtrip(name, instance, validator):
 
 # ── TEST 2: Registry-backed models ───────────────────────────────────────────
 MODEL_FACTORIES = [
-    ("text_element",       lambda reg: TextElement(issue_pid("te"), geometry=usg)),
-    ("image_element",      lambda reg: ImageElement(issue_pid("ie"), geometry=usg)),
-    ("component_template", lambda reg: ComponentTemplate(issue_pid("ct"), geometry=usg, registry=reg)),
-    ("layout_template",    lambda reg: LayoutTemplate(issue_pid("lt"), geometry=usg, registry=reg)),
-    ("layout_slot",        lambda reg: LayoutSlot(issue_pid("ls"), geometry=usg)),
+    ("text_element",       lambda reg: TextElement(resolve_pid("te"), geometry=usg)),
+    ("image_element",      lambda reg: ImageElement(resolve_pid("ie"), geometry=usg)),
+    ("component_template", lambda reg: ComponentTemplate(resolve_pid("ct"), geometry=usg, registry=reg)),
+    ("layout_template",    lambda reg: LayoutTemplate(resolve_pid("lt"), geometry=usg, registry=reg)),
+    ("layout_slot",        lambda reg: LayoutSlot(resolve_pid("ls"), geometry=usg)),
 ]
 
 @pytest.mark.parametrize("name,factory", MODEL_FACTORIES)

@@ -1,7 +1,8 @@
-
+from typing import Type, TYPE_CHECKING
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QListWidget, QListWidgetItem
 from PySide6.QtCore import Qt
 
+from prototypyside.models.component_template import ComponentTemplate
 
 class ImportPanel(QWidget):
     """
@@ -29,25 +30,29 @@ class ImportPanel(QWidget):
         layout.addWidget(self.fields_list)
         layout.addStretch(1)
 
+
     def update_for_template(self, template):
         """
-        Update field and file views for the new template,
+        Update file views for the new template, if it's
         and connect to its change signals.
         """
         # Disconnect previous listeners
         self._disconnect_signals()
-
         self._current_template = template
-        self.update_csv_file_list(template)
-        self.update_fields(template)
 
-        # Reconnect to new template signals
-        if hasattr(template, "template_changed"):
-            template.template_changed.connect(self._on_template_changed)
+        if isinstance(template, ComponentTemplate):
+            self.update_fields(template)
 
-        for item in getattr(template, "items", []):
-            if hasattr(item, "item_changed"):
-                item.item_changed.connect(self._on_item_changed)
+            # Reconnect to new template signals
+            if hasattr(template, "template_changed"):
+                template.template_changed.connect(self._on_template_changed)
+
+            for item in getattr(template, "items", []):
+                if hasattr(item, "item_changed"):
+                    item.item_changed.connect(self._on_template_changed)
+        else:
+            self
+
 
     def _disconnect_signals(self):
         """Disconnect signals from the previous template and its elements."""
@@ -63,7 +68,7 @@ class ImportPanel(QWidget):
         for item in getattr(self._current_template, "items", []):
             try:
                 if hasattr(item, "item_changed"):
-                    item.item_changed.disconnect(self._on_item_changed)
+                    item.item_changed.disconnect(self._on_template_changed)
             except TypeError:
                 pass
 
@@ -71,45 +76,43 @@ class ImportPanel(QWidget):
 
     def _on_template_changed(self):
         """Triggered when elements are added/removed to the template."""
-        self.update_fields(self._current_template)
+        template = self._current_template
+        if isinstance(template, ComponentTemplate):
+            # Reconnect to any new items
+            data = self.merge_manager.get(template.pid)
+            for item in getattr(self._current_template, "items", []):
+                if hasattr(item, "item_changed"):
+                    item.item_changed.connect(self._on_template_changed)
 
-        # Reconnect to any new items
-        for item in getattr(self._current_template, "items", []):
-            if hasattr(item, "item_changed"):
-                item.item_changed.connect(self._on_item_changed)
+            self.update_fields(self._current_template)
 
-    def _on_item_changed(self):
-        """Triggered when an element is renamed."""
-        self.update_fields(self._current_template)
-
-    def update_csv_file_list(self, selected_template):
+    # csv files aren't always linked to templates
+    def update_csv_file_list(self):
         self.csv_list.clear()
-        current_pid = selected_template.pid
-
-        for pid, data in self.merge_manager._csv_data.items():
-            # data is now CSVData, so data.file_path is a Path
-            file_name = data.file_path.name
-            item = QListWidgetItem(f"{file_name} ({pid})")
-            if pid == current_pid:
+        for key, entry in self.merge_manager.items:
+            tname = entry.tname if entry.is_linked else ""
+            item = QListWidgetItem(f"{path}" + (f" <= {entry.tname}" if entry.is_linked else ""))
+            if entry.is_linked and self._current_template.tpid == entry.tpid:
                 item.setSelected(True)
                 item.setBackground(Qt.lightGray)
-            self.csv_list.addItem(item)
+            self.csv_list.addItem(item) 
 
 
     def update_fields(self, template):
         self.fields_list.clear()
-        data = self.merge_manager._csv_data.get(template.pid)
-        if not data:
+        if not isinstance(template, ComponentTemplate):
             return
+        entry = self.merge_manager.get(template.pid) or self.merge_manager.get(template.csv_path)
 
-        field_status = data.validate_headers()
-        for field, status in field_status.items():
-            if status == "ok":
-                label = f"{field} ✔️"
-            elif status == "missing":
-                label = f"{field} ✖️"
-            elif status == "warn":
-                label = f"{field} ⚠️"
-            else:
-                label = f"{field} ?"
-            self.fields_list.addItem(QListWidgetItem(label))
+        if entry and entry.is_linked:
+            field_status = entry.validate_headers(template)
+            for field, status in field_status.items():
+                if status == "ok":
+                    label = f"{field} ✔️"
+                elif status == "missing":
+                    label = f"{field} ✖️"
+                elif status == "warn":
+                    label = f"{field} ⚠️"
+                else:
+                    label = f"{field}"
+                self.fields_list.addItem(QListWidgetItem(label))

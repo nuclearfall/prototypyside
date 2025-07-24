@@ -35,10 +35,10 @@ class DummyLayoutTemplate:
         self.items = items
 
 # ------------------------------------------------------------
-# Bring in the helpers and PaginationManager under test
+# Bring in the helpers and PageManager under test
 # ------------------------------------------------------------
 from prototypyside.utils.pagination_helpers import get_component_mode, get_required_instances, count_items
-from prototypyside.services.pagination_manager import PaginationManager
+from prototypyside.services.page_manager import PageManager
 from prototypyside.services.merge_manager import MergeManager
 
 # ------------------------------------------------------------
@@ -76,7 +76,7 @@ def test_static_component_pagination(copies, expected_pages):
     static_t = DummyComponentTemplate("ct_static", copies=copies)
     lt = build_grid(3, 3, static_t)
 
-    pm = PaginationManager(lt, DummyRegistry(), MergeManager())
+    pm = PageManager(lt, DummyRegistry(), MergeManager())
     pm.generate()
 
     assert len(pm) == expected_pages
@@ -89,7 +89,7 @@ def test_merge_component_45_rows():
     lt = build_grid(3, 3, merge_t)
 
     mm = MergeManager()
-    pm = PaginationManager(lt, DummyRegistry(), mm)
+    pm = PageManager(lt, DummyRegistry(), mm)
     pm.generate()
 
     assert len(pm) == 5
@@ -112,7 +112,7 @@ def test_mixed_rebalancing_example():
     items = [DummyLayoutSlot(tA)] * 4 + [DummyLayoutSlot(tB)] * 2 + [DummyLayoutSlot(tC)] * 3
     lt = DummyLayoutTemplate(items)
 
-    pm = PaginationManager(lt, DummyRegistry(), MergeManager())
+    pm = PageManager(lt, DummyRegistry(), MergeManager())
     pm.generate()
 
     assert len(pm) == 6

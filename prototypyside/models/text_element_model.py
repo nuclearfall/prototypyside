@@ -8,12 +8,32 @@ from prototypyside.utils.units.unit_str_geometry import UnitStrGeometry
 
 from prototypyside.models.component_element import ComponentElement
 
-class TextElement(ComponentElement):
+class TextElement(ElementModel):
     font: str 
     content:str
-    super().__init__(self, pid, geometry)
+    geometry = None
 
 
+    def to_dict(self):
+        data = super().to_dict()  # ← include base fields
+        for attr, (key, _, to_fn, default) in self._subclass_serializable.items():
+            val = getattr(self, f"_{attr}", default)
+            data[key] = to_fn(val)
+        return data
+
+    @classmethod
+    def from_dict(cls, data: dict, registry, is_clone=False):
+        inst = super().from_dict(data, registry, is_clone)
+        inst.pid = resolve_pid("te") if is_clone else data["pid"]
+        
+        inst.font = data.get("font", QFont("Arial", 12))
+            raw = data.get(key, default)
+            # We want to set content using the content setter.
+            if hasattr(inst, f"{attr}"):
+                setattr(inst, f"{attr}", )
+            else:
+                setattr(inst, f"_{attr}", from_fn(raw))
+        return inst
 
 
     _subclass_serializable = {
@@ -48,24 +68,7 @@ class TextElement(ComponentElement):
 
     # --- End Text-specific Property Getters and Setters ---
 
-    def to_dict(self):
-        data = super().to_dict()  # ← include base fields
-        for attr, (key, _, to_fn, default) in self._subclass_serializable.items():
-            val = getattr(self, f"_{attr}", default)
-            data[key] = to_fn(val)
-        return data
 
-    @classmethod
-    def from_dict(cls, data: dict, registry, is_clone=False):
-        inst = super().from_dict(data, registry, is_clone)
-        for attr, (key, from_fn, _, default) in cls._subclass_serializable.items():
-            raw = data.get(key, default)
-            # We want to set content using the content setter.
-            if hasattr(inst, f"{attr}"):
-                setattr(inst, f"{attr}", from_fn(raw))
-            else:
-                setattr(inst, f"_{attr}", from_fn(raw))
-        return inst
 
     def paint(self, painter, option, widget=None):
         super().paint(painter, option, widget)

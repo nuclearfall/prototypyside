@@ -3,15 +3,21 @@
 import json
 import uuid
 import re
-from typing import Any, Dict, List, Optional, Union, Tuple, TYPE_CHECKING
+from typing import Any, Dict, List, Optional, Union, Tuple, Type, TYPE_CHECKING
 
 from PySide6.QtCore import QObject, Signal
-from PySide6.QtGui import QGuiApplication, QClipboard
-from PySide6.QtWidgets import QGraphicsItem
 
 from prototypyside.services.proto_factory import ProtoFactory
-from prototypyside.utils.proto_helpers import issue_pid, get_prefix, MODEL_ONLY, OBJECT_ONLY
-
+from prototypyside.utils.proto_helpers import resolve_pid, get_prefix 
+# Import your model classes
+from prototypyside.models.component_template import ComponentTemplate
+from prototypyside.models.component_element import ComponentElement
+from prototypyside.models.text_element import TextElement
+from prototypyside.models.image_element import ImageElement
+from prototypyside.models.layout_template import LayoutTemplate
+from prototypyside.models.layout_slot import LayoutSlot
+from prototypyside.utils.units.unit_str_geometry import UnitStrGeometry
+from prototypyside.views.overlays.incremental_grid import IncrementalGrid
 
 BASE_NAMES = {
     "ie": "Image Element",
@@ -31,96 +37,65 @@ class ProtoRegistry(QObject):
 
     def __init__(self, parent=None, root=None):
         super().__init__(parent)
-        self.pid = issue_pid("proto_reg")
         self._factory = ProtoFactory()
         self._is_root = isinstance(self, RootRegistry)
         self.root = self if self._is_root else root
-        self._mail_room = None
-        self._object_registry = None
         self._store: Dict[str, Any] = {}
         self._orphans: Dict[str, Any] = {}
         self._unique_names = set()
         self._name_counts = {prefix: 1 for prefix in BASE_NAMES if prefix != "ls"}
-<<<<<<< Updated upstream
-        self.set_object_registry()
-
-    def set_object_registry(self):
-        self._object_registry = ObjectRegistry()
-
-    @property
-    def mail_room(self):
-        return self._mail_room
-
-    def set_mail_room(self, mail_room):
-        self._maiL_room = mail_room
 
     def get_registry(self, pid: str):
-        prefix = get_prefix(pid)
-        if prefix in OBJECT_ONLY:
-            return self._object_registry
-        return self
+        # 1. Check self
+        if pid in self._store:
+            return self
 
-=======
-        # At registry init:
-        SCHEMA_DIR = Path(__file__).parent / "schemas"
-        _schema_cache: Dict[str, dict] = {}
-        _defaults_cache: Dict[str, dict] = {}
+        # 2. Check root (if not self)
+        root = self.root
+        if root is not self and pid in root._store:
+            return root
+
+        # 3. Check siblings (other direct children of root, not self)
+        for sibling in root._children:
+            if sibling is not self and pid in sibling._store:
+                return sibling
+
+        # 4. Not found
+        return None
+
 
     @property
     def is_root(self):
         return True if self.root == self else False
-
-    def create(self, model_cls: type, **overrides) -> object:
-        model = self._factory.create(model_cls, **overrides)
-        self._register(model)
-        return model
 
     def load(self, model_cls: type, data: dict) -> object:
         model = self._factory.load(model_cls, data)
         self._register(model)
         return model
 
-    def _register(self, model: object):
-        self._store[model.pid] = model
-
     def get(self, pid: str) -> object:
         return self._instances[pid]       
->>>>>>> Stashed changes
+
     def register(self, obj: Any):
         pid = getattr(obj, "pid", None)
         prefix = get_prefix(pid)
         if not pid or not prefix:
             raise TypeError(f"[Registry] {prefix} is invalid for pid {pid}.")
-        # Decide target registry
-        target = self.get_registry(pid)
-
-        # Use the right storage dict
-        store = getattr(target, "_store", None)
-        if store is None:
-            raise RuntimeError("[Registry] Target registry missing _store attribute.")
+        
+        # For new objects, always use self._store
+        store = self._store
 
         if pid in store:
             print(f"[Registry] Skipping duplicate: {pid}")
             return
 
-<<<<<<< Updated upstream
         # Name generation/uniqueness
         if not hasattr(obj, "name") or not self.has_unique_name(obj):
             self.generate_name(obj)
 
-        # Register with mail room if needed
-        if hasattr(self, "mail_room"):
-            self._mail_room.register_target(pid, obj)  # Or whatever the appropriate method is
-
         store[pid] = obj
-        target.object_registered.emit(pid)
+        self.object_registered.emit(pid)
 
-
-
-=======
-        target._store[pid] = obj
-        target.object_registered.emit(obj.pid)
->>>>>>> Stashed changes
 
     def find_root(self):
         parent = self.parent()
@@ -173,29 +148,21 @@ class ProtoRegistry(QObject):
         self._unique_names.add(candidate)
         return candidate
 
-    def create(self,
-               model_cls: Type,
-               overrides: Optional[dict] = None) -> Any:
+    def create(self, prefix_or_pid=None, **kwargs):
         """
-        Create a brand-new model instance.
-        Missing fields (pid, name, schema defaults) are auto-generated.
+        Create a new model instance using the factory. 
+        Ensures correct PID generation and registration.
+        If model_cls is provided, uses its name to resolve prefix if needed.
         """
-<<<<<<< Updated upstream
-        final_pid = issue_pid(prefix_or_pid)
-        # print(f"Object created with final_pid {final_pid}")
-        obj = self._factory.create(pid=final_pid, **kwargs)
-        self.register(obj)
-        print ("Obj registered")
-        return obj
-=======
-        overrides = overrides or {}
-        model = self._factory.create_model(
-            model_cls,
-            data=overrides,
-            auto_name=True
-        )
-        self._register(model)
-        return model
+        # Determine final_pid
+        final_pid = None
+        if prefix_or_pid:
+            final_pid = resolve_pid(prefix_or_pid)
+            obj = self._factory.create(pid=final_pid, **kwargs)
+            self.register(obj)
+            return obj
+        else:
+            raise ValueError(f"{self.__class__.__name__} requires a valid prefix or pid")
 
     def load_schema(model_name: str) -> dict:
         if model_name not in _schema_cache:
@@ -208,9 +175,6 @@ class ProtoRegistry(QObject):
             schema = load_schema(model_name)
             _defaults_cache[model_name] = extract_defaults(schema)
         return _defaults_cache[model_name]
-
-    def get_model_name(self, model_cls):
-        if model_cls in list(self.)
 
     def load(self,
              model_cls: Type,
@@ -226,35 +190,7 @@ class ProtoRegistry(QObject):
         )
         self._register(model)
         return model
-    # def create(self, model_cls, data: dict = None, auto_name: bool = True):
-    #     # 1) Always generate a PID if it’s not already there
-    #     if data:
-    #         data = data.copy()
-    #         if "pid" not in data
-    #             prefix = self.factory.get_prefix_from_model_cls(model_cls)
-    #             data["pid"] = self._generate_pid()
 
-    #     # 2) Merge in schema defaults (if you’ve extracted them at startup)
-    #     defaults = get_schema_defaults(model_cls.__name__)
-    #     merged = {**defaults, **data}
-
-    #     # 3) Only auto-name if no “name” at all
-    #     if auto_name and not merged.get("name"):
-    #         merged["name"] = self.generate_name(model_cls)
-
-    #     # 4) Build and register
-    #     model = model_cls.from_dict(merged)
-    #     self.register(model)
-    #     return model
-
-    def get_model_cls_from_model_cls(self, schema):
-
-
-
-    def _generate_pid(self, model_cls):
-        prefix = self.factory.get_prefix_from_model_cls
-        return issue_pid(prefix)
->>>>>>> Stashed changes
 
     def deregister(self, pid: str):
         """
@@ -270,10 +206,9 @@ class ProtoRegistry(QObject):
 
     @classmethod
     def from_dict(cls, data, registry, is_clone=False):
-<<<<<<< Updated upstream
-=======
-        logger.debug("ProtoRegistry.deserialize: input dict: %s", data)
->>>>>>> Stashed changes
+
+        # logger.debug("ProtoRegistry.deserialize: input dict: %s", data)
+
         pid = data.get("pid")
         name = data.get("name")
         print(f"Registry opening {pid}: {name}")
@@ -361,31 +296,30 @@ class ProtoRegistry(QObject):
         return vals[0] if vals else None
 
 
-class ObjectRegistry(ProtoRegistry):
-    def __init__(self):
-        super().__init__()
-        self.pid = issue_pid("obj_reg")
-        self._object_registry = None   # Or omit entirely if not needed
+    # class ObjectRegistry(ProtoRegistry):
+    #     def __init__(self):
+    #         super().__init__()
+    #         self.pid = resolve_pid("obj_reg")
+    #         self._object_registry = None   # Or omit entirely if not needed
 
-    def set_object_registry(self):
-        # Prevent recursion: ObjectRegistry does not need its own object registry
-        self._object_registry = None 
+    #     def set_object_registry(self):
+    #         # Prevent recursion: ObjectRegistry does not need its own object registry
+    #         self._object_registry = None 
 
 class RootRegistry(ProtoRegistry):
     object_registered = Signal(str)
     object_deregistered = Signal(str)
 
     def __init__(self):
-        super().__init__()
-
-        self.root = self
+        super().__init__(root=self)
+        self._is_root=True
         self._children = []
-        self.pid = issue_pid("root_reg")
+        self._store = {}
 
     def add_child(self, child: ProtoRegistry):
         self._children.append(child)
-        child.object_registered.connect(self._repeat_registered)
-        child.object_deregistered.connect(self._repeat_deregistered)
+        # child.object_registered.connect(self._repeat_registered)
+        # child.object_deregistered.connect(self._repeat_deregistered)
 
     def has(self, pid):
         if pid in self._store:

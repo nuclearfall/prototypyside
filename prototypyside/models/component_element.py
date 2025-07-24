@@ -9,9 +9,8 @@ from prototypyside.utils.qt_helpers import qrectf_to_list, list_to_qrectf, qfont
 from prototypyside.utils.units.unit_str import UnitStr
 from prototypyside.utils.units.unit_str_geometry import UnitStrGeometry
 from prototypyside.utils.ustr_helpers import geometry_with_px_rect, geometry_with_px_pos
-from prototypyside.utils.style_serialization_helpers import save_style, load_style
 from prototypyside.config import HandleType, ALIGNMENT_MAP
-from prototypyside.utils.proto_helpers import get_prefix, issue_pid
+from prototypyside.utils.proto_helpers import get_prefix, resolve_pid
 
 class ComponentElement(QGraphicsObject):
     _serializable_fields = {
@@ -30,18 +29,13 @@ class ComponentElement(QGraphicsObject):
     property_changed = Signal(str, str, str, object)   # (parent_pid, element_pid, property_name, value)
     structure_changed = Signal(str)               # (element_pid)
 
-<<<<<<< Updated upstream
     def __init__(self, pid, geometry: UnitStrGeometry, tpid = None, 
             parent: Optional[QGraphicsObject] = None, name: str = None):
-=======
-    def __init__(self, model, view, pid, geometry: UnitStrGeometry, name: str = None, 
-            template_pid = None, parent: Optional[QGraphicsObject] = None, ):
->>>>>>> Stashed changes
         super().__init__(parent)
         self._pid = pid
         self._tpid = tpid
         self._geometry = geometry
-        self._dpi = geometry.dpi
+        self._dpi = 300
         self._unit = "px"
         self._name = name
         # Set the QGraphicsItem position (scene expects px)
@@ -49,7 +43,7 @@ class ComponentElement(QGraphicsObject):
         self._color = QColor(Qt.black)
         self._bg_color = QColor(255,255,255,0)
         self._border_color = QColor(Qt.black)
-        self._border_width = UnitStr("0.5 pt", dpi=self._dpi)
+        self._border_width = UnitStr("0.0 pt", dpi=self._dpi)
         self._alignment = "Top Left"
         self._content: Optional[str] = ""
 
@@ -69,6 +63,7 @@ class ComponentElement(QGraphicsObject):
     @property
     def alignment_flags(self):
         return ALIGNMENT_MAP.get(self.alignment, Qt.AlignCenter)
+
     @property
     def dpi(self) -> int:
         return self._dpi
@@ -107,15 +102,15 @@ class ComponentElement(QGraphicsObject):
         self.update()
 
     def boundingRect(self) -> QRectF:
-        return self._geometry.to(self.unit, dpi=self.dpi).rect
+        return self._geometry.to("px", dpi=self.dpi).rect
 
     # This method is for when ONLY the rectangle (size) changes,
     # not the position.
     def setRect(self, new_rect: QRectF):
-        if self._geometry.to(self.unit, dpi=self.dpi).rect == new_rect:
+        if self._geometry.to("px", dpi=self.dpi).rect == new_rect:
             return
         self.prepareGeometryChange()
-        geometry_with_px_rect(self._geometry, new_rect)
+        self.geometry = geometry_with_px_rect(self._geometry, new_rect)
 
     def itemChange(self, change: QGraphicsItem.GraphicsItemChange, value):
         # This is called when the scene moves the item.
@@ -228,10 +223,6 @@ class ComponentElement(QGraphicsObject):
         self.item_changed.emit()
         self.update()
 
-    @property
-    def unit(self):
-        return self._unit
-
     def resize_from_handle(self, handle_type: HandleType, delta: QPointF, start_scene_rect: QRectF):
         """Resize by handle: supports all 8 directions with proper boundary constraints."""
         self.prepareGeometryChange()
@@ -317,11 +308,6 @@ class ComponentElement(QGraphicsObject):
         self.item_changed.emit()
         self.update()
 
-    def update_from_merge_data(merge_data):
-        self.content = merge_data
-        self.elment_changed.emit()
-        self.update()
-
     def paint(self, painter: QPainter, option, widget=None):
         """
         Draws the background, border, and handles of the element using the specified unit and DPI.
@@ -331,7 +317,7 @@ class ComponentElement(QGraphicsObject):
             option: QStyleOptionGraphicsItem passed by the scene.
             widget: Optional widget; unused.
         """
-        rect = self.geometry.to(self.unit, dpi=self.dpi).rect
+        rect = self.geometry.to("px", dpi=self.dpi).rect
 
         # --- Background Fill ---
         bg = self._bg_color if isinstance(self._bg_color, QColor) else QColor(self._bg_color)
@@ -342,7 +328,7 @@ class ComponentElement(QGraphicsObject):
 
         # --- Border ---
         try:
-            bw = float(self._border_width.to(self.unit, dpi=self.dpi))
+            bw = float(self._border_width.to("px", dpi=self.dpi))
         except Exception:
             bw = 1.0
 
@@ -362,11 +348,7 @@ class ComponentElement(QGraphicsObject):
     def to_dict(self) -> Dict[str, Any]:
         data = {
             "pid":      self._pid,
-<<<<<<< Updated upstream
             "geometry": self._geometry.to_dict(),
-=======
-            "geometry": self._geometry.to_dict()
->>>>>>> Stashed changes
         }
         for key, (_, to_fn, default) in self._serializable_fields.items():
             val = getattr(self, f"_{key}", default)
@@ -374,23 +356,28 @@ class ComponentElement(QGraphicsObject):
         return data
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any], registry, is_clone=False) -> "ElementBase":
+    def from_dict(cls, data: Dict[str, Any], registry, is_clone: bool = False) -> "ElementBase":
+        # 1) Reconstruct geometry
         geom = UnitStrGeometry.from_dict(data["geometry"])
-        pid = data.get("pid")
-        prefix = get_prefix(pid)
-        if is_clone:
-            pid = issue_pid(prefix)
-        obj = ImageElement if prefix == 'ie' else TextElement
-        inst = obj(pid=pid,
-                   geometry=geom,
-                   tpid=None,  # will be set below if present
-                   name=None)          # ditto
-        # now restore everything via our metadata
+
+        # 2) Handle PID and cloning
+        pid = resolve_pid(get_prefix(data.get("pid"))) if is_clone else data.get("pid")
+
+        # 3) Template determines which subclass is `cls`
+        inst = cls(
+            pid=pid,
+            geometry=geom,
+            tpid=None,
+            name=data.get("name")
+        )
+        inst._tpid = data.get("tpid", None)
+        # 4) Restore all other serializable fields
         for key, (from_fn, _, default) in cls._serializable_fields.items():
             raw = data.get(key, default)
             if raw is None:
                 continue
             setattr(inst, f"_{key}", from_fn(raw))
+        # 5) Register and return
         registry.register(inst)
         return inst
         

@@ -7,7 +7,7 @@ from prototypyside.widgets.unit_field import UnitField
 from prototypyside.config import PAGE_SIZES
 from prototypyside.utils.unit_converter import to_px
 from prototypyside.config import DISPLAY_MODE_FLAGS
-from prototypyside.services.pagination.pagination_manager import PaginationPolicyFactory
+from prototypyside.services.pagination.page_manager import PageManager, PRINT_POLICIES
 
 
 class LayoutToolbar(QWidget):
@@ -68,10 +68,10 @@ class LayoutToolbar(QWidget):
         self.copies_spin.valueChanged.connect(lambda val:
             self.number_of_copies.emit(val)
         )
-        layout.addWidget(QLabel("Rows:", self))
-        layout.addWidget(self.rows_spin)
-        layout.addWidget(QLabel("Cols:", self))
-        layout.addWidget(self.cols_spin)
+        # layout.addWidget(QLabel("Rows:", self))
+        # layout.addWidget(self.rows_spin)
+        # layout.addWidget(QLabel("Cols:", self))
+        # layout.addWidget(self.cols_spin)
         layout.addWidget(QLabel("Copies:", self))
         layout.addWidget(self.copies_spin)
 
@@ -81,27 +81,20 @@ class LayoutToolbar(QWidget):
         self.autofill_checkbox.stateChanged.connect(
             lambda state: self.autofill_changed.emit(state == Qt.Checked)
         )
-        layout.addWidget(self.autofill_checkbox)
-        self.fitting_combo = QComboBox()
-        for k, v in DISPLAY_MODE_FLAGS.items():
-            self.fitting_combo.addItem(v.get("desc"), k)
-        index = self.fitting_combo.findData("stretch")
-        if index != -1:
-            self.fitting_combo.setCurrentIndex(index)
-        layout.addWidget(self.fitting_combo)
-        self.fitting_combo.currentTextChanged.connect(self._on_display_flag_changed)
+        #layout.addWidget(self.autofill_checkbox)
+
         layout.addStretch(1)
 
 
         # ── Pagination Policy selector ─────────────────────────────
-        self.policy_combo = QComboBox(self)
-        self.policy_combo.setToolTip("Pagination mode")
-        for name in PaginationPolicyFactory._registry:
-            self.policy_combo.addItem(name)
-        layout.addWidget(self.policy_combo)
+        self.policy_combo_box = QComboBox(self)
+        self.policy_combo_box.setToolTip("Pagination mode")
+        for name in PRINT_POLICIES:
+            self.policy_combo_box.addItem(name)
+        layout.addWidget(self.policy_combo_box)
 
         # Signals
-        self.policy_combo.currentTextChanged.connect(self._emit_policy_changed)
+        self.policy_combo_box.currentTextChanged.connect(self._emit_policy_changed)
 
     def emit_grid_size_changed(self):
         rows = self.rows_spin.value()
@@ -154,4 +147,4 @@ class LayoutToolbar(QWidget):
     # Private helpers
     # ------------------------------------------------------------------
     def _emit_policy_changed(self):
-        self.pagination_policy_changed.emit(self.policy_combo.currentText())
+        self.pagination_policy_changed.emit(self.policy_combo_box.currentText())

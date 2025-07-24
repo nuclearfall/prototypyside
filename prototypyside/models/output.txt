@@ -1,0 +1,13 @@
+# Auto-generated prefix map
+PREFIXES = {
+    "c1": "ComponentElement",
+    "c2": "ComponentTemplate",
+    "c3": "ComponentTemplateModel",
+    "co": "ComponentElement",
+    "im": "ImageElement",
+    "l1": "LayoutTemplate",
+    "la": "LayoutSlot",
+    "pr": "ProtoModel",
+    "t1": "TextElement",
+    "te": "TextElement",
+}

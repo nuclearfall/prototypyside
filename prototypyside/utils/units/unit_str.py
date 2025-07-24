@@ -24,31 +24,32 @@ ROUNDING_INCREMENT = {
     "pt": Decimal("1"),
 }
 
+# class UnitStr:
+# <<<<<<< Updated upstream:prototypyside/utils/units/unit_str.py
+#     """
+#     Stores any dimension *internally* in inches, based on a given DPI.
+
+#     The constructor logic for determining the input unit is as follows:
+#     1. If `raw` is a string with a unit (e.g., "1.5in"), that unit is used.
+#     2. If `raw` is a number (e.g., 1.5) or a string without a unit, the
+#        `unit` parameter is used.
+#     3. If the `unit` parameter is also not provided, it defaults to 'px'.
+#     """
+
+#
+# =======
 class UnitStr:
-<<<<<<< Updated upstream:prototypyside/utils/units/unit_str.py
-    """
-    Stores any dimension *internally* in inches, based on a given DPI.
-
-    The constructor logic for determining the input unit is as follows:
-    1. If `raw` is a string with a unit (e.g., "1.5in"), that unit is used.
-    2. If `raw` is a number (e.g., 1.5) or a string without a unit, the
-       `unit` parameter is used.
-    3. If the `unit` parameter is also not provided, it defaults to 'px'.
-    """
-
     __items__ = ("_raw", "_value", "_unit", "_dpi", "_cache")
-=======
     value: float
     unit: str
     dpi: float
->>>>>>> Stashed changes:prototypyside/utils/unit_str.py
-
+ 
     def __init__(
         self,
         raw: Union[str, float, int, Decimal, "UnitStr"],
         unit: Optional[str] = None,
         *,
-        dpi: int = 144,
+        dpi: int = 300,
     ):
         """
         Create a new UnitStr.
@@ -101,7 +102,7 @@ class UnitStr:
         self._unit = internal_unit
 
     @classmethod
-    def from_px(cls, px: Union[int, float, Decimal], *, dpi: int = 144) -> "UnitStr":
+    def from_px(cls, px: Union[int, float, Decimal], *, dpi: int = 300) -> "UnitStr":
         """Convenience constructor to create a UnitStr from a pixel value."""
         return cls(raw=px, unit="px", dpi=dpi)
 
@@ -168,24 +169,20 @@ class UnitStr:
         rounded_val = round(value_in_unit / inc) * inc
         return UnitStr(f"{rounded_val} {self.unit}", dpi=self._dpi)
 
-@dataclass
-class UnitStr:
+    # def to_dict(self) -> dict:
+    #     # only persist the semantic bits
+    #     return {
+    #         "value": self.value,
+    #         "unit":  self.unit,
+    #     }
 
-    def to_dict(self) -> dict:
-        # only persist the semantic bits
-        return {
-            "value": self.value,
-            "unit":  self.unit,
-        }
-
-    @classmethod
-    def from_dict(cls, data: dict) -> "UnitStr":
-        # re-attach the current DPI (or pass it in from context)
-        return cls(
-            value=data["value"],
-            unit=data["unit"],
-            dpi=AppSettings.dpi,
-        )
+    # @classmethod
+    # def from_dict(cls, data: dict) -> "UnitStr":
+    #     # re-attach the current DPI (or pass it in from context)
+    #     return cls(
+    #         value=data["value"],
+    #         unit=data["unit"],
+    #     )
     def to_dict(self) -> dict:
         """JSON-friendly dump of the value in all supported units."""
         data = {u: self.to(u) for u in ("in", "mm", "cm", "pt", "px")}
@@ -197,7 +194,7 @@ class UnitStr:
         data: dict,
         *,
         unit: str = "in",
-        dpi: int = 144,
+        dpi: int = 300,
     ) -> "UnitStr":
         """Rebuild a UnitStr from a dictionary, preferring physical units."""
         unit = unit.lower().replace('"', "in")

@@ -60,7 +60,7 @@ class PaginationPolicyFactory:
     """Global registry mapping *policy name* → *policy class*.
 
     The factory enables three things:
-    1.  Loose coupling: PaginationManager & GUI request policies by string.
+    1.  Loose coupling: PageManager & GUI request policies by string.
     2.  Persistence: LayoutTemplate stores the selected policy name & params.
     3.  Extensibility: plugins can register additional strategies at runtime.
     """
@@ -182,7 +182,7 @@ class TileOversizeComponent(PaginationPolicy):
     *Overlap* (px) – additional shared area between adjacent tiles (for glue).
     """
 
-    DEFAULT_PARAMS = {"bleed": 0, "overlap": 0, "order": "row-major"}
+    DEFAULT_PARAMS = {"bleed": 0, "overlap": 30, "order": "row-major"}
 
     # ------------------------------------------------------------------
     def __init__(self, **params):
@@ -202,18 +202,18 @@ class TileOversizeComponent(PaginationPolicy):
         if template is None:
             raise ValueError("Slot does not reference a ComponentTemplate")
 
-        page_w = getattr(layout, "page_width_px", None) or layout.width_px  # type: ignore[attr-defined]
-        page_h = getattr(layout, "page_height_px", None) or layout.height_px  # type: ignore[attr-defined]
-        comp_w = getattr(template, "width_px", None) or template.width  # type: ignore[attr-defined]
-        comp_h = getattr(template, "height_px", None) or template.height  # type: ignore[attr-defined]
+        page_w = getattr(layout, "page_width_px", None) or layout.geometry.to("px", dpi=300).size.width()  # type: ignore[attr-defined]
+        page_h = getattr(layout, "page_height_px", None) or layout.geometry.to("px", dpi=300).size.height()  # type: ignore[attr-defined]
+        comp_w = getattr(template, "width_px", None) or template.geometry.to("px", dpi=300).size.width()  # type: ignore[attr-defined]
+        comp_h = getattr(template, "height_px", None) or .geometry.to("px", dpi=300).size.height() # type: ignore[attr-defined]
 
         # 2. Determine tiling grid
         from math import ceil
         cols = ceil(comp_w / page_w)
         rows = ceil(comp_h / page_h)
 
-        bleed = float(self.params["bleed"])
-        overlap = float(self.params["overlap"])
+        bleed = float(self.params.get("bleed", 0))
+        overlap = float(self.params.get("overlap"))
 
         # 3. Precompute ComponentInstances for each tile
         merge_mgr = datasets.get(template.pid)  # may be None (static)
@@ -239,11 +239,7 @@ class TileOversizeComponent(PaginationPolicy):
                 setattr(instance, "viewport", viewport)
 
                 self._tiles.append((item, instance))
-
-        # Optional order: column-major or snake could be implemented later
-        if self.params["order"] == "column-major":
-            self._tiles.sort(key=lambda tpl: (tpl[1].viewport["x"], tpl[1].viewport["y"]))  # type: ignore[attr-defined]
-
+                
     def next_page(self) -> Optional[List[Placement]]:  # noqa: D401
         if self._cursor >= len(self._tiles):
             return None
@@ -623,6 +619,6 @@ PaginationPolicyFactory.register("StaticCluster", StaticCluster)
 #         …  # hydrate other fields
 #         return inst
 #
-# PaginationManager would then do:
+# PageManager would then do:
 #     policy = PaginationPolicyFactory.get(layout.pagination_policy, **layout.pagination_params)
 #     policy.prepare(layout, datasets)

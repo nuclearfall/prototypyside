@@ -12,7 +12,7 @@ from prototypyside.services.proto_registry import RootRegistry, ProtoRegistry
 from prototypyside.models.component_template import ComponentTemplate
 from prototypyside.models.layout_template import LayoutTemplate
 from prototypyside.utils.units.unit_str_geometry import UnitStrGeometry
-from prototypyside.utils.proto_helpers import issue_pid
+from prototypyside.utils.proto_helpers import resolve_pid
 
 # Shared geometry for tests
 usg = UnitStrGeometry(x=0, y=0, width=4, height=2, unit="in", dpi=300)
@@ -56,7 +56,7 @@ def registry():
 
 
 def test_component_template_clone(registry):
-    orig = ComponentTemplate(issue_pid("ct"), geometry=usg, registry=registry)
+    orig = ComponentTemplate(resolve_pid("ct"), geometry=usg, registry=registry)
     child = registry.create("te", geometry=usg)
     orig.items.append(child)
 
@@ -79,7 +79,7 @@ def test_component_template_clone(registry):
 
 
 def test_layout_template_clone(registry):
-    orig = LayoutTemplate(issue_pid("lt"), geometry=usg, registry=registry)
+    orig = LayoutTemplate(resolve_pid("lt"), geometry=usg, registry=registry)
     slot = registry.create("ls", geometry=usg)
     orig.items = [[slot]]
 

@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
     QGraphicsSceneDragDropEvent,
 )
 
-from prototypyside.models.component_elements import ComponentElement
+from prototypyside.models.component_element import ComponentElement
 from prototypyside.utils.units.unit_str_geometry import UnitStrGeometry
 
 class ImageElement(ComponentElement):
@@ -54,8 +54,6 @@ class ImageElement(ComponentElement):
         self.item_changed.emit()
         self.update()
 
-
-
     # --- Image-specific Property Getters and Setters ---
     @property
     def keep_aspect(self) -> bool:
@@ -76,8 +74,8 @@ class ImageElement(ComponentElement):
         Always draws the border *after* the content so it sits on top.
         """
         # 1) figure out our rect & size
-        rect = self.geometry.to(self.unit, dpi=self.dpi).rect
-        size = self.geometry.to(self.unit, dpi=self.dpi).size
+        rect = self.geometry.to("px", dpi=self.dpi).rect
+        size = self.geometry.to("px", dpi=self.dpi).size
         w = size.width()
         h = size.height()
         # 2) draw the image *first*
@@ -127,6 +125,9 @@ class ImageElement(ComponentElement):
                 setattr(inst, f"{attr}", from_fn(raw))
             else:
                 setattr(inst, f"_{attr}", from_fn(raw))
+        content = inst.content
+        inst.content = None
+        inst.content = content
         return inst
 
     def dragEnterEvent(self, event: QGraphicsSceneDragDropEvent):

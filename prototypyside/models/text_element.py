@@ -22,10 +22,9 @@ from prototypyside.utils.qt_helpers import qfont_from_string
 from prototypyside.utils.units.unit_str import UnitStr
 from prototypyside.utils.units.unit_str_geometry import UnitStrGeometry
 from prototypyside.utils.ustr_helpers import geometry_with_px_rect, geometry_with_px_pos
-from prototypyside.utils.style_serialization_helpers import save_style, load_style
 from prototypyside.config import HandleType, ALIGNMENT_MAP
-from prototypyside.utils.proto_helpers import get_prefix, issue_pid
-from prototypyside.models.component_elements import ComponentElement
+from prototypyside.utils.proto_helpers import get_prefix, resolve_pid
+from prototypyside.models.component_element import ComponentElement
 
 
 class TextElement(ComponentElement):
@@ -71,6 +70,7 @@ class TextElement(ComponentElement):
     @classmethod
     def from_dict(cls, data: dict, registry, is_clone=False):
         inst = super().from_dict(data, registry, is_clone)
+        inst.pid = resolve_pid("te") if is_clone else data["pid"]
         for attr, (key, from_fn, _, default) in cls._subclass_serializable.items():
             raw = data.get(key, default)
             # We want to set content using the content setter.
@@ -78,12 +78,13 @@ class TextElement(ComponentElement):
                 setattr(inst, f"{attr}", from_fn(raw))
             else:
                 setattr(inst, f"_{attr}", from_fn(raw))
+
         return inst
 
     def paint(self, painter, option, widget=None):
         super().paint(painter, option, widget)
 
-        rect = self.geometry.to(self.unit, dpi=self.dpi).rect
+        rect = self.geometry.to("px", dpi=self.dpi).rect
         painter.save()
 
         # 1) build the document

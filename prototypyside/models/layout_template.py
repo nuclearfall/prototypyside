@@ -1,165 +1,97 @@
 from dataclasses import dataclass, field
-from typing import List, Optional, Dict, Tuple, Any, TYPE_CHECKING
+from typing import List, Optional, Dict, Tuple, Any, Union, TYPE_CHECKING
 from enum import Enum, auto
 import json
+
 from PySide6.QtWidgets import QGraphicsObject, QGraphicsItem, QStyleOptionGraphicsItem
 from PySide6.QtCore import Qt, QRectF, QPointF, QSizeF, QMarginsF, Signal
-<<<<<<< Updated upstream
-from PySide6.QtGui import QPainter, QPixmap, QColor, QImage, QPen, QBrush,  QPageLayout, QPageSize
-from prototypyside.models.component_template import ComponentTemplate
-from prototypyside.models.component_elements import ImageElement
-from prototypyside.utils.unit_converter import to_px, page_in_px, page_in_units, compute_scale_factor
-from prototypyside.utils.units.unit_str import UnitStr
-from prototypyside.utils.units.unit_str_geometry import UnitStrGeometry
-from prototypyside.models.layout_slot import LayoutSlot
-=======
 from PySide6.QtGui import QPainter, QPixmap, QColor, QImage, QPen, QBrush,  QPageLayout
 
 from prototypyside.models.layout_slot import LayoutSlot
-from prototypyside.utils.unit_str import UnitStr
-from prototypyside.utils.unit_str_geometry import UnitStrGeometry
->>>>>>> Stashed changes
+from prototypyside.utils.units.unit_str import UnitStr
+from prototypyside.utils.units.unit_str_geometry import UnitStrGeometry
 from prototypyside.utils.ustr_helpers import geometry_with_px_rect, geometry_with_px_pos
 from prototypyside.config import PAGE_SIZES, DISPLAY_MODE_FLAGS, PAGE_UNITS
-from prototypyside.utils.proto_helpers import get_prefix, issue_pid
+from prototypyside.utils.proto_helpers import get_prefix, resolve_pid
+from prototypyside.services.pagination.page_manager import PRINT_POLICIES, PAGE_SIZES
+from prototypyside.models.component_template import ComponentTemplate
 if TYPE_CHECKING:
     from prototypyside.services.proto_registry import ProtoRegistry
-    from prototypyside.models.component_template import ComponentTemplate
 
 
 
-<<<<<<< Updated upstream
 
-=======
->>>>>>> Stashed changes
 class LayoutTemplate(QGraphicsObject):
     template_changed = Signal()
     marginsChanged = Signal()
     spacingChanged = Signal()
     orientationChanged = Signal()
-    export_quantity: Optional[int] = None     # Override for copies per item
-    def __init__(self, pid, parent=None, registry = None,
-                page_size = "letter", geometry=None,
-                pagination_policy="InterleaveDatasets",
-                rows=3, columns=3, dpi=144,
-                name=None, margin_top=UnitStr("0.5in"), margin_bottom = UnitStr("0.5in"),
-                margin_left = UnitStr("0.5in"), margin_right = UnitStr("0.5in"),
-                spacing_x = UnitStr("0.0in"), spacing_y  = UnitStr("0.0in"), orientation=False):
+    def __init__(self, pid, registry, name=None, pagination_policy='Letter: 3x3 Standard Cards (2.5"x3.5")', parent=None):
         super().__init__(parent)
         self._pid = pid
-        self._name = name
-        self._content = []
-        self._page_size = page_size
         self._registry = registry
-        self._geometry = PAGE_SIZES[page_size]["geometry"] or UnitStrGeometry(width="8.5in", height="11in")
-        self._dpi = 144
-        self._unit = "px"
-        self.pagination_policy = pagination_policy
-        self._rows = rows
-        self._columns = columns
-        self._margins = [UnitStr(m, dpi=self._dpi) for m in (margin_top, margin_bottom, margin_left, margin_right)]
-        self._spacing = [UnitStr(s, dpi=self._dpi) for s in (spacing_x, spacing_y)]
-        self._orientation = orientation
-<<<<<<< Updated upstream
-        self.items = self.initGrid(self._registry, rows=self._rows, columns=self._columns)
+        self._name = name
+        self._pagination_policy = pagination_policy
+        print(f"Policy is {self._pagination_policy}, DETAILS:\n{PRINT_POLICIES.get(self._pagination_policy)}")
+        #### All of these are set from PRINT_POLICIES
+        pol = PRINT_POLICIES.get(pagination_policy)
+        self._rows = pol.get("rows")
+        self._columns = pol.get("columns")
+        self._page_size = pol.get("page_size")
+        self._geometry = PAGE_SIZES.get(self._page_size)
+        self._whitespace = pol.get("whitespace")# ordered [top, bottom, left, right, spacing_x, spacing_y]
+        self._orientation = pol.get("orientation")
+        self.lock_at: int = pol.get("lock_at") # The number of components a given policy will accept.
+        ####
 
-    @property
-    def content(self):
-        return self.get_template()
-=======
+        self._dpi = 300
+        self._unit = "px"
+        self._content = None
         self.items = []
         self.setAcceptHoverEvents(True)
->>>>>>> Stashed changes
 
-    def add_template(self, template):
-        self._content.append(template)
-        return template
+        self.set_policy_props(pagination_policy)
 
-    def remove_template(
-        self,
-        index:        Optional[int]    = None,
-        tpid: Optional[str]    = None,
-        first:        bool             = False,
-        last:         bool             = True
-    ) -> Optional["ComponentTemplate"]:
-        """
-        Remove and return an item from self.content by:
-          1. tpid – if provided, pop the first item whose .pid matches
-          2. index        – if provided and in‐range
-          3. first        – if True, pop at 0
-          4. last         – if True (default), pop at -1
+    def set_policy_props(self, policy):
+        if policy in PRINT_POLICIES:
+            for prop, value in PRINT_POLICIES.get(policy).items():
+                fprop = f"_{prop}"
+                if hasattr(self, prop):
+                    setattr(self, prop, value)
 
-        Returns the removed item, or None if no match / empty content.
-        """
-        # nothing to remove
-        if not self._content:
-            return None
+    @property
+    def pagination_policy(self):
+        return self._pagination_policy
+    
+    @pagination_policy.setter
+    def pagination_policy(self, pol):
+        if pol != self._pagination_policy and pol in PRINT_POLICIES:
+            self._pagination_policy = pol
+            self._rows = pol.get("rows")
+            self._columns = pol.get("columns")
+            self._geometry = pol.get("geometry")
+            self._whitespace = pol.get("whitespace")# ordered [top, bottom, left, right, spacing_x, spacing_y]
+            self._orientation = pol.get("orientation")
+            self.lock_at: int = pol.get("lock_at") # The number of components a given policy will accept.
+            self.updateGrid()
 
-        # 1) PID lookup
-        if tpid is not None:
-            for i, item in enumerate(self._content):
-                if getattr(item, "pid", None) == tpid:
-                    return self.content.pop(i)
-            return None
+    @property
+    def name(self):
+        return self._name
 
-        # 2) Index lookup
-        if index is not None:
-            if 0 <= index < len(self._content):
-                return self.content.pop(index)
-            return None
+    @name.setter
+    def name(self, value):
+        if value != self._name:
+            self._name = value
+    
+    @property
+    def content(self):
+        return self._content
 
-        # 3) First?
-        if first:
-            return self._content.pop(0)
-
-        # 4) Last?
-        if last:
-            return self._content.pop(-1)
-
-        return None
-
-    def get_template(
-        self,
-        index: Optional[int] = None,
-        pid:   Optional[str] = None,
-        first: bool = False,
-        last:  bool = True
-    ) -> Optional["ComponentTemplate"]:
-        """
-        Retrieve an item from self.content by:
-          1. pid  — if provided, return the first item whose `.pid` matches
-          2. index — if provided and in‐range
-          3. first — if True, returns self.content[0]
-          4. last  — if True (default), returns self.content[-1]
-
-        Returns None if no match or content is empty.
-        """
-        # nothing to do if empty
-        if not self._content:
-            return None
-
-        # 1) PID lookup
-        if pid is not None:
-            for item in self._content:
-                if getattr(item, "pid", None) == pid:
-                    return item
-            return None
-
-        # 2) Index lookup
-        if index is not None:
-            if 0 <= index < len(self._content):
-                return self._content[index]
-            return None
-
-        # 3) First?
-        if first:
-            return self._content[0]
-
-        # 4) Last?
-        if last:
-            return self._content[-1]
-
-        return None
+    @content.setter
+    def content(self, new):
+        if new != self._content:
+            self._content = new
 
 
     def geometry_to_page_size(self, value, orientation):
@@ -201,14 +133,6 @@ class LayoutTemplate(QGraphicsObject):
         super().setPos(self._geometry.to(self.unit, dpi=self.dpi).pos)
         self.blockSignals(False)
 
-    # def geometry(self, new_geom: UnitStrGeometry):
-    #     if self._geometry == new_geom:
-    #         return
-    #     self.prepareGeometryChange()
-    #     self._geometry = new_geom
-    #     super().setPos(self._geometry.to(self.unit, dpi=self.dpi).pos)
-
-
     def boundingRect(self) -> QRectF: 
         return self._geometry.to(self.unit, dpi=self.dpi).rect
 
@@ -244,7 +168,6 @@ class LayoutTemplate(QGraphicsObject):
     def pid(self, value):
         self._pid = value
         self.template_changed.emit()
-        self.setGrid(self._registry, self.rows, self.columns)
 
     @property
     def rows(self) -> int: return self._rows
@@ -296,50 +219,88 @@ class LayoutTemplate(QGraphicsObject):
 
             self.template_changed.emit()
 
+    @property
+    def image(self) -> QImage:
+        if not hasattr(self, "_cache_image") or self._cache_image is None:
+            self._cache_image = self._render_to_image(dpi=self.dpi, unit=self.unit)
+        return self._cache_image
+
+    def _render_to_image(self, dpi=300, unit="in") -> QImage:
+        """
+        Renders the entire layout page to a single QImage by compositing pre-rendered slot images.
+        
+        Assumes each slot has a .geometry and .image property.
+        """
+
+        # Calculate full page size in pixels
+        page_rect = self.geometry.to("px", dpi=dpi).rect
+        width = max(1, int(page_rect.width()))
+        height = max(1, int(page_rect.height()))
+
+        image = QImage(width, height, QImage.Format_ARGB32_Premultiplied)
+        image.setDotsPerInch(dpi)
+        image.fill(Qt.white)  # or Qt.transparent if preferred
+
+        painter = QPainter(image)
+        painter.setRenderHints(QPainter.Antialiasing | QPainter.SmoothPixmapTransform)
+
+        for row in self.items:
+            for slot in row:
+                if slot.content:
+                    slot_img = slot.image  # Cached slot image
+                    if isinstance(slot_img, QImage):
+                        target_rect = slot.geometry.to("px", dpi=dpi).rect
+                        painter.drawImage(target_rect, slot_img)
+
+        painter.end()
+        return image
+
 
     # ---- Margins and Grid Spacing ---- #
     @property
-    def margins(self) -> List[UnitStr]: return self._margins
+    def margins(self) -> List[UnitStr]: return self._whitespace[:4]
 
     @margins.setter
     def margins(self, new_margins: List[UnitStr]):
-        self._margins = new_margins
+        if new_margins != self._whitespace[:4] and len(new_margins) == 4:
+            spacing = self._whitespace[4:]
+            self._whitespace = new_margins + spacing
         self.updateGrid()
         self.marginsChanged.emit()
 
     @property
     def margin_top(self):
-        return self._margins[0]
+        return self._whitespace[0]
 
     @margin_top.setter
     def margin_top(self, ustr: UnitStr):
-        self._margins[0] = ustr
+        self._whitespace[0] = ustr
         self.updateGrid()
         self.marginsChanged.emit()
 
     @property
     def margin_bottom(self):
-        return self._margins[1]
+        return self._whitespace[1]
 
     @margin_bottom.setter 
     def margin_bottom(self, ustr: UnitStr):
-        self._margins[1] = ustr
+        self._whitespace[1] = ustr
         self.updateGrid()
         self.marginsChanged.emit()
 
     @property
     def margin_left(self):
-        return self._margins[2]
+        return self._whitespace[2]
 
     @margin_left.setter
     def margin_left(self, ustr: UnitStr):
-        self._margins[2] = ustr
+        self._whitespace[2] = ustr
         self.updateGrid()
         self.marginsChanged.emit()
 
     @property
     def margin_right(self):
-        return self._margins[3]
+        return self._whitespace[3]
 
     @margin_right.setter
     def margin_right(self, ustr: UnitStr):
@@ -349,53 +310,78 @@ class LayoutTemplate(QGraphicsObject):
 
     @property
     def spacing_x(self):
-        return self._spacing[0]
+        return self._whitespace[4]
 
     @spacing_x.setter
     def spacing_x(self, ustr: UnitStr):
-        self._spacing[0] = ustr
+        self._whitespace[4] = ustr
         self.updateGrid()
         self.spacingChanged.emit()
 
     @property
     def spacing_y(self):
-        return self._spacing[1]
+        return self._whitespace[5]
 
     @spacing_y.setter
     def spacing_y(self, ustr: UnitStr):
-        self._spacing[1] = ustr
+        self._whitespace[5] = ustr
         self.updateGrid()
         self.spacingChanged.emit()
 
-    def get_whitespace(self):
-        return [w.to(self.unit, dpi=self.dpi) for w in self._margins + self._spacing]
+    @property
+    def whitespace(self) -> List[UnitStr]:
+        return self._whitespace
+
+    @whitespace.setter
+    def whitespace(self, value: Union[List[Any], Dict[str, Any]]):
+        """
+        Flexible setter:
+        - Accepts a full list of 6 values
+        - OR a dictionary like {'margin_top': '0.25in', 'spacing_x': '3mm'}
+        """
+        label_to_index = {
+            "margin_top": 0,
+            "margin_bottom": 1,
+            "margin_left": 2,
+            "margin_right": 3,
+            "spacing_x": 4,
+            "spacing_y": 5,
+        }
+
+        changed = False
+        if isinstance(value, (list, tuple)) and len(value) == 6:
+            new_ws = []
+            for old, new in zip(self._whitespace, value):
+                if new is None:
+                    new_ws.append(old)
+                else:
+                    new_ws.append(UnitStr(new, dpi=self.dpi))
+            if new_ws != self._whitespace:
+                self._whitespace = new_ws
+                changed = True
+
+        elif isinstance(value, dict):
+            for key, index in label_to_index.items():
+                if key in value:
+                    new_val = UnitStr(value[key], dpi=self.dpi)
+                    if self._whitespace[index] != new_val:
+                        self._whitespace[index] = new_val
+                        changed = True
+        if changed:
+            self.updateGrid()
+            self.marginsChanged.emit()
+
+
+    def whitespace_in_units(self, unit="px", dpi=300):
+        return [v.to(unit, dpi=dpi) for v in self._whitespace]
 
     def invalidate_cache(self):
         for row in self.items:
             for slot in row:
                 slot.invalidate_cache()
 
-    def initGrid(self, registry=None, rows=None, columns=None):
-        registry = registry or self.registry
-        # fall back to instance defaults only if caller passed None
-        if rows is None:
-            rows = self._rows
-        if columns is None:
-            columns = self._columns
-
-        # build a list of `rows` lists, each containing `columns` LayoutSlot instances
-        self.items = [
-            [
-                registry.create(
-                    'ls',        # your LayoutSlot proto-prefix
-                    parent=self
-                )
-                for c in range(columns)
-            ]
-            for r in range(rows)
-        ]
-
-        return self.items
+    def slots(self) -> List[LayoutSlot]:
+        return [slot for row in self.items for slot in row]
 
     ### Grid manipulation ###
     def setGrid(self, registry=None, rows=None, columns=None):
@@ -404,7 +390,9 @@ class LayoutTemplate(QGraphicsObject):
         Handles creation, updating, and deregistration of items as needed.
         """
         # -- 1. Determine new grid size --
-        registry = registry or self._regsitry
+        rows = rows or self.rows
+        columns = columns or self.columns
+        registry = registry or self._registry
         if not self._registry:
             self._registry = registry
         current_rows = len(self.items) if self.items else 0
@@ -414,19 +402,13 @@ class LayoutTemplate(QGraphicsObject):
         # print(f"[LAYOUT_TEMPLATE] From setGrid: Setting grid to rows and columns: {target_rows},{target_cols}")
         if target_rows < 1 or target_cols < 1:
             return  # Nothing to do
-        # Precompute the slot dimensions and positions for the new grid
-<<<<<<< Updated upstream
-        t, b, l, r, sx, sy = self.get_whitespace()  # px
-        w, h = self._geometry.to(self.unit, dpi=self.dpi).size.width(), self._geometry.to(self.unit, dpi=self.dpi).size.height()
-=======
-        t, b, l, r, sx, sy = self.get_whitespace(unit='in')  
-        pg = self._geometry.to("in", dpi=self.dpi)
-        w, h = pg.size.width(), pg.size.height() 
->>>>>>> Stashed changes
+        t, b, l, r, sx, sy = self.whitespace_in_units(unit="in")
+        w, h = self._geometry.inch.size.width(), self._geometry.inch.size.height()
+
         avail_width = w - l - r - (target_cols - 1) * sx
         avail_height = h - t - b - (target_rows - 1) * sy
-        item_width_px = max(avail_width / target_cols, 0)
-        item_height_px = max(avail_height / target_rows, 0)
+        item_width = max(avail_width / target_cols, 0)
+        item_height = max(avail_height / target_rows, 0)
         # -- 2. Shrink rows if needed --
         while len(self.items) > target_rows:
             row = self.items.pop()
@@ -455,31 +437,23 @@ class LayoutTemplate(QGraphicsObject):
             for c in range(target_cols):
                 item = self.items[r][c]
                 # Calculate position for this slot
-                x_px = l + c * (sx + item_width_px)
-                y_px = t + r * (sy + item_height_px)
-                rect = QRectF(0, 0, item_width_px, item_height_px)
-                pos = QPointF(x_px, y_px)
+                x = l + c * (sx + item_width)
+                y = t + r * (sy + item_height)
+                rect = QRectF(0, 0, item_width, item_height)
+                pos = QPointF(x, y)
                 if item is not None:
-                    # Update existing item
-<<<<<<< Updated upstream
-                    item.geometry = UnitStrGeometry(rect=rect, pos=pos, dpi=self._dpi)
-=======
                     item.geometry = UnitStrGeometry(width=item_width, height=item_height, x=x, y=y, unit="in", dpi=self._dpi)
->>>>>>> Stashed changes
                     item.update()
                 else:
                     # Create new item and add to scene
                     item = registry.create(
                         "ls",
-<<<<<<< Updated upstream
-                        geometry=UnitStrGeometry.from_px(rect=rect, pos=pos, dpi=self._dpi),
-=======
                         geometry=UnitStrGeometry(width=item_width, height=item_height, x=x, y=y, unit="in", dpi=self._dpi),
->>>>>>> Stashed changes
                         row=r,
                         column=c,
-                        parent=self,
+                        parent=self
                     )
+                    item.setParentItem(self)
                     print(f"USG.rect for Slot {r}, {c} in pixels {item.geometry.px.rect}")
                     self.items[r][c] = item
                     if item.scene() is None:
@@ -499,79 +473,39 @@ class LayoutTemplate(QGraphicsObject):
         Does NOT create or remove slots; only updates existing ones.
         """
         # 1. Gather pixel-values for margins & spacing
-        top_px, bottom_px, left_px, right_px, spacing_x_px, spacing_y_px = self.get_whitespace()
-        page_rect = self.geometry.to(self.unit, dpi=self.dpi).rect
+        top, bottom, left, right, spacing_x, spacing_y = self.whitespace_in_units(unit="in")
+        page_rect = self.geometry.inch.rect
         total_w, total_h = page_rect.width(), page_rect.height()
 
         # 2. Compute available area and per-cell size
-        avail_w = total_w - left_px - right_px - (self._columns - 1) * spacing_x_px
-        avail_h = total_h - top_px - bottom_px - (self._rows    - 1) * spacing_y_px
+        avail_w = total_w - left - right - (self._columns - 1) * spacing_x
+        avail_h = total_h - top - bottom - (self._rows    - 1) * spacing_y
         cell_w = max(avail_w / self.columns,  0)
         cell_h = max(avail_h / self.rows,     0)
 
         # 3. Loop through each slot and assign its new UnitStrGeometry
         for r, row in enumerate(self.items):
             for c, slot in enumerate(row):
-                x = left_px + c * (cell_w + spacing_x_px)
-                y = top_px  + r * (cell_h + spacing_y_px)
+                x = left + c * (cell_w + spacing_x)
+                y = top  + r * (cell_h + spacing_y)
 
                 # rect is local to the slot; pos is the offset on the page
-                rect = QRectF(0, 0, cell_w, cell_h)
-                pos  = QPointF(x, y)
-                new_geom = UnitStrGeometry.from_px(rect=rect, pos=pos, dpi=self.dpi)
-
+                new_geom = UnitStrGeometry(width=cell_w, height=cell_h, x=x, y=y, unit="in", dpi=self._dpi)
                 # apply it
                 slot.geometry = new_geom
                 slot.row      = r
                 slot.column   = c
                 slot.invalidate_cache()   # so that its rendered thumbnail will be rebuilt
-<<<<<<< Updated upstream
 
-=======
                 if slot.scene() is None and self.scene() is not None:
+                    slot.setParentItem(self)
                     self.scene().addItem(slot)
                 print(f"From updateGrid, slot {r},{c}: {new_geom}\nslot is in scene? {True if slot.scene() else False}")
->>>>>>> Stashed changes
-        # 4. Redraw the page and notify listeners
         self.update()
         self.template_changed.emit()
 
-    def compute_item_size(self, rows, cols):
-        """
-        Returns item_width, item_height in **pixels** for the given grid position.
-        Slot sizes are based on page size, margins, spacing, and grid size.
-        """
-        t, b, l, r, sx, sy = self.get_whitespace()  # Each is a float (pixels)
-        w, h = self._geometry.to(self.unit, dpi=self.dpi).size.width(), self._geometry.to(self.unit, dpi=self.dpi).size.height()
-
-        cols = self._columns
-        rows = self._rows
-
-        if cols < 1 or rows < 1:
-            return 0, 0
-
-        avail_width = w - l - r - (cols - 1) * sx
-        avail_height = h - t - b - (rows - 1) * sy
-
-        item_width_px = max(avail_width / cols, 0)
-        item_height_px = max(avail_height / rows, 0)
-
-        # Debug
-        # print(f"compute_item_size: avail_width={avail_width}, cols={cols}, item_width_px={item_width_px}")
-        # print(f"compute_item_size: avail_height={avail_height}, rows={rows}, item_height_px={item_height_px}")
-
-        return item_width_px, item_height_px
-
-    def compute_item_position(self, row, col, total_rows, total_cols):
-        t, b, l, r, sx, sy = self.get_whitespace()
-        item_w, item_h = self.compute_item_size(row, col, total_rows, total_cols)
-        return (
-            l + col * (item_w + sx),
-            t + row * (item_h + sy)
-        )
-
-    def get_margins(self):
-        return [m.to(self.unit, dpi=self.dpi) for m in self._margins]
+    def get_whitespace(self):
+        return [m.to(self.unit, dpi=self.dpi) for m in self._whitespace]
         
     def get_item_position(self, row: int, col: int) -> tuple[float, float]:
         item = self.items[row][col]
@@ -604,18 +538,19 @@ class LayoutTemplate(QGraphicsObject):
 
 
     def to_dict(self) -> Dict:
-        # items = [[item.to_dict() for item in row] for row in self.items]
-        content = []
-        if self._content:
-            for c in self._content:
-                if isinstance(c, ComponentTemplate):
-                    content.append(c.to_dict())
+        print(f'Serialzing results in content {self.content}')
+        items = []
+        for row in self.items:
+            row_list = []
+            for item in row:
+                row_list.append(item.to_dict())
+            items.append(row_list)
         return {
             "pid": self._pid,
             "name": self._name,
             "page_size": self._page_size,
             "geometry": self._geometry.to_dict(),
-            "pagination_policy": self.pagination_policy,
+            "pagination_policy": self._pagination_policy,
             "rows": self._rows,
             "columns": self._columns,
             "margin_top": self.margin_top.to_dict(),
@@ -625,73 +560,61 @@ class LayoutTemplate(QGraphicsObject):
             "spacing_x": self.spacing_x.to_dict(),
             "spacing_y": self.spacing_y.to_dict(),
             "orientation": self._orientation,
-<<<<<<< Updated upstream
-=======
-            # "dpi": self._dpi,
->>>>>>> Stashed changes
-            "content": content,
-            #"items": items,
+            "content": self._content,
+            "items": items,
         }
-
 
     @classmethod
     def from_dict(
         cls,
         data: dict,
         registry: "ProtoRegistry",
-        is_clone: bool = False
+        is_clone: bool = False,
     ) -> "LayoutTemplate":
         """
         Hydrate or clone a LayoutTemplate via the registry.
         """
-        # 1) Hydrate the content (ComponentTemplates)
-        registry = registry or self._registry
-        content: list[ComponentTemplate] = []
-        # print (f"Attempting to rehydrate contents {data.get("content")}")
-        for cdata in data.get("content", []):
-            comp = registry.from_dict(
-                cdata,
-                registry=registry,
-                is_clone=is_clone
-            )
-            content.append(comp)
-            
-        # 2) Determine PID (new one for clones)
-        pid = issue_pid("pg") if is_clone else data["pid"]
-        # 3) Build the LayoutTemplate instance
-        geom = UnitStrGeometry.from_dict(data["geometry"])
+        pid = resolve_pid("pg") if is_clone else data["pid"]
+
         inst = cls(
             pid=pid,
-            page_size=data.get("page_size", "custom"),
-            geometry=geom,
             registry=registry,
-            pagination_policy=data.get("pagination_policy", "InterleaveDatasets"),
-            rows=data.get("rows", 3),
-            columns=data.get("columns", 3),
-            margin_top=UnitStr.from_dict(data.get("margin_top", "0.5in")),
-            margin_bottom=UnitStr.from_dict(data.get("margin_bottom", "0.5in")),
-            margin_left=UnitStr.from_dict(data.get("margin_left", "0.5in")),
-            margin_right=UnitStr.from_dict(data.get("margin_right", "0.5in")),
-            spacing_x=UnitStr.from_dict(data.get("spacing_x", "0.0in")),
-            spacing_y=UnitStr.from_dict(data.get("spacing_y", "0.0in")),
-            orientation=data.get("orientation", False),
-            name=data.get("name"),
+            pagination_policy=data.get("pagination_policy"),
+            name=data.get("name")
         )
 
-        # 4) Wire up registry, set content, register self
-        if is_clone:
-            inst._name = data.get("name")
-        inst._registry = registry
-<<<<<<< Updated upstream
-        inst._content  = content
-=======
->>>>>>> Stashed changes
-        registry.register(inst)
-        # 5) Create new slots
-        # print(f"Layout Template instance created. Creating slots with initGrid: {rows}, {columns} in registry: {registry}...")
-        inst._items = inst.initGrid(registry, inst._rows, inst._columns)
+        inst._geometry = UnitStrGeometry.from_dict(data["geometry"])
+        inst._page_size = data.get("page_size", "custom")
+        inst._rows = data.get("rows", 3)
+        inst._columns = data.get("columns", 3)
+        inst._orientation = data.get("orientation", False)
 
+        inst._whitespace = [
+            UnitStr.from_dict(data["margin_top"]),
+            UnitStr.from_dict(data["margin_bottom"]),
+            UnitStr.from_dict(data["margin_left"]),
+            UnitStr.from_dict(data["margin_right"]),
+            UnitStr.from_dict(data["spacing_x"]),
+            UnitStr.from_dict(data["spacing_y"]),
+        ]
+        print("Instance created")
+
+        # Correctly handle content deserialization
+        inst._content = data.get("content")
+
+        registry.register(inst)
+        items = []
+        for row in data.get("items"):
+            item_row = []
+            for idata in row:
+                ls = LayoutSlot.from_dict(idata, registry=registry, is_clone=is_clone)
+                ls.setParentItem(inst)
+                item_row.append(ls)
+            items.append(item_row)
+        inst.items = items
         return inst
+
+
 
     def paint(self, painter: QPainter, option, widget=None):
         """
@@ -707,11 +630,11 @@ class LayoutTemplate(QGraphicsObject):
             The widget being painted on.
         unit : str, default "px"
             The logical unit system (e.g., 'in', 'mm', 'px') to scale layout to.
-        dpi : int, default 144
+        dpi : int, default 300
             DPI used for converting units to pixels.
         """
 
-        rect = self.geometry.to(self.unit, dpi=self.dpi).rect
+        rect = self.geometry.to("px", dpi=self.dpi).rect
         painter.setRenderHint(QPainter.Antialiasing)
 
         rows = self._rows
@@ -725,7 +648,7 @@ class LayoutTemplate(QGraphicsObject):
         painter.restore()
 
         # ——— Grid lines ———
-        top_margin, bottom_margin, left_margin, right_margin, spacing_x, spacing_y = self.get_whitespace()
+        top_margin, bottom_margin, left_margin, right_margin, spacing_x, spacing_y = self.whitespace_in_units()
 
 
         total_w = rect.width() - left_margin - right_margin - spacing_x * (cols - 1)

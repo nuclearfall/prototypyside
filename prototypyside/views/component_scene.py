@@ -13,10 +13,11 @@ from PySide6.QtWidgets import (
 from prototypyside.services.undo_commands import MoveElementCommand, ChangePropertyCommand
 from prototypyside.utils.graphics_item_helpers import is_movable
 from prototypyside.utils.ustr_helpers import geometry_with_px_pos
-from prototypyside.models.component_elements import ComponentElement
+from prototypyside.models.component_element import ComponentElement
 
 if TYPE_CHECKING:
-    from prototypyside.utils.incremental_grid import IncrementalGrid
+    from prototypyside.views.overlays.incremental_grid import IncrementalGrid
+    from prototypyside.views.overlays.print_lines import PrintLines
     from prototypyside.models.component_template import ComponentTemplate
 
 # -------------------------------------------------------------------------
@@ -37,23 +38,25 @@ class ComponentScene(QGraphicsScene):
         settings,
         *,
         grid: "IncrementalGrid",
+        # print_lines: "PrintLines",
         template: "ComponentTemplate",
         parent=None,
     ):
         super().__init__(parent)
 
         self.settings     = settings
-        #self.tab          = tab
+        self.dpi = settings.dpi
         self.template  = template          # QGraphicsObject, z = −100
 
         # 1️⃣  scene rect == template rect
         self._sync_scene_rect()
 
         # 2️⃣  add template + grid
-        self.addItem(self.template)
+        # self.addItem(self.template)
 
         self.inc_grid = grid
-
+        # self.print_lines = print_lines
+        # self.print_lines.hide()
         # React to template-size changes
         self.template.template_changed.connect(self._on_template_rect_changed)
 
@@ -72,7 +75,7 @@ class ComponentScene(QGraphicsScene):
     # ─────────────────────────── helpers / utils ──────────────────────────
     def _sync_scene_rect(self):
         """Make the scene rect exactly match the template’s bounding rect."""
-        r = self.template.geometry.to("px").rect
+        r = self.template.geometry.to("px", dpi=self.dpi).rect
         self.setSceneRect(r)
 
     @Slot()

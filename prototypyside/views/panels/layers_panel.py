@@ -6,7 +6,7 @@ from PySide6.QtGui import QDrag, QPixmap
 from typing import Optional, List, TYPE_CHECKING
 
 if TYPE_CHECKING:
-    from prototypyside.models.component_elements import ComponentElement
+    from prototypyside.models.component_element import ComponentElement
 
 
 class LayersListWidget(QListWidget):
@@ -27,7 +27,7 @@ class LayersListWidget(QListWidget):
         if item:
             self.item_selected_in_list.emit(item)
 
-    def update_list(self, items: List['GameComponentElement']):
+    def update_list(self, items: List['ComponentElement']):
         self.blockSignals(True) # Block signals to prevent spurious updates during rebuild
         self.clear()
         
@@ -68,7 +68,7 @@ class LayersListWidget(QListWidget):
         # We need to map the new order back to Z-values.
 
         # Get the list of GameComponentElement objects in the new order
-        reordered_items: List['GameComponentElement'] = []
+        reordered_items: List['ComponentElement'] = []
         for i in range(self.count()):
             item = self.item(i)
             item = item.data(Qt.UserRole)
