@@ -25,6 +25,7 @@ OBJECT_ONLY: Dict[str, str] = {
 REGISTERED: Dict[str, str] = {
     "ie": "ImageElement",
     "te": "TextElement",
+    "ve": "VectorElement",
     "ct": "ComponentTemplate",
     "cc": "Component",
     "lt": "LayoutTemplate",

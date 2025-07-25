@@ -8,6 +8,7 @@ from PySide6.QtGui import QPainter, QPixmap, QColor, QImage, QPen, QBrush,  QPag
 from prototypyside.models.text_element import TextElement
 from prototypyside.models.component_template import ComponentTemplate
 from prototypyside.models.image_element import ImageElement
+from prototypyside.models.vector_element import VectorElement
 from prototypyside.utils.unit_converter import to_px, page_in_px, page_in_units, compute_scale_factor
 from prototypyside.utils.units.unit_str import UnitStr
 from prototypyside.utils.units.unit_str_geometry import UnitStrGeometry
@@ -35,6 +36,7 @@ class LayoutSlot(QGraphicsObject):
         self._cache_image = None
         self._geometry = geometry
         self._render_text = True
+        self._render_vector = True
         self.setAcceptHoverEvents(True)
 
     # --- Geometric Property Getter/Setters ---#
@@ -64,6 +66,17 @@ class LayoutSlot(QGraphicsObject):
     def render_text(self, new: bool):
         if new != self._render_text:
             self._render_text = new
+            self.invalidate_cache()
+            self.update()
+
+    @property
+    def render_vector(self):
+        return self._render_vector
+
+    @render_vector.setter
+    def render_vector(self, new: bool):
+        if new != self._render_vector:
+            self._render_vector = new
             self.invalidate_cache()
             self.update()
                 
@@ -282,8 +295,10 @@ class LayoutSlot(QGraphicsObject):
 
         # Render elements in z-order
         for item in sorted(self._content.items, key=lambda e: e.zValue()):
-            if not self.render_text and isinstance(item, TextElement):
-                pass ### Instead we'll draw it at export as vector.
+            if (not self.render_text and isinstance(item, TextElement)) or \
+               (not self.render_vector and isinstance(item, VectorElement)):
+                # Skip drawing; will be rendered as vector later
+                continue
             img_painter.save()
             img_painter.translate(item.pos())
 

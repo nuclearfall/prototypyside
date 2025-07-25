@@ -14,6 +14,7 @@ from prototypyside.services.proto_registry import RootRegistry, ProtoRegistry
 
 # ── MODELS & HELPERS ───────────────────────────────────────────────────────
 from prototypyside.models.component_element import TextElement, ImageElement
+from prototypyside.models.vector_element import VectorElement
 from prototypyside.models.component_template import ComponentTemplate
 from prototypyside.models.layout_template import LayoutTemplate
 from prototypyside.models.layout_slot import LayoutSlot
@@ -90,6 +91,7 @@ def test_units_schema_and_roundtrip(name, instance, validator):
 MODEL_FACTORIES = [
     ("text_element",       lambda reg: TextElement(resolve_pid("te"), geometry=usg)),
     ("image_element",      lambda reg: ImageElement(resolve_pid("ie"), geometry=usg)),
+    ("vector_element",     lambda reg: VectorElement(resolve_pid("ve"), geometry=usg)),
     ("component_template", lambda reg: ComponentTemplate(resolve_pid("ct"), geometry=usg, registry=reg)),
     ("layout_template",    lambda reg: LayoutTemplate(resolve_pid("lt"), geometry=usg, registry=reg)),
     ("layout_slot",        lambda reg: LayoutSlot(resolve_pid("ls"), geometry=usg)),

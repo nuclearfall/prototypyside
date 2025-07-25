@@ -13,6 +13,7 @@ class SchemaValidator:
         "lt": "layout_template.json",
         "pg": "layout_template.json",
         "ie": "image_element.json",
+        "ve": "vector_element.json",
         "te": "text_element.json",
         "ls": "layout_slot.json",
     }

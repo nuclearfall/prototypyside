@@ -184,6 +184,7 @@ class ComponentTab(QWidget):
         components = [
             ("Text Field", "te", "T"),
             ("Image Container", "ie", "🖼️"),
+            ("Vector Graphic", "ve", "⬠"),
         ]
         for name, etype, icon in components:
             item = QListWidgetItem(f"{icon} {name}")

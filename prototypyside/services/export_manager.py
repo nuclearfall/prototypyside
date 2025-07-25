@@ -3,6 +3,7 @@ from PySide6.QtCore import QSizeF
 from PySide6.QtGui  import QPainter, QPdfWriter, QImage, QPageSize, QPageLayout, QStyleOptionGraphicsItem
 from PySide6.QtWidgets import QGraphicsScene
 from prototypyside.models.text_element import TextElement
+from prototypyside.models.vector_element import VectorElement
 from prototypyside.utils.units.unit_str_geometry import UnitStrGeometry
 from PySide6.QtCore import Qt, QSizeF, QRectF, QMarginsF
 from pathlib import Path
@@ -141,6 +142,7 @@ class ExportManager:
             page.dpi = self.settings.print_dpi
             for slot in page.slots:
                 slot.render_text = False
+                slot.render_vector = False
 
             page.invalidate_cache()
             img = page.image
@@ -154,7 +156,7 @@ class ExportManager:
             target_rect = QRectF(0, 0, page_size_pt.width(), page_size_pt.height())
             painter.drawImage(target_rect, img)
 
-            # Overlay text elements as vector graphics
+            # Overlay text and vector elements as vector graphics
             for slot in page.slots:
                 if not slot.content:
                     continue
@@ -163,7 +165,7 @@ class ExportManager:
                 painter.scale(scale_pt_per_px, scale_pt_per_px)
                 painter.translate(slot_pos)
                 for item in slot.content.items:
-                    if isinstance(item, TextElement):
+                    if isinstance(item, (TextElement, VectorElement)):
                         painter.save()
                         painter.translate(item.pos())
                         bounds = item.boundingRect()

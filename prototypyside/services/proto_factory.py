@@ -7,6 +7,7 @@ from prototypyside.models.component_template import ComponentTemplate
 from prototypyside.models.component_element import ComponentElement
 from prototypyside.models.text_element import TextElement
 from prototypyside.models.image_element import ImageElement
+from prototypyside.models.vector_element import VectorElement
 from prototypyside.models.layout_template import LayoutTemplate
 from prototypyside.models.layout_slot import LayoutSlot
 from prototypyside.utils.units.unit_str_geometry import UnitStrGeometry
@@ -33,6 +34,7 @@ class ProtoFactory:
     _PROTO_OBJECT_CLASSES: Dict[str, Type] = {
         "te": TextElement,
         "ie": ImageElement,
+        "ve": VectorElement,
         "ct": ComponentTemplate,
         "cc": ComponentTemplate,
         "lt": LayoutTemplate,

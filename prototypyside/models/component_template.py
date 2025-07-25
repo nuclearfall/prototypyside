@@ -438,6 +438,9 @@ class ComponentTemplate(QGraphicsObject):
                 el = ImageElement.from_dict(e, registry=registry, is_clone=is_clone)
             elif prefix == "te":
                 el = TextElement.from_dict(e, registry=registry, is_clone=is_clone)
+            elif prefix == "ve":
+                from prototypyside.models.vector_element import VectorElement
+                el = VectorElement.from_dict(e, registry=registry, is_clone=is_clone)
             else:
                 raise ValueError(f"Unknown prefix {prefix}")
             inst.add_item(el)

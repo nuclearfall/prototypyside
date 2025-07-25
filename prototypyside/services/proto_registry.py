@@ -22,6 +22,7 @@ from prototypyside.views.overlays.incremental_grid import IncrementalGrid
 BASE_NAMES = {
     "ie": "Image Element",
     "te": "Text Element",
+    "ve": "Vector Element",
     "ct": "Component Template",
     "cc": "Component",
     "lt": "Layout Template",

@@ -25,7 +25,8 @@
       "items": {
         "oneOf":[
           { "$ref": "text_element.json" },
-          { "$ref": "image_element.json" }
+          { "$ref": "image_element.json" },
+          { "$ref": "vector_element.json" }
         ]
       },
       "description": "List of TextElement or ImageElement objects"

@@ -12,6 +12,7 @@ from prototypyside.widgets.unit_field import UnitField, UnitStrGeometryField
 from prototypyside.utils.units.unit_str_geometry import UnitStrGeometry
 from prototypyside.models.component_element import ComponentElement
 from prototypyside.models.image_element import ImageElement
+from prototypyside.models.vector_element import VectorElement
 from prototypyside.models.text_element import TextElement
 from prototypyside.views.toolbars.font_toolbar import FontToolbar
 from prototypyside.widgets.color_picker import ColorPickerWidget
@@ -209,7 +210,7 @@ class PropertyPanel(QWidget):
         if isinstance(item, TextElement):
             self.content_text_edit.setText(item.content or "")
             self.content_stack.setCurrentWidget(self.content_text_edit)
-        elif isinstance(item, ImageElement):
+        elif isinstance(item, (ImageElement, VectorElement)):
             self.content_stack.setCurrentWidget(self.content_path_button)
         else:
              self.form_layout.labelForField(self.content_stack).hide()
@@ -283,7 +284,7 @@ class PropertyPanel(QWidget):
             self.content_stack.setCurrentWidget(self.content_text_edit)
             self.content_text_edit.setTarget(el, "content")
             self.content_text_edit.setText(el.content or "")
-        elif isinstance(el, ImageElement):
+        elif isinstance(el, (ImageElement, VectorElement)):
 
             self.content_stack.setCurrentWidget(self.content_path_button)
             self.content_stack.setMaximumHeight(20)
@@ -314,10 +315,10 @@ class PropertyPanel(QWidget):
  
     @Slot()
     def _choose_image_path(self):
-        if not isinstance(self.target_item, ImageElement):
+        if not isinstance(self.target_item, (ImageElement, VectorElement)):
             return
         file_path, _ = QFileDialog.getOpenFileName(
-            self, "Select Image", "", "Images (*.png *.jpg *.jpeg *.bmp *.gif)"
+            self, "Select File", "", "Images (*.png *.jpg *.bmp *.gif);;SVG Files (*.svg)"
         )
         if file_path:
             old_value = self.target_item.content
