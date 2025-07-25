@@ -1,7 +1,8 @@
 from math import ceil
 from PySide6.QtCore import QSizeF
-from PySide6.QtGui  import QPainter, QPdfWriter, QImage, QPageSize, QPageLayout
+from PySide6.QtGui  import QPainter, QPdfWriter, QImage, QPageSize, QPageLayout, QStyleOptionGraphicsItem
 from PySide6.QtWidgets import QGraphicsScene
+from prototypyside.models.text_element import TextElement
 from prototypyside.utils.units.unit_str_geometry import UnitStrGeometry
 from PySide6.QtCore import Qt, QSizeF, QRectF, QMarginsF
 from pathlib import Path
@@ -112,6 +113,64 @@ class ExportManager:
             if img and not img.isNull():
                 target_rect = QRectF(0, 0, page_size_pt.width(), page_size_pt.height())
                 painter.drawImage(target_rect, img)
+
+        painter.end()
+
+    def export_with_vector_text_to_pdf(self, layout, output_path, scale_to_300=True):
+        """Export pages while drawing text as vector graphics."""
+        pages = self.paginate(layout)
+        self.dpi = self.settings.print_dpi
+
+        page_size_pt = layout.geometry.to("pt", dpi=self.dpi).size
+        page_size = QPageSize(page_size_pt, QPageSize.Point, name="Custom")
+        page_layout = QPageLayout(page_size, QPageLayout.Portrait, QMarginsF(0, 0, 0, 0))
+
+        writer = QPdfWriter(str(output_path))
+        writer.setResolution(72)
+        writer.setPageLayout(page_layout)
+
+        painter = QPainter(writer)
+
+        scale_pt_per_px = 72 / self.settings.print_dpi
+        option = QStyleOptionGraphicsItem()
+
+        for i, page in enumerate(pages):
+            if i > 0:
+                writer.newPage()
+
+            page.dpi = self.settings.print_dpi
+            for slot in page.slots:
+                slot.render_text = False
+
+            page.invalidate_cache()
+            img = page.image
+
+            if scale_to_300:
+                scale_factor = 300 / self.settings.print_dpi
+                new_width_px = int(img.width() * scale_factor)
+                new_height_px = int(img.height() * scale_factor)
+                img = img.scaled(new_width_px, new_height_px, Qt.KeepAspectRatio, Qt.SmoothTransformation)
+
+            target_rect = QRectF(0, 0, page_size_pt.width(), page_size_pt.height())
+            painter.drawImage(target_rect, img)
+
+            # Overlay text elements as vector graphics
+            for slot in page.slots:
+                if not slot.content:
+                    continue
+                slot_pos = slot.geometry.to("px", dpi=self.settings.print_dpi).pos
+                painter.save()
+                painter.scale(scale_pt_per_px, scale_pt_per_px)
+                painter.translate(slot_pos)
+                for item in slot.content.items:
+                    if isinstance(item, TextElement):
+                        painter.save()
+                        painter.translate(item.pos())
+                        bounds = item.boundingRect()
+                        painter.setClipRect(QRectF(0, 0, bounds.width(), bounds.height()))
+                        item.paint(painter, option, widget=None)
+                        painter.restore()
+                painter.restore()
 
         painter.end()
     # def export_to_pdf(self, layout, output_path, scale_to_300=True):

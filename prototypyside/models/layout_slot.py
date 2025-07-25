@@ -5,6 +5,7 @@ import json
 from PySide6.QtWidgets import QGraphicsObject, QGraphicsItem, QStyleOptionGraphicsItem
 from PySide6.QtCore import Qt, QRectF, QPointF, QSizeF, QMarginsF, Signal
 from PySide6.QtGui import QPainter, QPixmap, QColor, QImage, QPen, QBrush,  QPageLayout, QPageSize
+from prototypyside.models.text_element import TextElement
 from prototypyside.models.component_template import ComponentTemplate
 from prototypyside.models.image_element import ImageElement
 from prototypyside.utils.unit_converter import to_px, page_in_px, page_in_units, compute_scale_factor
@@ -59,10 +60,12 @@ class LayoutSlot(QGraphicsObject):
     def render_text(self):
         return self._render_text
 
-    @render_text.setter 
+    @render_text.setter
     def render_text(self, new: bool):
-        if new != self._render_text
+        if new != self._render_text:
+            self._render_text = new
             self.invalidate_cache()
+            self.update()
                 
     @property
     def unit(self) -> str:
