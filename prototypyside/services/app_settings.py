@@ -11,12 +11,13 @@ from PySide6.QtCore import QObject, Signal, Property
 class AppSettings(QObject):
     unit_changed = Signal(str)
     print_unit_and_dpi_changed = Signal(str)
+    dpi_changed = Signal(int)
 
-
-    def __init__(self, display_unit="in", print_unit="in", display_dpi=300, print_dpi=300):
+    def __init__(self, display_unit="in", print_unit="in", display_dpi=300, print_dpi=600):
         super().__init__()
         self._display_unit = display_unit
         self._display_dpi = display_dpi
+        self._dpi = display_dpi
         self._print_dpi = print_dpi
         self._print_unit = print_unit
 
@@ -32,7 +33,14 @@ class AppSettings(QObject):
 
     @Property(int)
     def dpi(self):
-        return self._display_dpi
+        return self._dpi
+
+    @dpi.setter
+    def dpi(self, new_dpi):
+        if new_dpi != self._dpi:
+            self._dpi = new_dpi
+            print(f"[APPSETTINGS] new dpi {new_dpi} emitted")
+            self.dpi_changed.emit(new_dpi)
 
     @Property(int)
     def display_dpi(self):

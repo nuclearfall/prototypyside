@@ -5,18 +5,19 @@ from prototypyside.utils.units.unit_str import UnitStr
 def geometry_with_px_rect(
     base: UnitStrGeometry,
     px_rect: QRectF,
+    dpi: int
 ) -> UnitStrGeometry:
     """
     Return a new UnitStrGeometry whose rect (x,y,width,height)
     comes from px_rect converted into inches (via from_px),
     preserving base.dpi and the original x/y position.
     """
-    dpi = base.dpi
+    dpi = dpi
 
-    width  = UnitStr.from_px(px_rect.width(),  dpi=dpi)
-    height = UnitStr.from_px(px_rect.height(), dpi=dpi)
-    rect_x = UnitStr.from_px(px_rect.x(),      dpi=dpi)
-    rect_y = UnitStr.from_px(px_rect.y(),      dpi=dpi)
+    width  = UnitStr(px_rect.width(), unit="px", dpi=dpi)
+    height = UnitStr(px_rect.height(), unit="px", dpi=dpi)
+    rect_x = UnitStr(0, dpi=dpi)
+    rect_y = UnitStr(0, dpi=dpi)
 
     # keep the original logical position
     x = base.x
@@ -36,16 +37,17 @@ def geometry_with_px_rect(
 def geometry_with_px_pos(
     base: UnitStrGeometry,
     px_pos: QPointF,
+    dpi: int
 ) -> UnitStrGeometry:
     """
     Return a new UnitStrGeometry whose position (x,y)
     comes from px_pos converted into inches (via from_px),
     preserving base.dpi and the original size/rect.
     """
-    dpi = base.dpi
+    dpi = dpi
 
-    x = UnitStr.from_px(px_pos.x(), dpi=dpi)
-    y = UnitStr.from_px(px_pos.y(), dpi=dpi)
+    x = UnitStr(px_pos.x(), "px", dpi=self.dpi)
+    y = UnitStr(px_pos.y(), "px", dpi=self.dpi)
     # units are stored interally as inches. 
     return UnitStrGeometry(
         width=base.width,

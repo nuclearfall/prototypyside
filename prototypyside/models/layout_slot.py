@@ -52,8 +52,9 @@ class LayoutSlot(QGraphicsObject):
                 self._content.dpi = new
                 for item in self._content.items:
                     item.dpi = new
-                self._invalidate_cache()
+                self.invalidate_cache()
                 self.update()
+                
     @property
     def unit(self) -> str:
         return self._unit
@@ -87,7 +88,7 @@ class LayoutSlot(QGraphicsObject):
         if self._geometry.to(self.unit, dpi=self.dpi).rect == new_rect:
             return
         self.prepareGeometryChange()
-        geometry_with_px_rect(self._geometry, new_rect)
+        geometry_with_px_rect(self._geometry, new_rect, dpi=self.dpi)
         # self.update()
 
     def itemChange(self, change: QGraphicsItem.GraphicsItemChange, value):
@@ -97,7 +98,7 @@ class LayoutSlot(QGraphicsObject):
             # also tries to set the position.
             signals_blocked = self.signalsBlocked()
             self.blockSignals(True)
-            geometry_with_px_pos(self._geometry, value)
+            geometry_with_px_pos(self._geometry, value, dpi=self.dpi)
             print(f"[ITEMCHANGE] Called with change={change}, value={value}")
             print(f"[ITEMCHANGE] Geometry.pos updated to: {self._geometry.to(self.unit, dpi=self.dpi).pos}")
             self.blockSignals(signals_blocked)

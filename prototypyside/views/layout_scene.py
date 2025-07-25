@@ -40,15 +40,25 @@ class LayoutScene(QGraphicsScene):
     ):
         super().__init__(parent)
         self.settings     = settings
+        self._dpi = self.settings.dpi
         self.template  = template  
         self.inc_grid = grid       
         self._preview_mode = False
         self._pages = []
         self._sync_scene_rect()
-        
+    @property     
+    def dpi(self):
+        return self._dpi
+
+    @dpi.setter
+    def dpi(self, new_dpi):
+        if new_dpi != self._dpi:
+            self._dpi = new_dpi
+            self._sync_scene_rect()
+
     def _sync_scene_rect(self):
         """Make the scene rect exactly match the template’s bounding rect."""
-        r = self.template.geometry.to("px").rect
+        r = self.template.geometry.to("px", dpi=self._dpi).rect
         self.setSceneRect(r)
 
     @Slot()

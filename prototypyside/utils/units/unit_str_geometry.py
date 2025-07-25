@@ -130,19 +130,21 @@ class UnitStrGeometry:
         return QSizeF(self._val(self._w), self._val(self._h))
 
     def to(self, unit: str, dpi: int | None = None) -> UnitStrGeometry:
-        """Returns a new UnitStrGeometry that emits values in the target unit."""
         dpi = dpi or self._dpi
-        du = unit.lower().replace('"', "in")
-        if du not in {"in", "cm", "mm", "pt", "px"}:
-            raise ValueError(f"Unsupported display unit: {du!r}")
+        unit = unit.lower().replace('"', "in")
+        if unit not in {"in", "cm", "mm", "pt", "px"}:
+            raise ValueError(f"Unsupported unit: {unit!r}")
 
-        g = object.__new__(UnitStrGeometry)
-        g._rect_x, g._rect_y = self._rect_x, self._rect_y
-        g._w, g._h = self._w, self._h
-        g._pos_x, g._pos_y = self._pos_x, self._pos_y
-        g._dpi = dpi
-        g._unit = du
-        return g
+        return UnitStrGeometry(
+            rect_x=self._rect_x.to(unit, dpi),
+            rect_y=self._rect_y.to(unit, dpi),
+            width=self._w.to(unit, dpi),
+            height=self._h.to(unit, dpi),
+            x=self._pos_x.to(unit, dpi),
+            y=self._pos_y.to(unit, dpi),
+            dpi=dpi,
+            unit=unit,
+        )
 
     # Shorthand views
     @property

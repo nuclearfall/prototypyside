@@ -55,7 +55,10 @@ class MainDesignerWindow(QMainWindow):
         # Main application settings
         # Validation temporarily disabled pending schema updates
         self.settings = AppSettings()
+        self.settings.dpi_changed.connect(self.on_dpi_changed)
         self.registry = RootRegistry()
+        self.export_registry = ProtoRegistry(parent=self.registry, root=self.registry)
+        self.registry.add_child(self.export_registry)
         # self.mail_room = MailRoom(registry=self.registry)
         # self.registry.set_mail_room(self.mail_room)
         self.undo_group = QUndoGroup(self)
@@ -379,6 +382,21 @@ class MainDesignerWindow(QMainWindow):
             prop_layout.addStretch(1)
             self.properties_dock.setWidget(prop_container)
             active_tab.layout_palette.refresh()
+
+
+
+    @property
+    def tab_list(self):
+        return [self.tab_widget.widget(i) for i in range(self.tab_widget.count())]
+
+    @Slot(int)
+    def on_dpi_changed(self, new_dpi):
+        print(f"[MAINWINDOW] DPI received from settings. DPI should be set to {new_dpi}")
+        for tab in self.tab_list:
+            # tab.dpi = new_dpi
+            tab.template.dpi = new_dpi
+            tab.scene.dpi = new_dpi
+
 
     @Slot(int, str)
     # def on_tab_renamed(index: int, new_name: str):
@@ -794,9 +812,8 @@ class MainDesignerWindow(QMainWindow):
             output_path += ".pdf"
 
         try:
-            export_registry = ProtoRegistry(parent=self.registry, root=self.registry)
-            self.registry.add_child(export_registry)
-            export_manager = ExportManager(export_registry, self.merge_manager, dpi=self.settings.dpi)
+
+            export_manager = ExportManager(settings=self.settings, registry=self.export_registry, merge_manager=self.merge_manager, dpi=600)
             export_manager.export_to_pdf(template, output_path)
             QMessageBox.information(self, "Export Complete", f"PDF successfully saved:\n{output_path}")
         except Exception as e:

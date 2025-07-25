@@ -114,11 +114,6 @@ class MergeManager:
                 return entry.validate_headers(template)
         return {}
 
-    def affix_to_layout(self, layout):
-        template = layout.registry.global_get(layout.content) if layout.content else None
-        if template and template.csv_path
-            layout.csv_data = self.get(template.pid) or self.get(template.csv_path)
-
     def deregister(self, tpid):
         self._csv_data.pop(tpid)
 

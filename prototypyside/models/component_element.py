@@ -72,6 +72,7 @@ class ComponentElement(QGraphicsObject):
     def dpi(self, new: int):
         if self._dpi != new:
             self._dpi = new
+            self.update()
 
     @property
     def unit(self) -> str:
@@ -110,7 +111,7 @@ class ComponentElement(QGraphicsObject):
         if self._geometry.to("px", dpi=self.dpi).rect == new_rect:
             return
         self.prepareGeometryChange()
-        self.geometry = geometry_with_px_rect(self._geometry, new_rect)
+        self.geometry = geometry_with_px_rect(self._geometry, new_rect, dpi=self.dpi)
 
     def itemChange(self, change: QGraphicsItem.GraphicsItemChange, value):
         # This is called when the scene moves the item.
@@ -119,7 +120,7 @@ class ComponentElement(QGraphicsObject):
             # also tries to set the position.
             signals_blocked = self.signalsBlocked()
             self.blockSignals(True)
-            geometry_with_px_pos(self._geometry, value)
+            geometry_with_px_pos(self._geometry, value, dpi=self.dpi)
             # print(f"[ITEMCHANGE] Called with change={change}, value={value}")
             # print(f"[ITEMCHANGE] Geometry.pos updated to: {self._geometry.px.pos}")
             self.blockSignals(signals_blocked)

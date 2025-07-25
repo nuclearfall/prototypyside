@@ -145,7 +145,7 @@ class ComponentTemplate(QGraphicsObject):
         if self._geometry.px.rect == new_rect:
             return
         self.prepareGeometryChange()
-        geometry_with_px_rect(self._geometry, new_rect)
+        geometry_with_px_rect(self._geometry, new_rect, dpi=self.dpi)
 
     def itemChange(self, change: QGraphicsItem.GraphicsItemChange, value):
         # This is called when the scene moves the item.
@@ -154,7 +154,7 @@ class ComponentTemplate(QGraphicsObject):
             # also tries to set the position.
             signals_blocked = self.signalsBlocked()
             self.blockSignals(True)
-            geometry_with_px_pos(self._geometry, value)
+            geometry_with_px_pos(self._geometry, value, dpi=self.dpi)
             print(f"[ITEMCHANGE] Called with change={change}, value={value}")
             print(f"[ITEMCHANGE] Geometry.pos updated to: {self._geometry.px.pos}")
             self.blockSignals(signals_blocked)
@@ -400,7 +400,7 @@ class ComponentTemplate(QGraphicsObject):
             'items': [e.to_dict() for e in self.items],
             'border_width': self.border_width.to_dict(),
             'corner_radius': self.corner_radius.to_dict(),
-            'csv_path': str(self.csv_path) if self.csv_path.exists() else None,
+            'csv_path': str(self.csv_path) if self.csv_path and Path(self.csv_path).exists else None,
             'tpid': self._tpid
         }
         return data

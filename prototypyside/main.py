@@ -64,7 +64,7 @@ if __name__ == "__main__":
     cli_mode_active = export_png_flag or export_pdf_flag or (template_path and not sys.stdin.isatty())
 
     designer = MainDesignerWindow()
-    export_manager = ExportManager(designer.merge_manager, designer.tab_widget.currentWidget()) # NEW: Instantiate ExportManager
+    # Export at high dpi to scale down
 
     # Set cli_mode for the MainDesignerWindow instance for internal message handling
     designer.set_cli_mode(cli_mode_active)
