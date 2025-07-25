@@ -87,8 +87,6 @@ class MainDesignerWindow(QMainWindow):
         self.add_new_tab(ComponentTab, "ct")
 
 
-
-
     ### --- GUI Setup --- ###
     def setup_ui(self):
         tabs = QTabWidget()
@@ -796,12 +794,31 @@ class MainDesignerWindow(QMainWindow):
             output_path += ".pdf"
 
         try:
-            export_manager = ExportManager(self.merge_manager)
+            export_registry = ProtoRegistry(parent=self.registry, root=self.registry)
+            self.registry.add_child(export_registry)
+            export_manager = ExportManager(export_registry, self.merge_manager, dpi=self.settings.dpi)
             export_manager.export_to_pdf(template, output_path)
             QMessageBox.information(self, "Export Complete", f"PDF successfully saved:\n{output_path}")
         except Exception as e:
             QMessageBox.critical(self, "Export Failed", f"An error occurred during export:\n{e}")
 
+    # If a layout has an older copy of the ComponentTemplate, ask if they want to update the registered ComponentTemplate
+    def show_update_prompt(layout_template, original_template):
+        msg = QMessageBox()
+        msg.setIcon(QMessageBox.Question)
+        msg.setWindowTitle("Update Layout Template")
+        msg.setText(
+            f"The layout “{layout_template.name}” uses a copy of the component “{original_template.name}”.\n"
+            "You’ve just reloaded the original template.\n\n"
+            "Would you like to update the layout to use this new version?"
+        )
+        msg.setStandardButtons(QMessageBox.Yes | QMessageBox.No)
+        msg.setDefaultButton(QMessageBox.Yes)
+
+        result = msg.exec()
+
+        if result == QMessageBox.Yes:
+            apply_template_update_to_layout(layout_template, original_template)
 
     ########################
     # Command Line methods #

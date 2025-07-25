@@ -63,7 +63,6 @@ class ProtoRegistry(QObject):
         # 4. Not found
         return None
 
-
     @property
     def is_root(self):
         return True if self.root == self else False
@@ -71,10 +70,7 @@ class ProtoRegistry(QObject):
     def load(self, model_cls: type, data: dict) -> object:
         model = self._factory.load(model_cls, data)
         self._register(model)
-        return model
-
-    def get(self, pid: str) -> object:
-        return self._instances[pid]       
+        return model      
 
     def register(self, obj: Any):
         pid = getattr(obj, "pid", None)
@@ -96,6 +92,10 @@ class ProtoRegistry(QObject):
         store[pid] = obj
         self.object_registered.emit(pid)
 
+    def get(self, pid):
+        if pid is None:
+            raise ValueError("[Registry] Cannot get object: PID is None")
+        return self._store.get(pid)
 
     def find_root(self):
         parent = self.parent()
@@ -236,7 +236,7 @@ class ProtoRegistry(QObject):
             raise ValueError("Cannot clone object without a 'pid'.")
         payload = self._factory.to_dict(obj)
         # This calls ProtoRegistry.from_dict → factory.from_dict with is_clone=True
-        # which in turn invokes your LayoutTemplate.from_dict with is_clone=True
+        # which in turn invokes LayoutTemplate.from_dict with is_clone=True
         return self.from_dict(payload, registry=self, is_clone=True)
 
     def reinsert(self, pid: str):
@@ -250,13 +250,6 @@ class ProtoRegistry(QObject):
 
     def is_orphan(self, pid: str) -> bool:
         return True if pid in self._orphans else False
-
-    def get(self, pid, registry=None):
-        for r in registry._store:
-            item = r._store.get(pid)
-            if item:
-                return item
-        return None
 
     def global_get(self, pid):
         """
@@ -316,10 +309,16 @@ class RootRegistry(ProtoRegistry):
         self._children = []
         self._store = {}
 
-    def add_child(self, child: ProtoRegistry):
+    def add_child(self, child):
+        child.root = self
         self._children.append(child)
         # child.object_registered.connect(self._repeat_registered)
         # child.object_deregistered.connect(self._repeat_deregistered)
+
+    def remove_child(self, child):
+        child = self._children.pop(child)
+        for key, obj in child._store.items():
+            child.deregister(key)
 
     def has(self, pid):
         if pid in self._store:

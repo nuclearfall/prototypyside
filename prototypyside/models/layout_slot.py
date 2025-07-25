@@ -18,7 +18,7 @@ if TYPE_CHECKING:
 
 class LayoutSlot(QGraphicsObject):
     item_changed = Signal()
-    def __init__(self, pid, geometry, registry=None, row=0, column=0, parent=None):
+    def __init__(self, pid, geometry, registry, row=0, column=0, parent=None):
         super().__init__(parent)
         self._registry = registry
         self._pid = pid
@@ -36,6 +36,10 @@ class LayoutSlot(QGraphicsObject):
         self.setAcceptHoverEvents(True)
 
     # --- Geometric Property Getter/Setters ---#
+    @property
+    def registry(self):
+        return self._registry
+    
     @property
     def dpi(self) -> int:
         return self._dpi
@@ -381,7 +385,7 @@ class LayoutSlot(QGraphicsObject):
         restores geometry, flags, and re‐registers in the registry.
         """
         # PID logic
-        pid = resolve_pid("sl") if is_clone else data.get("pid")
+        pid = resolve_pid("ls") if is_clone else data.get("pid")
 
         # Geometry
         geom = UnitStrGeometry.from_dict(data.get("geometry"))

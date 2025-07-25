@@ -323,6 +323,10 @@ class ComponentTemplate(QGraphicsObject):
             self._background_image = None
             print(f"[Warning] Background image not found: {path}")
 
+    def apply_row_data(self, row_data):
+        for item in [i for i in items if i.name.startswith("@")]:
+            setattr(i, "content", row_data.get(i.name))
+
     def paint(self, painter: QPainter, option, widget=None):
         """
         Paints the template's background and border_width using the specified unit and dpi.

@@ -1,5 +1,5 @@
-# graphics_view.py
-# prototypyside/views/designer_graphics_view.py
+# component_view.py
+# prototypyside/views/designer_component_view.py
 from PySide6.QtWidgets import QGraphicsView, QPinchGesture, QGestureEvent
 from PySide6.QtGui import QWheelEvent, QPainter, QTransform, QMouseEvent, QColor
 from PySide6.QtCore import Qt, QPointF, QEvent, QRectF, QSizeF, QSize, QObject, QMarginsF, QVariantAnimation, QEasingCurve, QTimer

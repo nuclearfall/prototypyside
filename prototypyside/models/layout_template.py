@@ -93,7 +93,6 @@ class LayoutTemplate(QGraphicsObject):
         if new != self._content:
             self._content = new
 
-
     def geometry_to_page_size(self, value, orientation):
         geom = PAGE_SIZES[value].get("geometry").to(self.unit, dpi=self.dpi)
 
@@ -255,6 +254,18 @@ class LayoutTemplate(QGraphicsObject):
         painter.end()
         return image
 
+    clear_slot_content(self):
+        for item in self.slots:
+            # item.content property invalidates cached image and reloads content if any.
+            item.content = None
+        self.update()
+
+    update_slot_content(self, new_template):
+        self.content = new_template
+        for item in self.slots:
+            # item.content property invalidates and reloads content image if any.
+            item.content = self.registry.clone(template)
+        self.update()
 
     # ---- Margins and Grid Spacing ---- #
     @property
@@ -379,7 +390,7 @@ class LayoutTemplate(QGraphicsObject):
         for row in self.items:
             for slot in row:
                 slot.invalidate_cache()
-
+    @property
     def slots(self) -> List[LayoutSlot]:
         return [slot for row in self.items for slot in row]
 
@@ -449,6 +460,7 @@ class LayoutTemplate(QGraphicsObject):
                     item = registry.create(
                         "ls",
                         geometry=UnitStrGeometry(width=item_width, height=item_height, x=x, y=y, unit="in", dpi=self._dpi),
+                        registry= self._registry,
                         row=r,
                         column=c,
                         parent=self
@@ -597,7 +609,7 @@ class LayoutTemplate(QGraphicsObject):
             UnitStr.from_dict(data["spacing_x"]),
             UnitStr.from_dict(data["spacing_y"]),
         ]
-        print("Instance created")
+        print("Layout instance created")
 
         # Correctly handle content deserialization
         inst._content = data.get("content")
@@ -607,6 +619,9 @@ class LayoutTemplate(QGraphicsObject):
         for row in data.get("items"):
             item_row = []
             for idata in row:
+                if idata is None:
+                    print("[WARNING] Found None in items row during deserialization")
+                    continue
                 ls = LayoutSlot.from_dict(idata, registry=registry, is_clone=is_clone)
                 ls.setParentItem(inst)
                 item_row.append(ls)

@@ -11,7 +11,7 @@ from PySide6.QtCore import Qt, Signal, Slot, QPointF
 from PySide6.QtGui import QColor, QKeySequence, QShortcut, QUndoStack, QPainter
 
 from prototypyside.views.component_scene import ComponentScene
-from prototypyside.views.graphics_view import ComponentView
+from prototypyside.views.component_view import ComponentView
 from prototypyside.views.panels.property_panel import PropertyPanel
 from prototypyside.views.panels.layers_panel import LayersListWidget
 from prototypyside.views.palettes.palettes import ComponentListWidget
