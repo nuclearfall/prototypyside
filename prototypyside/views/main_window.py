@@ -418,9 +418,8 @@ class MainDesignerWindow(QMainWindow):
     def add_new_tab(self, tab, prefix):
         registry = ProtoRegistry(parent=self.registry, root=self.registry)
         self.registry.add_child(registry)
-        print ("registry created")
-        self.registry.add_child(registry)
-        template = self.registry.create(prefix, registry=registry)
+        print("registry created")
+        template = registry.create(prefix, registry=registry)
 
         new_tab = tab(parent=self, main_window=self, template=template, registry=registry)
         self.undo_group.addStack(new_tab.undo_stack)
@@ -480,7 +479,7 @@ class MainDesignerWindow(QMainWindow):
 
             registry = ProtoRegistry(parent=self.registry, root=self.registry)
             self.registry.add_child(registry)
-            obj = ProtoRegistry.from_dict(data, registry=self.registry)
+            obj = ProtoRegistry.from_dict(data, registry=registry)
             prefix = get_prefix(obj.pid)
             if prefix == 'ct':
                 new_tab = ComponentTab(parent=self,
