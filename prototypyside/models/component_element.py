@@ -16,7 +16,7 @@ class ComponentElement(QGraphicsObject):
     _serializable_fields = {
         # dict_key      : (from_fn,                 to_fn,                   default)
         "tpid": (lambda v: v,              lambda v: v,            None),
-        "name":         (lambda v: v,              lambda v: v,            ""),
+        # "name":         (lambda v: v,              lambda v: v,            lambda v: v),
         "z_order":      (int,                      lambda z: z,            0),
         "color":        (QColor.fromRgba,          lambda c: c.rgba(),     None),
         "bg_color":     (QColor.fromRgba,          lambda c: c.rgba(),     None),
@@ -220,6 +220,7 @@ class ComponentElement(QGraphicsObject):
 
     @content.setter
     def content(self, content: str):
+        print(f"[DEBUG] Setting content on {self.name} → {content}")
         self._content = content
         self.item_changed.emit()
         self.update()
@@ -350,6 +351,7 @@ class ComponentElement(QGraphicsObject):
         data = {
             "pid":      self._pid,
             "geometry": self._geometry.to_dict(),
+            "name": self._name
         }
         for key, (_, to_fn, default) in self._serializable_fields.items():
             val = getattr(self, f"_{key}", default)

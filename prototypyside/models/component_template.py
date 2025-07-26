@@ -420,7 +420,7 @@ class ComponentTemplate(QGraphicsObject):
         inst = cls(
             pid=pid,
             geometry=geom,
-            name=(None if is_clone else data.get("name")),
+            name=data.get("name"),
             border_width=UnitStr.from_dict(data.get("border_width")),
             corner_radius=UnitStr.from_dict(data.get("corner_radius")),
         )
@@ -431,6 +431,7 @@ class ComponentTemplate(QGraphicsObject):
         inst._csv_path = Path(csv_path) if csv_path else None
         inst._registry = registry
         registry.register(inst)
+        inst._name = registry.generate_name(inst)
         # 3) Child elements (images/text)
         inst.items = []
         for e in data.get("items", []):

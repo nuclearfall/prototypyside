@@ -628,6 +628,7 @@ class LayoutTemplate(QGraphicsObject):
         inst._content = data.get("content")
 
         registry.register(inst)
+        inst._name = registry.generate_name(inst)
         items = []
         for row in data.get("items"):
             item_row = []

@@ -73,7 +73,7 @@ class ProtoRegistry(QObject):
         self._register(model)
         return model      
 
-    def register(self, obj: Any):
+    def register(self, obj: Any, no_name_change=False):
         pid = getattr(obj, "pid", None)
         prefix = get_prefix(pid)
         if not pid or not prefix:
@@ -85,10 +85,6 @@ class ProtoRegistry(QObject):
         if pid in store:
             print(f"[Registry] Skipping duplicate: {pid}")
             return
-
-        # Name generation/uniqueness
-        if not hasattr(obj, "name") or not self.has_unique_name(obj):
-            self.generate_name(obj)
 
         store[pid] = obj
         self.object_registered.emit(pid)
@@ -161,6 +157,7 @@ class ProtoRegistry(QObject):
             final_pid = resolve_pid(prefix_or_pid)
             obj = self._factory.create(pid=final_pid, **kwargs)
             self.register(obj)
+            obj.name = self.generate_name(obj)
             return obj
         else:
             raise ValueError(f"{self.__class__.__name__} requires a valid prefix or pid")
