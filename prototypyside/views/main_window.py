@@ -86,8 +86,8 @@ class MainDesignerWindow(QMainWindow):
         self.setup_actions_and_menus()
 
         # Add initial tabs
-        # self.add_new_tab(LayoutTab, "lt")
-        self.add_new_tab(ComponentTab, "ct")
+        self.add_new_tab(LayoutTab, "lt")
+        # self.add_new_tab(ComponentTab, "ct")
 
 
     ### --- GUI Setup --- ###
@@ -521,7 +521,7 @@ class MainDesignerWindow(QMainWindow):
 
         if tab_to_close:
             template_pid = tab_to_close.template.pid
-            self.merge_manager.deregister(template_pid)  # If you store merged rows by pid
+            # self.merge_manager.deregister(template_pid)  # If you store merged rows by pid
             self.remove_template_from_all_tabs(template_pid)
             tab_to_close.cleanup()
             template = tab_to_close.template
