@@ -130,6 +130,17 @@ class LayoutPalette(QWidget):
         self.select_btn.setEnabled(True)
         self.remove_template.emit(pid)
 
+    def remove_template_by_pid(self, pid: str):
+        """Remove the QListWidget item corresponding to the given component template PID."""
+        for i in range(self.list_widget.count()):
+            item = self.list_widget.item(i)
+            if item.data(Qt.UserRole) == pid:
+                removed_item = self.list_widget.takeItem(i)
+                del removed_item  # optional, but helps avoid lingering C++ object warnings
+                return True
+        return False  # not found
+
+
 class DraggableListWidget(QListWidget):
     def __init__(self, parent=None, registry=None):
         super().__init__(parent)

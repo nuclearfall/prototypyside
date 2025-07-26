@@ -1,7 +1,7 @@
 from typing import Type, TYPE_CHECKING
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QListWidget, QListWidgetItem
 from PySide6.QtCore import Qt
-
+from shiboken6 import isValid
 from prototypyside.models.component_template import ComponentTemplate
 
 class ImportPanel(QWidget):
@@ -30,28 +30,41 @@ class ImportPanel(QWidget):
         layout.addWidget(self.fields_list)
         layout.addStretch(1)
 
+    def refresh_ui_for_template(self, template):
+        """
+        Rebuilds the import panel UI for the given template.
+        Updates the field bindings and CSV file indicators.
+        """
+        self.update_csv_file_list()
+        self.update_fields(template)
+
+
 
     def update_for_template(self, template):
         """
-        Update file views for the new template, if it's
-        and connect to its change signals.
+        Update the panel to reflect a new ComponentTemplate.
+        If the same template is already active, do nothing.
         """
-        # Disconnect previous listeners
-        self._disconnect_signals()
+        if template == self._current_template:
+            return  # Already connected to this template
+
+        # Disconnect from previous template if valid
+        if self._current_template and isValid(self._current_template):
+            try:
+                self._current_template.template_changed.disconnect(self._on_template_changed)
+            except (RuntimeError, TypeError):
+                pass
+
         self._current_template = template
 
-        if isinstance(template, ComponentTemplate):
-            self.update_fields(template)
+        if self._current_template and isValid(self._current_template):
+            try:
+                self._current_template.template_changed.connect(self._on_template_changed)
+            except (RuntimeError, TypeError):
+                pass
 
-            # Reconnect to new template signals
-            if hasattr(template, "template_changed"):
-                template.template_changed.connect(self._on_template_changed)
+        self.refresh_ui_for_template(template)  # Custom method to update display
 
-            for item in getattr(template, "items", []):
-                if hasattr(item, "item_changed"):
-                    item.item_changed.connect(self._on_template_changed)
-        else:
-            self
 
 
     def _disconnect_signals(self):
@@ -86,16 +99,23 @@ class ImportPanel(QWidget):
 
             self.update_fields(self._current_template)
 
-    # csv files aren't always linked to templates
     def update_csv_file_list(self):
         self.csv_list.clear()
-        for key, entry in self.merge_manager.items:
-            tname = entry.tname if entry.is_linked else ""
-            item = QListWidgetItem(f"{path}" + (f" <= {entry.tname}" if entry.is_linked else ""))
-            if entry.is_linked and self._current_template.tpid == entry.tpid:
+        for key, entry in self.merge_manager.csv_data.items():
+            label = str(entry.path)
+            if entry.is_linked:
+                label += f"  ⇐  {entry.tname}"
+            item = QListWidgetItem(label)
+
+            # Highlight if linked to current template
+            if (entry.is_linked and
+                self._current_template and
+                getattr(self._current_template, "pid", None) == entry.tpid):
                 item.setSelected(True)
                 item.setBackground(Qt.lightGray)
-            self.csv_list.addItem(item) 
+
+            self.csv_list.addItem(item)
+
 
 
     def update_fields(self, template):

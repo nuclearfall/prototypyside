@@ -114,6 +114,10 @@ class MergeManager:
                 return entry.validate_headers(template)
         return {}
 
+    @property
+    def csv_data(self):
+        return self._csv_data
+    
     def deregister(self, tpid):
         self._csv_data.pop(tpid)
 

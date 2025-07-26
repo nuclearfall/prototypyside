@@ -25,3 +25,6 @@ class ComponentListWidget(QListWidget):
         if self.itemAt(event.position().toPoint()):
             self.palette_item_clicked.emit()
         super().mousePressEvent(event)
+
+    def remove_template_by_tpid(self, tpid):
+        pass

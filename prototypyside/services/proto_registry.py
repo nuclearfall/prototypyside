@@ -312,11 +312,17 @@ class RootRegistry(ProtoRegistry):
 
     def remove_child(self, child):
         if child in self._children:
-            # Deregister all objects from this child registry
+            # Deregister all objects
             for key in list(child._store.keys()):
                 child.deregister(key)
-            child.root = None  # Clear its root reference
+
+            # Clean up orphans safely
+            for key in list(child._orphans.keys()):
+                del child._orphans[key]
+
+            child.root = None
             self._children.remove(child)
+
 
     def has(self, pid):
         if pid in self._store:

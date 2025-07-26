@@ -26,7 +26,7 @@ class LayoutTemplate(QGraphicsObject):
     marginsChanged = Signal()
     spacingChanged = Signal()
     orientationChanged = Signal()
-    def __init__(self, pid, registry, name=None, pagination_policy='Letter: 3x3 Standard Cards (2.5"x3.5")', parent=None):
+    def __init__(self, pid, registry, name=None, pagination_policy='Letter: 3x3 Standard 2.5"x3.5" Cards', parent=None):
         super().__init__(parent)
         self._pid = pid
         self._registry = registry
@@ -34,7 +34,7 @@ class LayoutTemplate(QGraphicsObject):
         self._pagination_policy = pagination_policy
         # print(f"Policy is {self._pagination_policy}, DETAILS:\n{PRINT_POLICIES.get(self._pagination_policy)}")
         #### All of these are set from PRINT_POLICIES
-        pol = PRINT_POLICIES.get(pagination_policy)
+        pol = PRINT_POLICIES[pagination_policy]
         self._rows = pol.get("rows")
         self._columns = pol.get("columns")
         self._page_size = pol.get("page_size")
@@ -65,15 +65,20 @@ class LayoutTemplate(QGraphicsObject):
     
     @pagination_policy.setter
     def pagination_policy(self, pol):
-        if pol != self._pagination_policy and pol in PRINT_POLICIES:
-            self._pagination_policy = pol
-            self._rows = pol.get("rows")
-            self._columns = pol.get("columns")
-            self._geometry = pol.get("geometry")
-            self._whitespace = pol.get("whitespace")# ordered [top, bottom, left, right, spacing_x, spacing_y]
-            self._orientation = pol.get("orientation")
-            self.lock_at: int = pol.get("lock_at") # The number of components a given policy will accept.
-            self.updateGrid()
+        # if pol != self._pagination_policy and pol in PRINT_POLICIES:
+        self._pagination_policy = pol
+        pol = PRINT_POLICIES[pol]
+
+        self.rows = pol.get("rows")
+        self.columns = pol.get("columns")
+        self.geometry = pol.get("geometry")
+        self.whitespace = pol.get("whitespace")# ordered [top, bottom, left, right, spacing_x, spacing_y]
+
+        self.setGrid(self._registry, rows=pol.get("rows"), columns=pol.get("columns"))
+        self.orientation = pol.get("orientation")
+        self.lock_at: int = pol.get("lock_at") # The number of components a given policy will accept.
+
+        self.updateGrid()
 
     @property
     def name(self):
@@ -473,10 +478,12 @@ class LayoutTemplate(QGraphicsObject):
                         parent=self
                     )
                     item.setParentItem(self)
-                    print(f"USG.rect for Slot {r}, {c} in pixels {item.geometry.px.rect}")
+                    # print(f"USG.rect for Slot {r}, {c} in pixels {item.geometry.px.rect}")
                     self.items[r][c] = item
-                    if item.scene() is None:
-                        self.scene().addItem(item)
+                    if item and item.scene() is None:
+                        scene = self.scene()
+                        if scene:
+                            scene.addItem(item)
                     item.update()
         # Update the template's row and column counts
 
@@ -507,7 +514,7 @@ class LayoutTemplate(QGraphicsObject):
             for c, slot in enumerate(row):
                 x = left + c * (cell_w + spacing_x)
                 y = top  + r * (cell_h + spacing_y)
-                print(f"Position determined as {x}, {y} in inches at resolution {self._dpi}")
+                # print(f"Position determined as {x}, {y} in inches at resolution {self._dpi}")
 
                 # rect is local to the slot; pos is the offset on the page
                 new_geom = UnitStrGeometry(width=cell_w, height=cell_h, x=x, y=y, unit="in", dpi=self._dpi)
@@ -521,11 +528,11 @@ class LayoutTemplate(QGraphicsObject):
                 if slot.scene() is None and self.scene() is not None:
                     slot.setParentItem(self)
                     self.scene().addItem(slot)
-                print(f"Slot scene pos should be {slot.pos()}")
+                # print(f"Slot scene pos should be {slot.pos()}")
                 #print(f"From updateGrid, slot {r},{c}: {new_geom}\nslot is in scene? {True if slot.scene() else False}")
                 px_rect = self.geometry.to("px", dpi=self._dpi).rect
                 px_pos = self.geometry.to("px", dpi=self._dpi).pos
-                print(f"Painting item at {px_pos} and rect of {px_rect} px with dpi {self._dpi} ")
+                # print(f"Painting item at {px_pos} and rect of {px_rect} px with dpi {self._dpi} ")
         self.update()
         self.template_changed.emit()
 

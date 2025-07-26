@@ -272,7 +272,7 @@ class UnitStrGeometryField(QWidget):
 
         new_geometry = UnitStrGeometry(
             x=x_val, y=y_val, width=w_val, height=h_val,
-            unit=self._old_geometry.unit, dpi=self.dpi, 
+            unit=self._old_geometry.unit, dpi=self._old_geometry.dpi, 
         )
 
         # If value is unchanged, just re-format the text and lose focus.

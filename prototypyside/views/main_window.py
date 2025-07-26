@@ -4,7 +4,7 @@ import sys
 import json
 from pathlib import Path
 from typing import Optional, List, Dict, Any
-
+import gc
 from PySide6.QtWidgets import (QMainWindow, QDockWidget, QTabWidget, QWidget,
                                QVBoxLayout, QLabel, QFileDialog, QMessageBox,
                                QToolBar, QPushButton, QHBoxLayout, QSizePolicy) # Added QPushButton, QHBoxLayout for temporary property panel layout
@@ -86,7 +86,7 @@ class MainDesignerWindow(QMainWindow):
         self.setup_actions_and_menus()
 
         # Add initial tabs
-        self.add_new_tab(LayoutTab, "lt")
+        # self.add_new_tab(LayoutTab, "lt")
         self.add_new_tab(ComponentTab, "ct")
 
 
@@ -521,11 +521,32 @@ class MainDesignerWindow(QMainWindow):
         self.registry.remove_child(registry)
 
         if tab_to_close:
-            # Optionally ask to save before closing
-            # if isinstance(tab_to_close, ComponentTab) and tab_to_close.is_dirty: # You'd need a dirty flag in ComponentTab
-            #     reply = QMessageBox.question(...)
-            self.tab_widget.removeTab(index)
-            tab_to_close.deleteLater() # Important to clean up
+            template_pid = tab_to_close.template.pid
+            self.merge_manager.deregister(template_pid)  # If you store merged rows by pid
+            self.remove_template_from_all_tabs(template_pid)
+            tab_to_close.cleanup()
+            template = tab_to_close.template
+            scene = tab_to_close.scene
+            if template in scene.items():  # or however your scene stores items
+                scene.removeItem(template)
+            tab_to_close.undo_stack.clear()
+            tab_to_close.deleteLater()
+            gc.collect()
+
+    def remove_template_from_all_tabs(self, template_pid: str):
+        """
+        Scan all tabs and remove the template from the palette
+        if it's present in any open tab.
+        """
+        for i in range(self.tab_widget.count()):
+            tab = self.tab_widget.widget(i)
+            template = getattr(tab, "template", None)
+            if not template:
+                continue
+
+            if getattr(template, "pid", None) == template_pid:
+                tab.palette.remove_template_by_tpid(template_pid)
+                break  # Once found, stop (unless you expect duplicates)
 
     @Slot()
     def save_template(self):

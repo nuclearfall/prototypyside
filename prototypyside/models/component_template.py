@@ -8,6 +8,9 @@ import csv
 import json
 from pathlib import Path
 from PySide6.QtWidgets import QMessageBox
+import weakref
+import gc
+import traceback
 
 from prototypyside.models.component_element import ComponentElement
 from prototypyside.models.image_element import ImageElement
@@ -40,6 +43,7 @@ class ComponentTemplate(QGraphicsObject):
         self._geometry = geometry
         self._dpi = 300
         self._unit = "px"
+        self._corner_radius = corner_radius
         self._bleed = UnitStr("0.125in", unit="in", dpi=300)
         self._pixmap = None
         self.items: List['ComponentElement'] = []
@@ -49,6 +53,20 @@ class ComponentTemplate(QGraphicsObject):
         self._csv_row = []
         self._csv_path: Path = None 
         self.content = None
+        weakref.finalize(self, self._on_finalize)
+
+    def _on_finalize(self):
+        print(f"\n[DEBUG] ComponentTemplate {getattr(self, 'pid', 'unknown')} finalized")
+        print(">>> Remaining references (may include stack frames):")
+        for ref in gc.get_referrers(self):
+            try:
+                print(f" - {type(ref)}: {repr(ref)[:120]}")
+            except RuntimeError as e:
+                print(f" - {type(ref)}: <unavailable: {e}>")
+
+        print(">>> Object was constructed at:")
+        import traceback
+        traceback.print_stack(limit=4)  # shows where template was created
 
     @property
     def name(self):
@@ -132,7 +150,7 @@ class ComponentTemplate(QGraphicsObject):
         self._geometry = new_geom
         super().setPos(self._geometry.px.pos)
         if not self.tpid:
-            self.template_changed.emit(self.tpid)
+            self.template_changed.emit()
         self.update()
 
     def boundingRect(self) -> QRectF:
@@ -270,7 +288,7 @@ class ComponentTemplate(QGraphicsObject):
         self._normalize_z_values()
         self.item_z_order_changed.emit()
         if not self.tpid:
-            self.template_changed.emit(self.tpid)
+            self.template_changed.emit()
 
     def _normalize_z_values(self):
         """Ensure all items have unique, ordered z-values"""
@@ -318,7 +336,7 @@ class ComponentTemplate(QGraphicsObject):
         if path.exists():
             self._background_image = path
             if not self.tpid:
-                self.template_changed.emit(self.tpid)
+                self.template_changed.emit()
             self.update()
         else:
             self._background_image = None

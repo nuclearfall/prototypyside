@@ -20,7 +20,7 @@ from prototypyside.utils.units.unit_str_helpers import geometry_with_px_pos
 from prototypyside.utils.units.unit_str_geometry import UnitStrGeometry
 from prototypyside.views.overlays.incremental_grid import IncrementalGrid
 # from prototypyside.views.overlays.print_lines import PrintLines
-
+from prototypyside.models.component_template import ComponentTemplate
 from prototypyside.models.component_element import ComponentElement
 from prototypyside.models.text_element import TextElement
 from prototypyside.models.image_element import ImageElement
@@ -79,7 +79,7 @@ class ComponentTab(QWidget):
 
     @template.setter
     def template(self, new):
-        if new != self.template and isinstance(new, ComponentTemplate):
+        if new != self._template and isinstance(new, ComponentTemplate):
             self._template = new
 
     @property
@@ -104,7 +104,6 @@ class ComponentTab(QWidget):
         # self.create_font_toolbar()
         self.create_measure_toolbar()
         toolbar_container.addWidget(self.measure_toolbar)
-  
 
         main_layout.addLayout(toolbar_container)
 
@@ -160,7 +159,10 @@ class ComponentTab(QWidget):
         self.scene.item_cloned.connect(self.clone_item)
         self.scene.item_resized.connect(self.on_property_changed)
 
-        
+    def cleanup(self):
+        self.undo_stack.clear()
+        self.scene.clear()
+        self._template = None
 
     @Slot()
     def update_component_scene(self):
@@ -249,7 +251,7 @@ class ComponentTab(QWidget):
             dim.valueChanged.connect(self.on_template_geometry_changed)
 
         self.border_label = QLabel("Border")
-        self.border_width_field = UnitField(self.template, "border", self.unit, self)
+        self.border_width_field = UnitField(self.template, "border_width", self.unit, self)
         self.border_width_field.valueChanged.connect(self.set_template_border)
         self.border_width_field.setMaximumWidth(80)
         self.corners_label = QLabel("Corner Radius")

@@ -41,63 +41,84 @@ PAGE_SIZES = {
 }
 
 PRINT_POLICIES = {
-    'Letter: 3x3 Standard Cards (2.5"x3.5")': {
+    'Letter: 3x3 Standard 2.5"x3.5" Cards': {
         "page_size": "Letter (8.5x11 inches)",
         "geometry": UnitStrGeometry(width="8.5in", height="11in", unit="in", dpi=300),
         "orientation": False,
         "rows": 3,
         "columns": 3,
-        "whitespace": [            # margins: top, bottom, left, right — spacing: x, y
-            UnitStr("0.25in", dpi=300), 
-            UnitStr("0.25in", dpi=300),
-            UnitStr("0.5in", dpi=300),
-            UnitStr("0.5in", dpi=300),
-            UnitStr("0.0in", dpi=300),
-            UnitStr("0.0in", dpi=300)
+        "whitespace": [
+            UnitStr("0.25in", dpi=300),  # top
+            UnitStr("0.25in", dpi=300),  # bottom
+            UnitStr("0.5in", dpi=300),   # left
+            UnitStr("0.5in", dpi=300),   # right
+            UnitStr("0.0in", dpi=300),   # spacing_x
+            UnitStr("0.0in", dpi=300)    # spacing_y
         ],
         "duplex": False,
         "oversized": False,
-        "lock_at": 1,
-        # "component_geometry": UnitStrGeometry(width="2.5in", height="3.5in", unit="in", dpi=300),
-        # "component_bleed": UnitStrGeometry(width="0.0in", height="0.0in", unit="in", dpi=300)
+        "lock_at": 1
     },
-    'Letter: 2x4 Standard Front & Back (2.5"x3.5")': {
+    'Letter: 2x4 Standard 2.5"x3.5" Cards': {
         "page_size": "Letter (8.5x11 inches)",
-        "geometry": UnitStrGeometry(width="11.0in", height="8.5in", unit="in", dpi=300),
+        "geometry": UnitStrGeometry(width="8.5in", height="11in", unit="in", dpi=300),
         "orientation": True,
-        "rows": 2,
-        "columns": 4,
-        "whitespace": [            # margins: top, bottom, left, right — spacing: x, y
-            UnitStr("0.75in", dpi=300), 
+        "rows": 4,
+        "columns": 2,
+        "whitespace": [
+            UnitStr("0.75in", dpi=300),
             UnitStr("0.75in", dpi=300),
             UnitStr("0.5in", dpi=300),
             UnitStr("0.5in", dpi=300),
             UnitStr("0.0in", dpi=300),
             UnitStr("0.0in", dpi=300)
         ],
-        "oversized": False,
-        "static": False,
-        "lock_at": 2,
-        # "component_geometry": UnitStrGeometry(width="2.5in", height="3.5in", unit="in", dpi=300),
-        # "component_bleed": UnitStrGeometry(width="0.0in", height="0.0in", unit="in", dpi=300)
+        "lock_at": 2
     },
-    'Letter: 2x4 Standard Front & Back (2.5"x3.5")': {
+    'Letter: 10x13 Small 0.5" Tokens': {
         "page_size": "Letter (8.5x11 inches)",
         "geometry": UnitStrGeometry(width="8.5in", height="11in", unit="in", dpi=300),
-        "orientation": True,
-        "rows": 3,
-        "columns": 3,
-        "whitespace": [            # margins: top, bottom, left, right — spacing: x, y
-            UnitStr("0.25in", dpi=300), 
+        "orientation": False,
+        "rows": 13,
+        "columns": 9,
+        "whitespace": [
+            UnitStr("0.5in", dpi=300),
+            UnitStr("0.5in", dpi=300),
+            UnitStr("0.5in", dpi=300),
+            UnitStr("0.5in", dpi=300),
             UnitStr("0.25in", dpi=300),
+            UnitStr("0.25in", dpi=300)
+        ]
+    },
+    'Letter: 7x10 Medium 0.75" Tokens': {
+        "page_size": "Letter (8.5x11 inches)",
+        "geometry": UnitStrGeometry(width="8.5in", height="11in", unit="in", dpi=300),
+        "orientation": False,
+        "rows": 10,
+        "columns": 7,
+        "whitespace": [
             UnitStr("0.5in", dpi=300),
             UnitStr("0.5in", dpi=300),
-            UnitStr("0.0in", dpi=300),
-            UnitStr("0.0in", dpi=300)
-        ],
-        "lock_at": 2,
-        # "component_geometry": UnitStrGeometry(width="2.5in", height="3.5in", unit="in", dpi=300),
-        # "component_bleed": UnitStrGeometry(width="0.0in", height="0.0in", unit="in", dpi=300)
+            UnitStr("0.5in", dpi=300),
+            UnitStr("0.5in", dpi=300),
+            UnitStr("0.25in", dpi=300),
+            UnitStr("0.25in", dpi=300)
+        ]
+    },
+    'Letter: 6x9 Standard 1.0" Tokens': {
+        "page_size": "Letter (8.5x11 inches)",
+        "geometry": UnitStrGeometry(width="8.5in", height="11in", unit="in", dpi=300),
+        "orientation": False,
+        "rows": 8,
+        "columns": 6,
+        "whitespace": [
+            UnitStr("0.5in", dpi=300),
+            UnitStr("0.5in", dpi=300),
+            UnitStr("0.5in", dpi=300),
+            UnitStr("0.5in", dpi=300),
+            UnitStr("0.125in", dpi=300),
+            UnitStr("0.125in", dpi=300)
+        ]
     }
 }
 

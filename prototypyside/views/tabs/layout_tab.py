@@ -314,6 +314,10 @@ class LayoutTab(QWidget):
         self.template.updateGrid()
         self.view.fitInView(self.scene.sceneRect(), Qt.KeepAspectRatio)
 
+    def cleanup(self):
+        self.scene.clear()  # Clears all graphics items
+        self.template = None  # Drop reference to ComponentTemplate
+        
     @Slot(str)
     def on_confirm_template(self, pid):
         comp = self.registry.global_get(pid)
@@ -334,8 +338,8 @@ class LayoutTab(QWidget):
     @Slot(str)
     def pagination_policy_changed(self, new):
         template = self.template
-        old = self.template.policy
-        self.on_property_changed(template, "policy", new, old)
+        old = self.template.pagination_policy
+        self.on_property_changed(template, "pagination_policy", new, old)
         self.template.update()
 
     @Slot(int, int)
