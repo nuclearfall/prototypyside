@@ -492,10 +492,11 @@ class MainDesignerWindow(QMainWindow):
                                        main_window=self,
                                        registry=registry,
                                        template=obj)
-            if hasattr(obj, "csv_path"):
+            if hasattr(obj, "csv_path") and obj.csv_path:
                 self.merge_manager.load_csv(obj.csv_path, obj)
                 print(f"Template {obj.name} successfully loaded csv at path: {obj.csv_path}")      
             idx = self.tab_widget.addTab(new_tab, Path(path).stem)
+            new_tab.file_path = path
             self.tab_widget.setCurrentIndex(idx)
         except Exception as e:
             QMessageBox.critical(self, "Error Opening File", str(e))
@@ -503,6 +504,7 @@ class MainDesignerWindow(QMainWindow):
 
     @Slot(int)
     def close_tab(self, index: int):
+
         if self.tab_widget.count() < 2:
             reply = QMessageBox.question(self, "Close Last Tab",
                                          "This is the last tab. Are you sure you want to close it? "
@@ -515,6 +517,9 @@ class MainDesignerWindow(QMainWindow):
             return
 
         tab_to_close = self.tab_widget.widget(index)
+        registry = tab_to_close.template.registry
+        self.registry.remove_child(registry)
+
         if tab_to_close:
             # Optionally ask to save before closing
             # if isinstance(tab_to_close, ComponentTab) and tab_to_close.is_dirty: # You'd need a dirty flag in ComponentTab
@@ -527,7 +532,6 @@ class MainDesignerWindow(QMainWindow):
         tab = self.get_current_tab()
         if not tab:
             return
-
         path = tab.file_path
         if not path:
             self.save_as_template()
@@ -814,7 +818,7 @@ class MainDesignerWindow(QMainWindow):
         try:
 
             export_manager = ExportManager(settings=self.settings, registry=self.export_registry, merge_manager=self.merge_manager, dpi=600)
-            export_manager.export_to_pdf(template, output_path)
+            export_manager.export_with_vector_text_to_pdf(template, output_path)
             QMessageBox.information(self, "Export Complete", f"PDF successfully saved:\n{output_path}")
         except Exception as e:
             QMessageBox.critical(self, "Export Failed", f"An error occurred during export:\n{e}")

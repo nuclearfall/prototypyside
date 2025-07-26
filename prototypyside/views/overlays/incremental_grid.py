@@ -4,11 +4,11 @@ from PySide6.QtWidgets import QGraphicsItem
 from prototypyside.utils.units.unit_str import UnitStr
 
 DEFAULT_INCREMENTS = {   # used when caller passes increment=None
-    "cm": {3: 0.25, 2: 0.50, 1:  2.0},
-    "mm": {4:    2.5, 3:   5, 2: 10.0, 1:25},
-    "in": {4:0.125, 3: 0.25, 2:  0.5, 1: 1.0},
-    "px": {3:   10, 2:   50, 1:100.0},
-    "pt": {4:    4.5, 3: 9, 2:   36, 1: 72.0},
+    "cm": {4: 0.125,  3: 0.25, 2: 0.50, 1: 2.0},
+    "mm": {4: 2.5,    3:   5,  2: 10.0, 1:  25},
+    "in": {4: 0.0625,3: 0.125, 2:  0.25, 1: 0.5},
+    "px": {4: 5,      3:   10, 2:   50, 1:100.0},
+    "pt": {4: 4.5,    3:    9, 2:   36, 1: 72.0},
 }
 
 
@@ -107,6 +107,13 @@ class IncrementalGrid(QGraphicsItem):
                 top = int(rect.top())
                 bottom = int(rect.bottom())
 
+                # Set line width to 2 for level 1
+                if level == 1: # Assuming 'level' is the numerical representation of the level
+                    pen.setWidth(2)
+                else:
+                    pen.setWidth(1) # Default to 1 pixel for other levels
+
+                painter.setPen(pen)
                 # vertical lines
                 x = left - (left % spacing)
                 while x < right:
@@ -144,7 +151,7 @@ class IncrementalGrid(QGraphicsItem):
     def isSnapEnabled(self) -> bool:
         return self._snap
 
-    def snap_to_grid(self, pos: QPointF, level: int = 3) -> QPointF:
+    def snap_to_grid(self, pos: QPointF, level: int = 4) -> QPointF:
         if not self._snap:
             return pos
         spacing = self.get_grid_spacing(level)

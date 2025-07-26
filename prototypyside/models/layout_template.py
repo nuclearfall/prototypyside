@@ -10,7 +10,7 @@ from PySide6.QtGui import QPainter, QPixmap, QColor, QImage, QPen, QBrush,  QPag
 from prototypyside.models.layout_slot import LayoutSlot
 from prototypyside.utils.units.unit_str import UnitStr
 from prototypyside.utils.units.unit_str_geometry import UnitStrGeometry
-from prototypyside.utils.ustr_helpers import geometry_with_px_rect, geometry_with_px_pos
+from prototypyside.utils.units.unit_str_helpers import geometry_with_px_rect, geometry_with_px_pos
 from prototypyside.config import PAGE_SIZES, DISPLAY_MODE_FLAGS, PAGE_UNITS
 from prototypyside.utils.proto_helpers import get_prefix, resolve_pid
 from prototypyside.services.pagination.page_manager import PRINT_POLICIES, PAGE_SIZES
@@ -256,8 +256,7 @@ class LayoutTemplate(QGraphicsObject):
                     if isinstance(slot_img, QImage):
                         size = slot.geometry.to("px", dpi=self._dpi).size 
                         pos = slot.geometry.to("px", dpi=self._dpi).pos
-                        target_rect = QRectF(pos, size)
-                        print(f"Slot image drawn with rect {target_rect}")
+                        target_rect = QRectF(pos, size)      
                         painter.drawImage(target_rect, slot_img)
         painter.end()
         return image

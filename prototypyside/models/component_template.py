@@ -14,7 +14,7 @@ from prototypyside.models.image_element import ImageElement
 from prototypyside.models.text_element import TextElement
 from prototypyside.utils.units.unit_str import UnitStr
 from prototypyside.utils.units.unit_str_geometry import UnitStrGeometry
-from prototypyside.utils.ustr_helpers import geometry_with_px_pos, geometry_with_px_rect
+from prototypyside.utils.units.unit_str_helpers import geometry_with_px_pos, geometry_with_px_rect
 from prototypyside.utils.proto_helpers import get_prefix, resolve_pid
 # Use TYPE_CHECKING for type hinting
 if TYPE_CHECKING:
@@ -132,7 +132,7 @@ class ComponentTemplate(QGraphicsObject):
         self._geometry = new_geom
         super().setPos(self._geometry.px.pos)
         if not self.tpid:
-            self.template_updated.emit(self.tpid)
+            self.template_changed.emit(self.tpid)
         self.update()
 
     def boundingRect(self) -> QRectF:
@@ -202,8 +202,10 @@ class ComponentTemplate(QGraphicsObject):
             self.template_changed.emit()
 
     def add_item(self, item):
-        if item in self.items:
-            return
+        if item.pid in self.registry.orphans():
+            self.registry.reinsert(item.pid)
+        elif not self.registry.get(item.pid):
+            self.registry.register(item)
         max_z = max([e.zValue() for e in self.items], default=0)
         item.setZValue(max_z + 100)
         self.items.append(item)
@@ -214,8 +216,7 @@ class ComponentTemplate(QGraphicsObject):
             self.items.remove(item)
             self.template_changed.emit()
             self.item_z_order_changed.emit()
-            if not self.tpid:
-                self.template_updated.emit(self.tpid)
+            self.registry.deregister(item)
 
     def update_from_template(self, tpid):
         if not self.tpid:
@@ -269,7 +270,7 @@ class ComponentTemplate(QGraphicsObject):
         self._normalize_z_values()
         self.item_z_order_changed.emit()
         if not self.tpid:
-            self.template_updated.emit(self.tpid)
+            self.template_changed.emit(self.tpid)
 
     def _normalize_z_values(self):
         """Ensure all items have unique, ordered z-values"""
@@ -317,7 +318,7 @@ class ComponentTemplate(QGraphicsObject):
         if path.exists():
             self._background_image = path
             if not self.tpid:
-                self.template_updated.emit(self.tpid)
+                self.template_changed.emit(self.tpid)
             self.update()
         else:
             self._background_image = None
@@ -336,7 +337,7 @@ class ComponentTemplate(QGraphicsObject):
             option: QStyleOptionGraphicsItem from the scene (unused).
             widget: Optional QWidget; unused.
         """
-        rect = self.geometry.to("px", dpi=self.dpi).rect
+        rect = self.geometry.to(self.unit, dpi=self.dpi).rect
         painter.setRenderHint(QPainter.Antialiasing)
 
         # ——— Background ———
@@ -361,7 +362,7 @@ class ComponentTemplate(QGraphicsObject):
             painter.setBrush(Qt.NoBrush)
 
             # Convert border_width thickness to unit
-            thickness = self.border_width.to("px", dpi=self.dpi)
+            thickness = self.border_width.to(self.unit, dpi=self.dpi)
             inset = thickness / 2.0
 
             inner = QRectF(
@@ -373,7 +374,7 @@ class ComponentTemplate(QGraphicsObject):
 
             # Clamp the radius to avoid exceeding available space
             max_radius = min(inner.width(), inner.height()) / 2.0
-            radius = max(0.0, min(self.corner_radius.to("px", dpi=self.dpi) - inset, max_radius))
+            radius = max(0.0, min(self.corner_radius.to(self.unit, dpi=self.dpi) - inset, max_radius))
 
             # Rounded or regular rect
             path = QPainterPath()

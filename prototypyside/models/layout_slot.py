@@ -12,7 +12,7 @@ from prototypyside.models.vector_element import VectorElement
 from prototypyside.utils.unit_converter import to_px, page_in_px, page_in_units, compute_scale_factor
 from prototypyside.utils.units.unit_str import UnitStr
 from prototypyside.utils.units.unit_str_geometry import UnitStrGeometry
-from prototypyside.utils.ustr_helpers import geometry_with_px_rect, geometry_with_px_pos
+from prototypyside.utils.units.unit_str_helpers import geometry_with_px_rect, geometry_with_px_pos
 from prototypyside.config import PAGE_SIZES, DISPLAY_MODE_FLAGS, PAGE_UNITS
 from prototypyside.utils.proto_helpers import get_prefix, resolve_pid
 if TYPE_CHECKING:

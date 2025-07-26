@@ -1,21 +1,21 @@
 from math import ceil
 from PySide6.QtCore import QSizeF
-from PySide6.QtGui  import QPainter, QPdfWriter, QImage, QPageSize, QPageLayout, QStyleOptionGraphicsItem
-from PySide6.QtWidgets import QGraphicsScene
+from PySide6.QtGui  import QPainter, QPdfWriter, QImage, QPageSize, QPageLayout
+from PySide6.QtWidgets import QGraphicsScene, QStyleOptionGraphicsItem
 from prototypyside.models.text_element import TextElement
 from prototypyside.models.vector_element import VectorElement
 from prototypyside.utils.units.unit_str_geometry import UnitStrGeometry
-from PySide6.QtCore import Qt, QSizeF, QRectF, QMarginsF
+from PySide6.QtCore import Qt, QSizeF, QRectF, QMarginsF, QPointF
 from pathlib import Path
 from itertools import zip_longest
 
 class ExportManager:
     # Here we're setting dpi to 600 and downscaling to 300 for print.
-    def __init__(self, settings, registry, merge_manager, dpi):
+    def __init__(self, settings, registry, merge_manager, dpi=300):
         print(f'Setting received from {settings}')
         # self.original_dpi = settings.dpi 
         self.settings = settings
-        self.dpi = self.settings.print_dpi
+        self.settings.print_dpi = 300
         self.registry = registry
         self.merge_manager = merge_manager
 
@@ -73,7 +73,7 @@ class ExportManager:
         #         pages.append(page)
         #     return pages
 
-    def export_to_pdf(self, layout, output_path, scale_to_300=True):
+    def export_to_pdf(self, layout, output_path, scale_to_300=False):
         pages = self.paginate(layout)
         self.dpi = self.settings.print_dpi # Keep this one
         page_size_pt = layout.geometry.to("pt", dpi=self.dpi).size
@@ -97,7 +97,7 @@ class ExportManager:
             if i > 0:
                 writer.newPage()
             page.dpi = self.settings.print_dpi # This should cause cache invalidation and force redraw with new dpi
-
+            page.updateGrid()
             img = getattr(page, "image", None)
             # Optional: Smooth scaling
             if scale_to_300:
@@ -118,7 +118,10 @@ class ExportManager:
         painter.end()
 
     def export_with_vector_text_to_pdf(self, layout, output_path, scale_to_300=True):
-        """Export pages while drawing text as vector graphics."""
+        """
+        Export pages while drawing text as vector graphics.
+        Render raster at 600 DPI for quality, scale to 300 DPI for output balance
+        """
         pages = self.paginate(layout)
         self.dpi = self.settings.print_dpi
 
@@ -156,19 +159,25 @@ class ExportManager:
             target_rect = QRectF(0, 0, page_size_pt.width(), page_size_pt.height())
             painter.drawImage(target_rect, img)
 
-            # Overlay text and vector elements as vector graphics
             for slot in page.slots:
                 if not slot.content:
                     continue
-                slot_pos = slot.geometry.to("px", dpi=self.settings.print_dpi).pos
+                slot_pos_px = slot.geometry.to("px", dpi=self.settings.print_dpi).pos
+
                 painter.save()
-                painter.scale(scale_pt_per_px, scale_pt_per_px)
-                painter.translate(slot_pos)
+
+                # Scale painter so 1 unit = 1 px at 300 DPI = 72 pts
+                scale = self.settings.print_dpi / 72.0  # e.g. 4.166
+                slot_pos_pt = QPointF(slot_pos_px.x() / scale, slot_pos_px.y() / scale)
+                painter.translate(slot_pos_pt)
+                painter.scale(1 / scale, 1 / scale)
+
                 for item in slot.content.items:
                     if isinstance(item, (TextElement, VectorElement)):
                         painter.save()
                         painter.translate(item.pos())
                         bounds = item.boundingRect()
+                        UnitStrGeometry(rect=bounds, pos=item.pos(), dpi=300)
                         painter.setClipRect(QRectF(0, 0, bounds.width(), bounds.height()))
                         item.paint(painter, option, widget=None)
                         painter.restore()

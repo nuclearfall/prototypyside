@@ -203,7 +203,6 @@ class ProtoRegistry(QObject):
             return
         self._orphans[pid] = obj
         self.object_deregistered.emit(obj.pid)
-        self.object_orphaned.emit(obj.pid)
 
     @classmethod
     def from_dict(cls, data, registry, is_clone=False):
@@ -313,13 +312,14 @@ class RootRegistry(ProtoRegistry):
     def add_child(self, child):
         child.root = self
         self._children.append(child)
-        # child.object_registered.connect(self._repeat_registered)
-        # child.object_deregistered.connect(self._repeat_deregistered)
 
     def remove_child(self, child):
-        child = self._children.pop(child)
-        for key, obj in child._store.items():
-            child.deregister(key)
+        if child in self._children:
+            # Deregister all objects from this child registry
+            for key in list(child._store.keys()):
+                child.deregister(key)
+            child.root = None  # Clear its root reference
+            self._children.remove(child)
 
     def has(self, pid):
         if pid in self._store:

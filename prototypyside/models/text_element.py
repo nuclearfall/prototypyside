@@ -15,13 +15,14 @@ from PySide6.QtGui import (
     QPixmap,
     QPalette,
     QAbstractTextDocumentLayout,
+    QTextCursor, 
+    QTextBlockFormat
 )
 from PySide6.QtWidgets import QGraphicsItem, QGraphicsObject
-
 from prototypyside.utils.qt_helpers import qfont_from_string
 from prototypyside.utils.units.unit_str import UnitStr
 from prototypyside.utils.units.unit_str_geometry import UnitStrGeometry
-from prototypyside.utils.ustr_helpers import geometry_with_px_rect, geometry_with_px_pos
+from prototypyside.utils.units.unit_str_helpers import geometry_with_px_rect, geometry_with_px_pos
 from prototypyside.config import HandleType, ALIGNMENT_MAP
 from prototypyside.utils.proto_helpers import get_prefix, resolve_pid
 from prototypyside.models.component_element import ComponentElement
@@ -81,31 +82,56 @@ class TextElement(ComponentElement):
 
         return inst
 
-    def paint(self, painter, option, widget=None):
-        super().paint(painter, option, widget)
 
-        rect = self.geometry.to("px", dpi=self.dpi).rect
+    # def paint(self, painter, option, widget=None):
+    #     painter.save()
+    #     # Convert geometry to px at current DPI
+    #     rect = self.geometry.to("px", dpi=self.dpi).rect
+    #     print(f'Rect dimensions are {self.geometry.px.rect} at {self.dpi}')
+
+    #     # Set font size using DPI scaling
+    #     font = QFont(self.font)
+    #     font.setPointSize(int(font.pointSizeF() * self.dpi / 72.0))  # Convert pt → px
+    #     painter.setFont(font)
+
+    #     # Set color
+    #     painter.setPen(QPen(self.color))
+
+    #     # Draw unformatted text
+    #     painter.drawText(rect, self.alignment_flags, self.content or "")
+
+    #     painter.restore()
+
+
+    def paint(self, painter, option, widget=None):
         painter.save()
 
-        # 1) build the document
-        doc = QTextDocument()
-        doc.setDefaultFont(self.font)
+        # Render geometry as pixels at given DPI
+        rect = self.geometry.to("px", dpi=self.dpi).rect
 
-        # force text color
+        # Build the document
+        doc = QTextDocument()
+
+        # FONT SIZE MUST BE SET IN PIXELS — because painter is scaled to px
+        font = QFont(self.font)
+        font.setPixelSize(int(font.pointSizeF() * self.dpi / 72.0))  # px = pt * dpi / 72
+        doc.setDefaultFont(font)
+
+        # Text styling
         ctx = QAbstractTextDocumentLayout.PaintContext()
         ctx.palette.setColor(QPalette.Text, self.color)
-
         doc.setDocumentMargin(0)
         doc.setDefaultTextOption(QTextOption(self.alignment_flags))
         doc.setPlainText(self.content or "")
         doc.setTextWidth(rect.width())
 
-        # 2) clip if needed
+        # Clip if text overflows rect
         if doc.size().height() > rect.height():
             painter.setClipRect(rect)
 
-        # 3) translate into position and draw
+        # Paint at correct position in px space
         painter.translate(rect.topLeft())
         doc.documentLayout().draw(painter, ctx)
 
         painter.restore()
+

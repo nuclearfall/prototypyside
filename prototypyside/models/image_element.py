@@ -114,6 +114,7 @@ class ImageElement(ComponentElement):
         for attr, (key, _, to_fn, default) in self._subclass_serializable.items():
             val = getattr(self, f"_{attr}", default)
             data[key] = to_fn(val)
+
         return data
 
     @classmethod
@@ -125,7 +126,7 @@ class ImageElement(ComponentElement):
                 setattr(inst, f"{attr}", from_fn(raw))
             else:
                 setattr(inst, f"_{attr}", from_fn(raw))
-        content = inst.content
+        content = data.get("content")
         inst.content = None
         inst.content = content
         return inst

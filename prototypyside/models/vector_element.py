@@ -59,6 +59,14 @@ class VectorElement(ComponentElement):
             painter.restore()
         super().paint(painter, option, widget)
 
+    @classmethod
+    def from_dict(cls, data: dict, registry, is_clone=False):
+        inst = super().from_dict(data, registry, is_clone)
+        content = data.get("content")
+        inst.content = None
+        inst.content = content
+        return inst
+
     # --- Drag and drop / double click ---
     def dragEnterEvent(self, event: QGraphicsSceneDragDropEvent):
         if event.mimeData().hasUrls():

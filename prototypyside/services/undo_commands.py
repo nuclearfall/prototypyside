@@ -95,12 +95,12 @@ class RemoveElementCommand(QUndoCommand):
         self.tab = tab
 
     def redo(self):
-        self.tab.registry.deregister(self.item.pid)
+        self.tab.template.remove_item(self.item)
         self.tab.scene.removeItem(self.item)
         self.tab.update_layers_panel()
 
     def undo(self):
-        self.tab.registry.reinsert(self.item.pid)
+        self.tab.template.add_item(self.item)
         self.tab.scene.addItem(self.item)
         self.tab.update_layers_panel()
 

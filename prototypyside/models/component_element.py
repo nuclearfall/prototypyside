@@ -8,7 +8,7 @@ from prototypyside.views.graphics_items import ResizeHandle
 from prototypyside.utils.qt_helpers import qrectf_to_list, list_to_qrectf, qfont_from_string
 from prototypyside.utils.units.unit_str import UnitStr
 from prototypyside.utils.units.unit_str_geometry import UnitStrGeometry
-from prototypyside.utils.ustr_helpers import geometry_with_px_rect, geometry_with_px_pos
+from prototypyside.utils.units.unit_str_helpers import geometry_with_px_rect, geometry_with_px_pos
 from prototypyside.config import HandleType, ALIGNMENT_MAP
 from prototypyside.utils.proto_helpers import get_prefix, resolve_pid
 

@@ -16,7 +16,7 @@ from prototypyside.views.panels.property_panel import PropertyPanel
 from prototypyside.views.panels.layers_panel import LayersListWidget
 from prototypyside.views.palettes.palettes import ComponentListWidget
 from prototypyside.widgets.unit_field import UnitField
-from prototypyside.utils.ustr_helpers import geometry_with_px_pos
+from prototypyside.utils.units.unit_str_helpers import geometry_with_px_pos
 from prototypyside.utils.units.unit_str_geometry import UnitStrGeometry
 from prototypyside.views.overlays.incremental_grid import IncrementalGrid
 # from prototypyside.views.overlays.print_lines import PrintLines
@@ -485,7 +485,7 @@ class ComponentTab(QWidget):
     def add_item_from_drop(self, scene_pos: QPointF, item_type: str):
         self.scene.clearSelection()
         rect = UnitStrGeometry(width="0.5in", height="0.25in", dpi=self.template.dpi)
-        new_geometry = geometry_with_px_pos(rect, scene_pos)
+        new_geometry = geometry_with_px_pos(rect, scene_pos, dpi=self.dpi)
         command = AddElementCommand(item_type, self, new_geometry)
         self.undo_stack.push(command)
         self.selected_item = self.registry.get_last()

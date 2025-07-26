@@ -12,7 +12,7 @@ from PySide6.QtWidgets import (
 
 from prototypyside.services.undo_commands import MoveElementCommand, ChangePropertyCommand
 from prototypyside.utils.graphics_item_helpers import is_movable
-from prototypyside.utils.ustr_helpers import geometry_with_px_pos
+from prototypyside.utils.units.unit_str_helpers import geometry_with_px_pos
 from prototypyside.models.component_element import ComponentElement
 
 if TYPE_CHECKING:
@@ -86,7 +86,7 @@ class ComponentScene(QGraphicsScene):
         self.inc_grid.update()
 
     # Public helper for FSM / tools
-    def snap_to_grid(self, pos: QPointF, level: int = 3) -> QPointF:
+    def snap_to_grid(self, pos: QPointF, level: int = 4) -> QPointF:
         return self.inc_grid.snap_to_grid(pos, level)
 
     def select_exclusive(self, item: QGraphicsItem):
@@ -174,9 +174,9 @@ class ComponentScene(QGraphicsScene):
         if self._dragging_item and self._dragging_start_pos is not None:
             geom = self._dragging_item.geometry
             old_pos = self._dragging_start_pos
-            old = geometry_with_px_pos(geom, old_pos)
+            old = geometry_with_px_pos(geom, old_pos, dpi=self.dpi)
             new_pos = self._dragging_item.pos()
-            new = geometry_with_px_pos(geom, new_pos)
+            new = geometry_with_px_pos(geom, new_pos, dpi=self.dpi)
 
             if old_pos != new_pos:
                 self.item_resized.emit(self._dragging_item, "geometry", new, old)
