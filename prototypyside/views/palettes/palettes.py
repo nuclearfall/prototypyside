@@ -5,7 +5,7 @@ from PySide6.QtGui import QDrag, QMouseEvent
 from PySide6.QtWidgets import QListWidget, QListWidgetItem
 
 class ComponentListWidget(QListWidget):
-    palette_item_clicked = Signal()
+    palette_item_clicked = Signal(str)
 
     def startDrag(self, supportedActions: Qt.DropActions) -> None:
         item = self.currentItem()
@@ -22,8 +22,10 @@ class ComponentListWidget(QListWidget):
         drag.exec(supportedActions)
 
     def mousePressEvent(self, event: QMouseEvent) -> None:
-        if self.itemAt(event.position().toPoint()):
-            self.palette_item_clicked.emit()
+        item = self.itemAt(event.position().toPoint())
+        if item:
+            prefix = item.data(Qt.UserRole)
+            self.palette_item_clicked.emit(prefix)
         super().mousePressEvent(event)
 
     def remove_template_by_tpid(self, tpid):

@@ -7,7 +7,7 @@ from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QComboBox, QCheckBox,
     QLineEdit, QLabel, QToolBar, QListWidgetItem, QMessageBox, QGraphicsView
 )
-from PySide6.QtCore import Qt, Signal, Slot, QPointF
+from PySide6.QtCore import Qt, Signal, Slot, QPointF, QRectF
 from PySide6.QtGui import QColor, QKeySequence, QShortcut, QUndoStack, QPainter
 
 from prototypyside.views.component_scene import ComponentScene
@@ -156,6 +156,7 @@ class ComponentTab(QWidget):
         self.template.item_z_order_changed.connect(self.update_layers_panel)
         self.scene.selectionChanged.connect(self.on_selection_changed)
         self.scene.item_dropped.connect(self.add_item_from_drop)
+        self.scene.new_item_requested.connect(self.add_item_from_click)
         self.scene.item_cloned.connect(self.clone_item)
         self.scene.item_resized.connect(self.on_property_changed)
 
@@ -193,7 +194,7 @@ class ComponentTab(QWidget):
             item.setData(Qt.UserRole, etype)
             self.palette.addItem(item)
         self.palette.setDragEnabled(True)
-        self.palette.palette_item_clicked.connect(self.clear_scene_selection)
+        self.palette.palette_item_clicked.connect(self.on_palette_item_clicked)
 
     def setup_property_editor(self):
         # This will be a widget that the QMainWindow will place in a DockWidget
@@ -484,11 +485,32 @@ class ComponentTab(QWidget):
         if self.scene.selectedItems():
             self.scene.clearSelection()
 
+    @Slot(str)
+    def on_palette_item_clicked(self, prefix: str):
+        self.clear_scene_selection()
+        self.scene.start_item_creation(prefix)
+
     def add_item_from_drop(self, scene_pos: QPointF, item_type: str):
         self.scene.clearSelection()
         rect = UnitStrGeometry(width="0.5in", height="0.25in", dpi=self.template.dpi)
         new_geometry = geometry_with_px_pos(rect, scene_pos, dpi=self.dpi)
         command = AddElementCommand(item_type, self, new_geometry)
+        self.undo_stack.push(command)
+        self.selected_item = self.registry.get_last()
+        tz = self.template.zValue()
+        gz = self.inc_grid.zValue()
+        ezs = [e.zValue() for e in self.template.items]
+        print(f"[Z_ORDER] zOrdering after item placement: Template {tz}, Grid {gz}, Elements {ezs}")
+
+    @Slot(QRectF, str)
+    def add_item_from_click(self, rect: QRectF, item_type: str):
+        self.scene.clearSelection()
+        if rect.width() < 1 or rect.height() < 1:
+            base = UnitStrGeometry(width="0.5in", height="0.25in", dpi=self.template.dpi)
+            geometry = geometry_with_px_pos(base, rect.topLeft(), dpi=self.dpi)
+        else:
+            geometry = UnitStrGeometry.from_px(QRectF(0, 0, rect.width(), rect.height()), rect.topLeft(), dpi=self.dpi)
+        command = AddElementCommand(item_type, self, geometry)
         self.undo_stack.push(command)
         self.selected_item = self.registry.get_last()
         tz = self.template.zValue()
