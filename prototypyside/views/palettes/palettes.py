@@ -25,6 +25,7 @@ class ComponentListWidget(QListWidget):
         item = self.itemAt(event.position().toPoint())
         if item:
             self.setCurrentItem(item)
+  
             prefix = item.data(Qt.UserRole)
             self.palette_item_clicked.emit(prefix)
         super().mousePressEvent(event)
