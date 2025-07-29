@@ -3,10 +3,10 @@ from __future__ import annotations
 from typing import Optional, TYPE_CHECKING
 
 from PySide6.QtCore    import Qt, QPointF, QRectF, Signal, Slot
-from PySide6.QtGui     import QTransform
+from PySide6.QtGui     import QTransform, QPen
 from PySide6.QtWidgets import (
     QGraphicsScene, QGraphicsItem, QGraphicsSceneMouseEvent,
-    QGraphicsSceneDragDropEvent
+    QGraphicsSceneDragDropEvent, QGraphicsRectItem
 )
 
 
@@ -30,6 +30,7 @@ class ComponentScene(QGraphicsScene):
     item_cloned   = Signal(ComponentElement, QPointF)
     item_moved    = Signal()
     item_resized  = Signal(object, str, object, object)
+    new_item_requested = Signal(QRectF, str)
     selectionChanged = Signal()
 
     # ──────────────────────────────── init ────────────────────────────────
@@ -70,6 +71,11 @@ class ComponentScene(QGraphicsScene):
         self.resize_start_geom    = None
         self.resize_handle_type   = None
 
+        # creation helper state
+        self._creation_prefix = None
+        self._creation_start = None
+        self._creation_preview: Optional[QGraphicsRectItem] = None
+
         self.setBackgroundBrush(Qt.lightGray)
 
     # ─────────────────────────── helpers / utils ──────────────────────────
@@ -97,10 +103,31 @@ class ComponentScene(QGraphicsScene):
         if item is not None and not item.isSelected():
             item.setSelected(True)
         self.selectionChanged.emit()
+
+    # creation API -----------------------------------------------------
+    def start_item_creation(self, prefix: str):
+        """Begin placing a new element of the given prefix."""
+        self._creation_prefix = prefix
     # ───────────────────────────── mouse events ───────────────────────────
     # (unchanged except calls to self.snap_to_grid keep working)
     def mousePressEvent(self, event: QGraphicsSceneMouseEvent):
         item = self.itemAt(event.scenePos(), self.views()[0].transform())
+
+        if self._creation_prefix and event.button() == Qt.LeftButton:
+            if not isinstance(item, ComponentElement):
+                self._creation_start = self.snap_to_grid(event.scenePos())
+                if self._creation_preview is None:
+                    self._creation_preview = QGraphicsRectItem()
+                    pen = QPen(Qt.black)
+                    pen.setStyle(Qt.DashLine)
+                    self._creation_preview.setPen(pen)
+                    self._creation_preview.setBrush(Qt.NoBrush)
+                    self._creation_preview.setZValue(1000)
+                    self.addItem(self._creation_preview)
+                rect = QRectF(self._creation_start, self._creation_start)
+                self._creation_preview.setRect(rect)
+                event.accept()
+                return
 
         if hasattr(item, 'is_handle') and item.is_handle:  # Your ResizeHandle flag
             print("Entering resize event")
@@ -157,6 +184,12 @@ class ComponentScene(QGraphicsScene):
             event.accept()
             return
 
+        if self._creation_prefix and self._creation_start is not None and self._creation_preview is not None:
+            rect = QRectF(self._creation_start, self.snap_to_grid(event.scenePos())).normalized()
+            self._creation_preview.setRect(rect)
+            event.accept()
+            return
+
         if self._dragging_item:
             # Calculate the new snapped position for the item based on the snapped mouse position
             # and the stored snapped offset.
@@ -170,6 +203,19 @@ class ComponentScene(QGraphicsScene):
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event: QGraphicsSceneMouseEvent):
+        if self._creation_prefix and self._creation_start is not None:
+            end_pos = self.snap_to_grid(event.scenePos())
+            rect = QRectF(self._creation_start, end_pos).normalized()
+            if self._creation_preview is not None:
+                self.removeItem(self._creation_preview)
+                self._creation_preview = None
+            prefix = self._creation_prefix
+            self._creation_prefix = None
+            self._creation_start = None
+            self.new_item_requested.emit(rect, prefix)
+            event.accept()
+            return
+
         # Commit move to undo stack (if needed)
         if self._dragging_item and self._dragging_start_pos is not None:
             geom = self._dragging_item.geometry
