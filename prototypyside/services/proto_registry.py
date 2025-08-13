@@ -36,9 +36,11 @@ class ProtoRegistry(QObject):
     object_registered = Signal(str)  # pid
     object_deregistered = Signal(str)
 
-    def __init__(self, parent=None, root=None):
+    def __init__(self, ldpi=144.0, parent=None, root=None):
         super().__init__(parent)
         self._factory = ProtoFactory()
+
+        self.ldpi = ldpi
         self._is_root = isinstance(self, RootRegistry)
         self.root = self if self._is_root else root
         self._store: Dict[str, Any] = {}
@@ -300,11 +302,12 @@ class RootRegistry(ProtoRegistry):
     object_registered = Signal(str)
     object_deregistered = Signal(str)
 
-    def __init__(self):
+    def __init__(self, ldpi=144.0):
         super().__init__(root=self)
         self._is_root=True
         self._children = []
         self._store = {}
+        self.ldpi = ldpi
 
     def add_child(self, child):
         child.root = self
@@ -321,6 +324,7 @@ class RootRegistry(ProtoRegistry):
                 del child._orphans[key]
 
             child.root = None
+            child.logical_display_units = self.logical_display_units
             self._children.remove(child)
 
 

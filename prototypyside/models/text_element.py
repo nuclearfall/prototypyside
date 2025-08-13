@@ -29,24 +29,22 @@ from prototypyside.models.component_element import ComponentElement
 
 
 class TextElement(ComponentElement):
-    _subclass_serializable = {
-        # maps attribute name -> (dict_key, from_fn, to_fn, default)
-        "font": (
-            "font",
-            qfont_from_string,
-            lambda f: f.toString(),
-            QFont("Arial", 12)
-        )
-    }
-
-    def __init__(self, pid, geometry: UnitStrGeometry, tpid = None, 
-            parent: Optional[QGraphicsObject] = None, name: str = None):
-        super().__init__(pid, geometry, tpid, parent, name)
-
-        self._font = QFont("Arial", 12)
+    def __init__(self, pid, registry, geometry: UnitStrGeometry, tpid = None, 
+            parent: Optional[QGraphicsObject] = None, name: str = None,
+            font: QFont = QFont("Arial", 12)):
+        super().__init__(pid, registry, geometry, tpid, parent, name)
+        self.registry = registry
+        self.ldpi = registry.ldpi
+        self._font = font
+        self._font_scale = int(font.pointSize()*self._dpi/self.ldpi)
+        self._font.setPixelSize(self._font_scale)
         self._content = "Sample Text"
 
     # --- Text-specific Property Getters and Setters ---
+    @property
+    def font_scale(self):
+        return self._font_scale
+    
     @property
     def font(self) -> QFont:
         return self._font
@@ -55,7 +53,9 @@ class TextElement(ComponentElement):
     def font(self, value: QFont):
         if self._font != value:
             self.prepareGeometryChange() # Font change might change layout/size
+            fs = self.font_scale
             self._font = value
+            self._font.setPixelSize(self.font_scale)
             self.item_changed.emit()
             self.update()
 
@@ -63,67 +63,49 @@ class TextElement(ComponentElement):
 
     def to_dict(self):
         data = super().to_dict()  # ← include base fields
-        for attr, (key, _, to_fn, default) in self._subclass_serializable.items():
-            val = getattr(self, f"_{attr}", default)
-            data[key] = to_fn(val)
+        data["font"] = self._font.toString()
         return data
 
     @classmethod
     def from_dict(cls, data: dict, registry, is_clone=False):
         inst = super().from_dict(data, registry, is_clone)
         inst.pid = resolve_pid("te") if is_clone else data["pid"]
-        for attr, (key, from_fn, _, default) in cls._subclass_serializable.items():
-            raw = data.get(key, default)
-            # We want to set content using the content setter.
-            if hasattr(inst, f"{attr}"):
-                setattr(inst, f"{attr}", from_fn(raw))
-            else:
-                setattr(inst, f"_{attr}", from_fn(raw))
-
+        font_str = data.get("font")
+        print(f"font string is {font_str}, at ")
+        inst._font = QFont(data.get("font"))
+        inst._font_scale = int(inst._font.pointSize()*inst._dpi/inst.ldpi)
+        inst._font.setPixelSize(inst._font_scale)
         return inst
-
-
-    # def paint(self, painter, option, widget=None):
-    #     painter.save()
-    #     # Convert geometry to px at current DPI
-    #     rect = self.geometry.to("px", dpi=self.dpi).rect
-    #     print(f'Rect dimensions are {self.geometry.px.rect} at {self.dpi}')
-
-    #     # Set font size using DPI scaling
-    #     font = QFont(self.font)
-    #     font.setPointSize(int(font.pointSizeF() * self.dpi / 72.0))  # Convert pt → px
-    #     painter.setFont(font)
-
-    #     # Set color
-    #     painter.setPen(QPen(self.color))
-
-    #     # Draw unformatted text
-    #     painter.drawText(rect, self.alignment_flags, self.content or "")
-
-    #     painter.restore()
 
 
     def paint(self, painter, option, widget=None):
         painter.save()
-
-        # Render geometry as pixels at given DPI
+        font = self._font
+        print(f"Font size prior to painting is {self._font.pixelSize()}")
+        # Convert geometry to px at current DPI
         rect = self.geometry.to("px", dpi=self.dpi).rect
+        print(f'Rect dimensions are {self.geometry.px.rect} at {self.dpi}')
 
-        # Build the document
+        # Set font size using DPI scaling
+        painter.setRenderHint(QPainter.TextAntialiasing, True)
+        painter.setRenderHint(QPainter.Antialiasing, True)
+
+
+        # Set color
+        painter.setPen(QPen(self.color))
         doc = QTextDocument()
-
-        # FONT SIZE MUST BE SET IN PIXELS — because painter is scaled to px
-        font = QFont(self.font)
-        font.setPixelSize(int(font.pointSizeF() * self.dpi / 72.0))  # px = pt * dpi / 72
+        # font.setPixelSize(int(font.pointSizeF() * self.dpi / 72.0))  # px = pt * dpi / 72
+        print(f"Font size while painting is {font.pixelSize()}")
         doc.setDefaultFont(font)
-
+        # Draw unformatted text
+        #painter.drawText(rect, self.alignment_flags, self.content or "")
         # Text styling
         ctx = QAbstractTextDocumentLayout.PaintContext()
         ctx.palette.setColor(QPalette.Text, self.color)
         doc.setDocumentMargin(0)
         doc.setDefaultTextOption(QTextOption(self.alignment_flags))
         doc.setPlainText(self.content or "")
-        doc.setTextWidth(rect.width())
+        #doc.setTextWidth(rect.width())
 
         # Clip if text overflows rect
         if doc.size().height() > rect.height():
@@ -134,4 +116,37 @@ class TextElement(ComponentElement):
         doc.documentLayout().draw(painter, ctx)
 
         painter.restore()
+
+
+    # def paint(self, painter, option, widget=None):
+    #     painter.save()
+
+    #     # Render geometry as pixels at given DPI
+    #     rect = self.geometry.to("px", dpi=self.dpi).rect
+
+    #     # Build the document
+    #     doc = QTextDocument()
+
+    #     # FONT SIZE MUST BE SET IN PIXELS — because painter is scaled to px
+    #     font = QFont(self.font)
+    #     font.setPixelSize(int(font.pointSizeF() * self.dpi / 72.0))  # px = pt * dpi / 72
+    #     doc.setDefaultFont(font)
+
+    #     # Text styling
+    #     ctx = QAbstractTextDocumentLayout.PaintContext()
+    #     ctx.palette.setColor(QPalette.Text, self.color)
+    #     doc.setDocumentMargin(0)
+    #     doc.setDefaultTextOption(QTextOption(self.alignment_flags))
+    #     doc.setPlainText(self.content or "")
+    #     doc.setTextWidth(rect.width())
+
+    #     # Clip if text overflows rect
+    #     if doc.size().height() > rect.height():
+    #         painter.setClipRect(rect)
+
+    #     # Paint at correct position in px space
+    #     painter.translate(rect.topLeft())
+    #     doc.documentLayout().draw(painter, ctx)
+
+    #     painter.restore()
 

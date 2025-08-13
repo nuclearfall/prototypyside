@@ -18,7 +18,7 @@ class AddSlotCommand(QUndoCommand):
 
     def redo(self):
         if item is None:
-            self.item = self.registry.create("ls", tpid=self.template.pid, cpid=None, parent=self.template)
+            self.item = self.registry.create("ls", tpid=self.template.pid, registry=self.registry, parent=self.template)
         else:
             self.registry.reinsert(self.item)
 
@@ -37,6 +37,7 @@ class AddElementCommand(QUndoCommand):
             self.item = self.tab.registry.create(
                 self.prefix,
                 geometry=self.geometry,
+                registry=self.registry,
                 tpid = self.tab.template.pid,
                 parent=self.tab.template,
                 name=None

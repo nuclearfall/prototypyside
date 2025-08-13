@@ -5,7 +5,7 @@ from PySide6.QtGui import (QColor, QFont, QPen, QBrush, QTextDocument, QTextOpti
 from PySide6.QtWidgets import QGraphicsItem, QGraphicsObject, QGraphicsSceneDragDropEvent
 from typing import Optional, Dict, Any, Union
 from prototypyside.views.graphics_items import ResizeHandle
-from prototypyside.utils.qt_helpers import qrectf_to_list, list_to_qrectf, qfont_from_string
+from prototypyside.utils.qt_helpers import qrectf_to_list, list_to_qrectf
 from prototypyside.utils.units.unit_str import UnitStr
 from prototypyside.utils.units.unit_str_geometry import UnitStrGeometry
 from prototypyside.utils.units.unit_str_helpers import geometry_with_px_rect, geometry_with_px_pos
@@ -33,7 +33,7 @@ class ComponentElement(QGraphicsObject):
     structure_changed = Signal(str)               # (element_pid)
     resize_finished = Signal(object, object, object) # item, new_geometry, old_geometry
 
-    def __init__(self, pid, geometry: UnitStrGeometry, tpid = None, 
+    def __init__(self, pid, registry, geometry: UnitStrGeometry, tpid = None, 
             parent: Optional[QGraphicsObject] = None, name: str = None):
         super().__init__(parent)
         self._pid = pid
@@ -795,6 +795,7 @@ class ComponentElement(QGraphicsObject):
         # 3) Template determines which subclass is `cls`
         inst = cls(
             pid=pid,
+            registry=registry,
             geometry=geom,
             tpid=None,
             name=data.get("name")

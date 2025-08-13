@@ -1,8 +1,36 @@
 # prototypyside/utils/qt_helpers.py
 
 from PySide6.QtCore import Qt, QRectF
-from PySide6.QtGui import QColor, QFont
+from PySide6.QtGui import QColor, QFont, QPainter
 from typing import List, Dict, Any
+from PySide6.QtGui import QPainter
+
+def resolve_painted_font(base_font: QFont, text_dpi: float) -> QFont:
+    """
+    Returns a copy of base_font scaled to pixels for the target text_dpi.
+    base_font is expected to be point-sized (preferred).
+    """
+    f = QFont(base_font)  # copy
+
+    # If someone set a pixel size upstream, normalize it back to pt for consistency
+    if f.pixelSize() > 0:
+        px = f.pixelSize()
+        # Convert to pt using the *current* text_dpi as reference
+        pt = (px * 72.0) / max(1.0, text_dpi)
+        f.setPixelSize(-1)
+        f.setPointSizeF(pt if pt > 0 else 12.0)
+
+    # Ensure we have a valid point size
+    pt = f.pointSizeF()
+    if pt <= 0:
+        pt = 12.0
+        f.setPointSizeF(pt)
+
+    # Now scale to pixels for painting on this device
+    target_px = pt * (text_dpi / 72.0)
+    # QFont expects int pixel sizes; rounding yields stable line-heights
+    f.setPixelSize(int(round(target_px)))
+    return f
 
 def qrectf_to_list(rect: QRectF) -> List[float]:
     return [rect.x(), rect.y(), rect.width(), rect.height()]

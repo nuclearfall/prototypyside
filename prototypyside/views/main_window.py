@@ -9,7 +9,7 @@ from PySide6.QtWidgets import (QMainWindow, QDockWidget, QTabWidget, QWidget,
                                QVBoxLayout, QLabel, QFileDialog, QMessageBox,
                                QToolBar, QPushButton, QHBoxLayout, QSizePolicy, QCheckBox) # Added QPushButton, QHBoxLayout for temporary property panel layout
 from PySide6.QtCore import Qt, Signal, Slot, QTimer, QStandardPaths, QSaveFile
-from PySide6.QtGui import QIcon, QAction, QKeySequence, QShortcut, QUndoStack, QUndoGroup, QUndoCommand
+from PySide6.QtGui import QIcon, QAction, QKeySequence, QShortcut, QUndoStack, QUndoGroup, QUndoCommand, QPainter
 
 # Import the new ComponentTab
 from prototypyside.views.tabs.component_tab import ComponentTab
@@ -47,14 +47,16 @@ def MetaKeySequence(key: str) -> QKeySequence:
 
 
 class MainDesignerWindow(QMainWindow):
+    logical_disp_change = Signal()
     def __init__(self):
         super().__init__()
-
+        screen = self.screen()
+        ldpi = float(screen.logicalDotsPerInchY()) or 144.0
         # Main application settings
         # Validation temporarily disabled pending schema updates
         self.settings = AppSettings()
         self.settings.dpi_changed.connect(self.on_dpi_changed)
-        self.registry = RootRegistry()
+        self.registry = RootRegistry(ldpi=ldpi)
         self.export_registry = ProtoRegistry(parent=self.registry, root=self.registry)
         self.registry.add_child(self.export_registry)
         # self.mail_room = MailRoom(registry=self.registry)
