@@ -12,7 +12,7 @@ from prototypyside.views.overlays.incremental_grid import IncrementalGrid
 from prototypyside.models.layout_template import LayoutTemplate
 from prototypyside.models.layout_slot import LayoutSlot
 from prototypyside.services.app_settings import AppSettings
-from prototypyside.views.panels.layout_property_panel import LayoutPropertyPanel, scene_to_pixmap
+from prototypyside.views.panels.layout_property_panel import LayoutPropertyPanel
 from prototypyside.views.toolbars.layout_toolbar import LayoutToolbar
 from prototypyside.views.palettes.layout_palette import LayoutPalette
 from prototypyside.widgets.unit_field import UnitField
@@ -72,9 +72,9 @@ class LayoutTab(QWidget):
         self.inc_grid.setVisible(self._show_grid)
 
         print(f"Scene rect is: {self.scene.sceneRect()}")
-        print(f"[LAYOUT_TAB] From __init__: Template rows and columns prior to initially setting grid {template.rows}, {template.columns}")
+        # print(f"[LAYOUT_TAB] From __init__: Template rows and columns prior to initially setting grid {template.rows}, {template.columns}")
         self._template.setGrid(self.registry, rows=template.rows, columns=template.columns)
-        print(f"[LAYOUT_TAB] From __init__: Template rows and columns after initially setting grid {template.rows}, {template.columns}")
+        # print(f"[LAYOUT_TAB] From __init__: Template rows and columns after initially setting grid {template.rows}, {template.columns}")
         self._create_layout_toolbar()
         self._create_layout_palette()
 
@@ -122,7 +122,7 @@ class LayoutTab(QWidget):
 
     @template.setter
     def template(self, new):
-        if new != self.template and isinstance(new, ComponentTemplate):
+        if new != self.template and isinstance(new, LayoutTemplate):
             self._template = new
 
     def focusInEvent(self, event):
@@ -139,7 +139,6 @@ class LayoutTab(QWidget):
     def on_template_name_changed(self):
         new_name = self.template_name_field.text().strip()
         if new_name:
-            self.template.name = new_name
             self.tab_title_changed.emit(new_name)
 
     # --- Properties ---
@@ -295,6 +294,10 @@ class LayoutTab(QWidget):
         command = ChangePropertyCommand(t, "orientation", new, old)
         if old == new:
             return  # no change, no-op
+        t.updateGrid()
+        self.scene.setSceneRect(t.boundingRect())
+        self.view.fitInView(t.boundingRect(), Qt.KeepAspectRatio)
+        self.scene
 
         # # 🔁 Swap row/col spinbox values (but keep logical count the same)
         # r = self.layout_toolbar.rows_spin.value()

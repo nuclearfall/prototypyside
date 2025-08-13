@@ -26,23 +26,23 @@ class LayoutTemplate(QGraphicsObject):
     marginsChanged = Signal()
     spacingChanged = Signal()
     orientationChanged = Signal()
+
     def __init__(self, pid, registry, name=None, pagination_policy='Letter: 3x3 Standard 2.5"x3.5" Cards', parent=None):
         super().__init__(parent)
         self._pid = pid
         self._registry = registry
         self._name = name
         self._pagination_policy = pagination_policy
-        # print(f"Policy is {self._pagination_policy}, DETAILS:\n{PRINT_POLICIES.get(self._pagination_policy)}")
+
         #### All of these are set from PRINT_POLICIES
         pol = PRINT_POLICIES[pagination_policy]
         self._rows = pol.get("rows")
         self._columns = pol.get("columns")
         self._page_size = pol.get("page_size")
         self._geometry = PAGE_SIZES.get(self._page_size)
-        self._whitespace = pol.get("whitespace")# ordered [top, bottom, left, right, spacing_x, spacing_y]
+        # [top, bottom, left, right, x, y]
+        self._whitespace = pol.get("whitespace")
         self._orientation = pol.get("orientation")
-        self.lock_at: int = pol.get("lock_at") # The number of components a given policy will accept.
-        ####
 
         self._dpi = 300
         self._unit = "px"
@@ -75,7 +75,7 @@ class LayoutTemplate(QGraphicsObject):
         self.whitespace = pol.get("whitespace")# ordered [top, bottom, left, right, spacing_x, spacing_y]
 
         self.setGrid(self._registry, rows=pol.get("rows"), columns=pol.get("columns"))
-        self.orientation = pol.get("orientation")
+        self._orientation = pol.get("orientation")
         self.lock_at: int = pol.get("lock_at") # The number of components a given policy will accept.
 
         self.updateGrid()
@@ -129,6 +129,7 @@ class LayoutTemplate(QGraphicsObject):
 
     @property
     def geometry(self) -> UnitStrGeometry: return self._geometry.to(self.unit, dpi=self.dpi)
+    
     @geometry.setter
     def geometry(self, new_geom: UnitStrGeometry):
         if self._geometry == new_geom:
@@ -221,10 +222,6 @@ class LayoutTemplate(QGraphicsObject):
             new_c = self._rows
             self.grid = (new_r, new_c)
             self.geometry=UnitStrGeometry(width=new_w, height=new_h)
-            self.updateGrid()
-            self.scene().setSceneRect(self.boundingRect())
-            self.scene().views()[0].fitInView(self.boundingRect(), Qt.KeepAspectRatio)
-
             self.template_changed.emit()
 
     @property
@@ -480,10 +477,8 @@ class LayoutTemplate(QGraphicsObject):
                     item.setParentItem(self)
                     # print(f"USG.rect for Slot {r}, {c} in pixels {item.geometry.px.rect}")
                     self.items[r][c] = item
-                    if item and item.scene() is None:
-                        scene = self.scene()
-                        if scene:
-                            scene.addItem(item)
+                    if item and item.scene() is None and self.scene():
+                        scene.addItem(item)
                     item.update()
         # Update the template's row and column counts
 
@@ -527,7 +522,7 @@ class LayoutTemplate(QGraphicsObject):
 
                 if slot.scene() is None and self.scene() is not None:
                     slot.setParentItem(self)
-                    self.scene().addItem(slot)
+                    # self.scene().addItem(slot)
                 # print(f"Slot scene pos should be {slot.pos()}")
                 #print(f"From updateGrid, slot {r},{c}: {new_geom}\nslot is in scene? {True if slot.scene() else False}")
                 px_rect = self.geometry.to("px", dpi=self._dpi).rect

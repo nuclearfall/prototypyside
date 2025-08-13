@@ -2,9 +2,12 @@ from math import ceil
 from PySide6.QtCore import QSizeF
 from PySide6.QtGui  import QPainter, QPdfWriter, QImage, QPageSize, QPageLayout
 from PySide6.QtWidgets import QGraphicsScene, QStyleOptionGraphicsItem
+
+from prototypyside.models.layout_slot import LayoutSlot
 from prototypyside.models.text_element import TextElement
 from prototypyside.models.vector_element import VectorElement
 from prototypyside.utils.units.unit_str_geometry import UnitStrGeometry
+from prototypyside.utils.proto_helpers import resolve_pid
 from PySide6.QtCore import Qt, QSizeF, QRectF, QMarginsF, QPointF
 from pathlib import Path
 from itertools import zip_longest
@@ -62,60 +65,66 @@ class ExportManager:
                     continue
                 print(f"{comp_inst.pid} elements: {[el.name for el in comp_inst.items]}")
 
+                # export_manager.py
                 for el in comp_inst.items:
-                    print(f"    EL: {el.name} → {type(el)} → rect={el.geometry.to("px").rect} scene? {el.scene() is not None}")
-                    if el.name.startswith("@"):
-                        val = row.get(el.name, "")
-                        print(f"    → Setting {el.name} = {val}")
-                        el.content = val
+                    name = getattr(el, "name", "") or ""
+                    if not name.startswith("@"):
+                        continue
+
+                    # Try exact header first (e.g., '@top_text'), then normalized ('top_text')
+                    v = row.get(name)
+                    if v in (None, ""):
+                        v = row.get(name.lstrip("@"))
+                    if v is None:
+                        v = ""
+
+                    # Apply to element
+                    # (adjust to your element API)
+                    if hasattr(el, "content"):        # TextElement/VectorElement in your codebase
+                        el.content = v
+
                 slot.invalidate_cache()
 
         return pages
 
+    def export_component_to_png(self, template, output_dir, dpi=300):
+        output_dir = Path(output_dir)
+        output_dir.mkdir(parents=True, exist_ok=True)
 
-    # def paginate(self, layout, copies=1):
-    #     registry = self.registry
-    #     print(f"Export registry is set to {registry}")
-    #     pages = []
-    #     tpid = layout.content
-    #     template = registry.global_get(tpid)
-    #     # self.settings.dpi = self.dpi
+        if template.csv_path:
+            csv_data = self.merge_manager.load_csv(template.csv_path, template)
+            rows = csv_data.rows
+        else:
+            rows = [{}]  # single empty row for static content
 
-    #     layout.updateGrid()
-    #     csv_path = template.csv_path
-    #     slots_n = len(layout.slots)
-    #     page_count = copies
-    #     if csv_path:
-    #         csv_data = self.merge_manager.load_csv(csv_path, template)
-    #         rows = csv_data.rows   
-    #         page_count = ceil(max(len(rows), 1) / slots_n) * copies
-    #         # print(f"Prior to export:\n* Rows: {csv_data.count}\n* Pages: {page_count}")
-    #     pages = []
-        
-    #     for _ in range(page_count):
-    #         # layout.invalidate_cache()
-    #         page = self.registry.clone(layout)
-    #         # page.updateGrid()  # <-- this is what positions each slot correctly
-    #         pages.append(page)
-    #     all_slots = [slot for page in pages for slot in page.slots]
+        validation = csv_data.validate_headers(template) if template.csv_path else {}
+        missing = [k for k, v in validation.items() if v == "missing"]
+        if missing:
+            print(f"[EXPORT ERROR] Missing CSV headers for: {', '.join(missing)}")
+            raise ValueError(f"Export aborted due to missing headers: {', '.join(missing)}")
 
-    #     # We have merge data so we need to validate headers one more time before exporting
-    #     if rows:
-    #         validation = csv_data.validate_headers(template)
-    #         missing = [k for k, v in validation.items() if v == "missing"]
-    #         if missing:
-    #             print(f"[EXPORT ERROR] Missing CSV headers for: {', '.join(missing)}")
-    #             raise ValueError(f"Export aborted due to missing headers: {', '.join(missing)}")
-    #         for row, slot in zip_longest(rows, all_slots):
-    #             comp_inst = slot.content
-    #             if not comp_inst or not row::
-    # #                 print("Slot has no content")
-    #                 pass
-    #             for el in comp_inst.items:
-    #                 if el.name.startswith("@"):
-    #                     el.content = row.get(el.name, "")
-    #             slot.content = comp_inst
-    #     return pages
+        for i, row in enumerate(rows, start=1):
+            comp_inst = self.registry.clone(template)
+            # Apply CSV data to bound elements
+            for el in comp_inst.items:
+                if el.name.startswith("@"):  # CSV-bound element
+                    val = row.get(el.name, "")
+                    el.content = val
+            # We're not going to register the slot.
+            slot = LayoutSlot(
+                    pid=resolve_pid('ls'),
+                    geometry=template.geometry, 
+                    registry=self.registry)
+
+            scene = QGraphicsScene()
+            scene.addItem(slot)
+            
+            slot.content = comp_inst
+            slot.dpi = 300
+            image = slot.image
+            filename = f"{template.name}_{i}.png"
+            image.save(str(output_dir / filename), "PNG")
+            print(f"Exported component to {filename}")
 
     def export_to_pdf(self, layout, output_path, scale_to_300=False):
         pages = self.paginate(layout)
@@ -219,10 +228,8 @@ class ExportManager:
                 for item in slot.content.items:
                     if isinstance(item, (TextElement, VectorElement)):
                         painter.save()
-                        painter.translate(item.pos())
-                        bounds = item.boundingRect()
-                        UnitStrGeometry(rect=bounds, pos=item.pos(), dpi=300)
-                        painter.setClipRect(QRectF(0, 0, bounds.width(), bounds.height()))
+                        painter.setTransform(item.sceneTransform(), True)  # compose with current page/slot transform
+                        painter.setClipRect(item.boundingRect())
                         item.paint(painter, option, widget=None)
                         painter.restore()
                 painter.restore()

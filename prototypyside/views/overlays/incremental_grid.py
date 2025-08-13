@@ -4,11 +4,11 @@ from PySide6.QtWidgets import QGraphicsItem
 from prototypyside.utils.units.unit_str import UnitStr
 
 DEFAULT_INCREMENTS = {   # used when caller passes increment=None
-    "cm": {4: 0.125,  3: 0.25, 2: 0.50, 1: 2.0},
-    "mm": {4: 2.5,    3:   5,  2: 10.0, 1:  25},
-    "in": {4: 0.0625,3: 0.125, 2:  0.25, 1: 0.5},
-    "px": {4: 5,      3:   10, 2:   50, 1:100.0},
-    "pt": {4: 4.5,    3:    9, 2:   36, 1: 72.0},
+    "cm": {4: 0.125,    3:    0.25,   2: 0.50,    1: 2.0},
+    "mm": {4: 2.5,      3:    5,      2:  10.0,   1:  25},
+    "in": {4: 0.0625,   3:    0.125,  2: 0.25,    1: 0.5},
+    "px": {4: 5,        3:    10,     2:   50,    1:100.0},
+    "pt": {4: 4.5,      3:    9,      2:   36,    1: 72.0},
 }
 
 
@@ -41,41 +41,7 @@ class IncrementalGrid(QGraphicsItem):
     def boundingRect(self) -> QRectF:
         return self.scene().sceneRect()
 
-    # def paint(self, painter, *_):
-    #     if not self.isVisible():
-    #         return
-    #     rect = self.scene().sceneRect()
-    #     painter.save()
-    #     painter.setRenderHint(QPainter.Antialiasing, False)
 
-    #     unit = self._settings.unit
-    #     increments = self._increments.get(unit, {})
-    #     levels = sorted(increments.keys(), reverse=True)
-    #     num_levels = len(levels)
-
-    #     gray_range = DEFAULT_LIGHT - DEFAULT_DARK
-
-    #     for i, level in enumerate(levels):
-    #         spacing = self.get_grid_spacing(level)
-
-    #         gray_value = DEFAULT_LIGHT - int(i * (gray_range / max(1, num_levels - 1)))
-    #         pen = QPen(QColor(gray_value, gray_value, gray_value))
-    #         painter.setPen(pen)
-
-    #         left = int(rect.left())
-    #         right = int(rect.right())
-    #         top = int(rect.top())
-    #         bottom = int(rect.bottom())
-
-    #         x = left - (left % spacing)
-    #         while x < right:
-    #             painter.drawLine(x, top, x, bottom)
-    #             x += spacing
-
-    #         y = top - (top % spacing)
-    #         while y < bottom:
-    #             painter.drawLine(left, y, right, y)
-    #             y += spacing
     def paint(self, painter, *_):
         if not self.isVisible():
             return

@@ -28,7 +28,7 @@ class ResizeHandle(QGraphicsRectItem):
         self.setAcceptHoverEvents(True)
         self.setFlag(QGraphicsItem.ItemIsSelectable, False)
         self.setFlag(QGraphicsItem.ItemIsMovable, False)
-        self.setFlag(QGraphicsItem.ItemIgnoresTransformations, False)
+        self.setFlag(QGraphicsItem.ItemIgnoresTransformations, True)
         self.setFlag(QGraphicsItem.ItemIgnoresParentOpacity, True)
         self.setAcceptedMouseButtons(Qt.LeftButton)  # ⬅️ Be explicit
         self.drag_started = False  # debounce flag
@@ -63,7 +63,31 @@ class ResizeHandle(QGraphicsRectItem):
         return QCursor(Qt.ArrowCursor)
 
     def mousePressEvent(self, event: QGraphicsSceneMouseEvent):
-        print(f"[DEBUG] Handle pressed: {self.handle_type}")
-        event.accept() 
+        event.accept()
+        self.drag_started = True
+        self.parent_item._active_handle = self.handle_type
+
+        # NEW: delegate to the parent to compute sx/sy and stash pre-resize state
+        if hasattr(self.parent_item, "begin_handle_resize"):
+            self.parent_item.begin_handle_resize(self, event)
+        else:
+            # Fallback to old behavior if you keep it around
+            if hasattr(self.parent_item, "store_pre_resize_state"):
+                self.parent_item.store_pre_resize_state()
+
+
+    def mouseMoveEvent(self, event: QGraphicsSceneMouseEvent):
+        event.accept()
+        if self.drag_started:
+            # unchanged: parent does the work
+            self.parent_item.resize_from_handle(self.handle_type, event.scenePos())
+
+    def mouseReleaseEvent(self, event: QGraphicsSceneMouseEvent):
+        event.accept()
+        self.drag_started = False
+        self.parent_item._active_handle = None
+        if hasattr(self.parent_item, "end_handle_resize"):
+            self.parent_item.end_handle_resize()
+
 
 

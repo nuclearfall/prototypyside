@@ -4,7 +4,7 @@ from enum import Enum, auto
 import json
 from PySide6.QtWidgets import QGraphicsObject, QGraphicsItem, QStyleOptionGraphicsItem
 from PySide6.QtCore import Qt, QRectF, QPointF, QSizeF, QMarginsF, Signal
-from PySide6.QtGui import QPainter, QPixmap, QColor, QImage, QPen, QBrush,  QPageLayout, QPageSize
+from PySide6.QtGui import QPainter, QPixmap, QColor, QImage, QPen, QBrush,  QPageLayout, QPageSize, QTransform
 from prototypyside.models.text_element import TextElement
 from prototypyside.models.component_template import ComponentTemplate
 from prototypyside.models.image_element import ImageElement
@@ -17,6 +17,16 @@ from prototypyside.config import PAGE_SIZES, DISPLAY_MODE_FLAGS, PAGE_UNITS
 from prototypyside.utils.proto_helpers import get_prefix, resolve_pid
 if TYPE_CHECKING:
     from prototypyside.services.proto_registry import ProtoRegistry
+
+
+def _rotate_around(painter, center: QPointF, angle_deg: float):
+    if not angle_deg:
+        return
+    t = QTransform()
+    t.translate(center.x(), center.y())
+    t.rotate(angle_deg)
+    t.translate(-center.x(), -center.y())
+    painter.setTransform(painter.transform() * t)
 
 class LayoutSlot(QGraphicsObject):
     item_changed = Signal()
@@ -305,9 +315,15 @@ class LayoutSlot(QGraphicsObject):
             item_bounds = item.boundingRect()
             img_painter.setClipRect(QRectF(0, 0, item_bounds.width(), item_bounds.height()))
 
-            # rotation = getattr(item, "rotation", lambda: 0)()
-            # if rotation:
-            #     img_painter.rotate(rotation)
+            # >>> add rotation about the element’s local center <<<
+            rotation = getattr(item, "rotation", 0) or 0
+            if rotation:
+                # rotate around the center of the element’s local rect
+                cx = item_bounds.width() * 0.5
+                cy = item_bounds.height() * 0.5
+                img_painter.translate(cx, cy)
+                img_painter.rotate(rotation)
+                img_painter.translate(-cx, -cy)
 
             item.paint(img_painter, option, widget=None)
             img_painter.restore()

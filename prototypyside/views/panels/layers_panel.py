@@ -28,21 +28,26 @@ class LayersListWidget(QListWidget):
             self.item_selected_in_list.emit(item)
 
     def update_list(self, items: List['ComponentElement']):
-        self.blockSignals(True) # Block signals to prevent spurious updates during rebuild
+        self.blockSignals(True)
         self.clear()
         
-        # Sort items by zValue in ascending order for correct layer representation
         sorted_items = sorted(items, key=lambda e: e.zValue(), reverse=True)
         
         for item in sorted_items:
-            item = QListWidgetItem(item.name)
-            item.setData(Qt.UserRole, item) # Store the actual item object
-            item.setFlags(item.flags() | Qt.ItemIsDragEnabled) # Make items draggable
-            self.addItem(item)
+            list_item = QListWidgetItem(item.name)
+            list_item.setData(Qt.UserRole, item)
+            # list_item.setFlags(item.flags() | Qt.ItemIsDragEnabled)
+            self.addItem(list_item)
+            
+            # Connect nameChanged signal to update the text
+            item.nameChanged.connect(
+                lambda name, item=list_item: item.setText(name)
+            )
+            
             if item.isSelected():
-                self.setCurrentItem(item) # Select the item if the item is selected in scene
+                self.setCurrentItem(list_item)
 
-        self.blockSignals(False) # Unblock signals
+        self.blockSignals(False)
 
     def dragEnterEvent(self, event):
         if event.mimeData().hasFormat('application/x-qabstractitemmodeldatalist'):

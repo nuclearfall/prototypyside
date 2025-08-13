@@ -14,8 +14,9 @@ from prototypyside.models.component_element import ComponentElement
 from prototypyside.models.image_element import ImageElement
 from prototypyside.models.vector_element import VectorElement
 from prototypyside.models.text_element import TextElement
-from prototypyside.views.toolbars.font_toolbar import FontToolbar
+# from prototypyside.views.toolbars.font_toolbar import FontToolbar
 from prototypyside.widgets.color_picker import ColorPickerWidget
+from prototypyside.widgets.rotation_field import RotationField
 
 
 
@@ -120,6 +121,7 @@ class PropertyPanel(QWidget):
         self.content_stack.addWidget(self.content_path_button)
 
         self.geometry_field = UnitStrGeometryField()
+        self.rotation_field = RotationField()
         self.color_picker = ColorPickerWidget()
         self.bg_color_picker = ColorPickerWidget()
         self.border_color_picker = ColorPickerWidget()
@@ -138,7 +140,7 @@ class PropertyPanel(QWidget):
         self.alignment_rev_map = {v: k for k, v in self.alignment_map.items()}
 
         # Conditional widgets
-        self.font_toolbar = FontToolbar()
+        #self.font_toolbar = FontToolbar()
         self.keep_aspect_checkbox = QCheckBox("Keep Aspect Ratio")
 
         # Add widgets to layout
@@ -147,12 +149,13 @@ class PropertyPanel(QWidget):
         self.form_layout.addRow("Name:", self.name_edit)
         self.form_layout.addRow("Content:", self.content_stack)
         self.form_layout.addRow("Geometry:", self.geometry_field)
+        self.form_layout.addRow("Rotation", self.rotation_field)
         self.form_layout.addRow("Color:", self.color_picker)
         self.form_layout.addRow("Background Color:", self.bg_color_picker)
         self.form_layout.addRow("Border Color:", self.border_color_picker)
         self.form_layout.addRow("Border Width:", self.border_width_field)
         self.form_layout.addRow("Alignment:", self.alignment_combo)
-        self.form_layout.addRow(self.font_toolbar)
+        #self.form_layout.addRow(self.font_toolbar)
         self.form_layout.addRow(self.keep_aspect_checkbox)
 
         # Connect signals
@@ -166,12 +169,13 @@ class PropertyPanel(QWidget):
         self.content_text_edit.editingFinished.connect(self.property_changed.emit)
         self.content_path_button.clicked.connect(self._choose_image_path)
         self.geometry_field.valueChanged.connect(self.property_changed.emit)
+        self.rotation_field.editingFinished.connect(self._on_rotation_finished)
+        self.rotation_field.angleChanged.connect(self._preview_rotation_only)
         self.color_picker.color_changed.connect(lambda c: self._handle_property_change("color", c))
         self.bg_color_picker.color_changed.connect(lambda c: self._handle_property_change("bg_color", c))
         self.border_color_picker.color_changed.connect(lambda c: self._handle_property_change("border_color", c))
         self.border_width_field.valueChanged.connect(self.property_changed.emit)
         self.alignment_combo.currentIndexChanged.connect(self._on_alignment_changed)
-        self.font_toolbar.font_changed.connect(self.property_changed.emit)
         self.keep_aspect_checkbox.toggled.connect(lambda t: self._handle_property_change("keep_aspect", t))
 
     def set_target(self, item: Optional[ComponentElement]):
@@ -197,10 +201,12 @@ class PropertyPanel(QWidget):
         alignment_text = self.alignment_rev_map.get(item.alignment, "Center")
         self.alignment_combo.setCurrentText(alignment_text)
 
+        current_rot = getattr(item, "rotation", 0.0) or 0.0
+        self.rotation_field.setAngle(float(current_rot), emit_signal=False)
         # Handle conditional widgets
-        self.font_toolbar.setVisible(hasattr(item, 'font'))
-        if hasattr(item, 'font'):
-            self.font_toolbar.setTarget(item)
+        # self.font_toolbar.setVisible(hasattr(item, 'font'))
+        # if hasattr(item, 'font'):
+        #     self.font_toolbar.setTarget(item)
 
         self.keep_aspect_checkbox.setVisible(hasattr(item, 'keep_aspect'))
         if hasattr(item, 'keep_aspect'):
@@ -270,9 +276,9 @@ class PropertyPanel(QWidget):
         self.alignment_combo.setCurrentText(text)
 
         # font toolbar
-        self.font_toolbar.setVisible(hasattr(el, "font"))
-        if hasattr(el, "font"):
-            self.font_toolbar.setTarget(el)
+        # self.font_toolbar.setVisible(hasattr(el, "font"))
+        # if hasattr(el, "font"):
+        #     self.font_toolbar.setTarget(el)
 
         # aspect checkbox
         self.keep_aspect_checkbox.setVisible(hasattr(el, "keep_aspect"))
@@ -308,8 +314,6 @@ class PropertyPanel(QWidget):
         
         # For QColor, direct comparison works. For others, it should be fine.
         if old_value != new_value:
-            if prop_name == "font" or prop_name ==  "geometry":
-                self.text_edit.setCurrentFont(new_value)
             print(f"[PROP PANEL] Prop={prop_name}, old={old_value}, new={new_value}, equal={old_value == new_value}")
             self.property_changed.emit(self.target_item, prop_name, new_value, old_value)
  
@@ -326,7 +330,6 @@ class PropertyPanel(QWidget):
             if old_value != new_value:
                 self.property_changed.emit(self.target_item, "content", new_value, old_value)
 
-
     @Slot(int)
     def _on_alignment_changed(self, index: int):
         if not self.target_item:
@@ -335,3 +338,25 @@ class PropertyPanel(QWidget):
         text = self.alignment_combo.itemText(index)
         new_value = self.alignment_map.get(text)
         self._handle_property_change("alignment", new_value)
+
+    @Slot()
+    def _on_rotation_finished(self):
+        if not self.target_item:
+            print("no target item")
+            return
+        new_value = float(self.rotation_field.angle())  # 0–360 normalized by RotationField
+        print(f"setting rotation to {new_value}")
+        old_value = float(getattr(self.target_item, "rotation", 0.0) or 0.0)
+        self.property_changed.emit(self.target_item, "rotation", new_value, old_value)
+
+    @Slot(float)
+    def _preview_rotation_only(self, v):
+        if not self.target_item:
+            return
+        # update the view immediately but don't emit property_changed
+        try:
+            self.target_item.rotation = float(v)
+            if hasattr(self.target_item, "element_changed"):
+                self.target_item.element_changed.emit()
+        except Exception:
+            pass

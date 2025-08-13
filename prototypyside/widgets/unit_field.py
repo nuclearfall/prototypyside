@@ -81,7 +81,7 @@ class UnitField(QLineEdit):
         if not isinstance(value, UnitStr):
             self.clear()
             return
-        # Display value formatted to the display_unit, without the unit suffix
+        # Display value formatted to the display_unit
         formatted_value = value.fmt(".4f", unit=self.display_unit, dpi=self._dpi)
         self._old_value = value
         self.setText(formatted_value)
@@ -174,8 +174,8 @@ class UnitStrGeometryField(QWidget):
         # Create the four sub-fields for x, y, width, and height
         self.x_field = self._create_sub_field("X", 0, 0, layout)
         self.y_field = self._create_sub_field("Y", 1, 0, layout)
-        self.w_field = self._create_sub_field("W", 0, 2, layout)
-        self.h_field = self._create_sub_field("H", 1, 2, layout)
+        self.w_field = self._create_sub_field("W", 2, 0, layout)
+        self.h_field = self._create_sub_field("H", 3, 0, layout)
 
         if target_item and property_name:
             self.setTarget(target_item, property_name, display_unit=display_unit)

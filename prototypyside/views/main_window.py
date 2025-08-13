@@ -7,7 +7,7 @@ from typing import Optional, List, Dict, Any
 import gc
 from PySide6.QtWidgets import (QMainWindow, QDockWidget, QTabWidget, QWidget,
                                QVBoxLayout, QLabel, QFileDialog, QMessageBox,
-                               QToolBar, QPushButton, QHBoxLayout, QSizePolicy) # Added QPushButton, QHBoxLayout for temporary property panel layout
+                               QToolBar, QPushButton, QHBoxLayout, QSizePolicy, QCheckBox) # Added QPushButton, QHBoxLayout for temporary property panel layout
 from PySide6.QtCore import Qt, Signal, Slot, QTimer, QStandardPaths, QSaveFile
 from PySide6.QtGui import QIcon, QAction, QKeySequence, QShortcut, QUndoStack, QUndoGroup, QUndoCommand
 
@@ -15,8 +15,6 @@ from PySide6.QtGui import QIcon, QAction, QKeySequence, QShortcut, QUndoStack, Q
 from prototypyside.views.tabs.component_tab import ComponentTab
 from prototypyside.views.tabs.layout_tab import LayoutTab
 
-# Other imports that are still needed for MainDesignerWindow's global concerns
-# (e.g., AppSettings if it's truly global, not per-tab)
 from prototypyside.services.app_settings import AppSettings
 from prototypyside.services.proto_registry import ProtoRegistry, RootRegistry
 from prototypyside.views.tabs.editable_tab_bar import EditableTabBar
@@ -87,7 +85,7 @@ class MainDesignerWindow(QMainWindow):
 
         # Add initial tabs
         self.add_new_tab(LayoutTab, "lt")
-        # self.add_new_tab(ComponentTab, "ct")
+        self.add_new_tab(ComponentTab, "ct")
 
 
     ### --- GUI Setup --- ###
@@ -147,13 +145,6 @@ class MainDesignerWindow(QMainWindow):
         self.toolbar_dock.setFeatures(QDockWidget.NoDockWidgetFeatures)
         self.toolbar_dock.setTitleBarWidget(QWidget())  # hide title bar
 
-        # Log initial sizing for diagnostics
-        for name, dock in all_docks:
-            w = dock.widget()
-            if w:
-                print(f"{name}_dock widget: sizeHint={w.sizeHint()}, minSize={w.minimumSize()}, maxSize={w.maximumSize()}")
-            else:
-                print(f"{name}_dock widget: None assigned")
 
     def setup_status_bar(self):
         self.statusBar = self.statusBar()
@@ -191,11 +182,11 @@ class MainDesignerWindow(QMainWindow):
         # 1. File Menu
         file_menu = self.menuBar().addMenu("&File")
 
-        new_action = file_menu.addAction("&New Component Tab")
-        new_action.triggered.connect(lambda: self.add_new_tab(ComponentTab, "ct"))
+        new_ctab_action = file_menu.addAction("&New Component Tab")
+        new_ctab_action.triggered.connect(lambda: self.add_new_tab(ComponentTab, "ct"))
 
-        new_action = file_menu.addAction("New &Layout Tab")
-        new_action.triggered.connect(lambda: self.add_new_tab(LayoutTab, "lt"))
+        new_ltab_action = file_menu.addAction("New &Layout Tab")
+        new_ltab_action.triggered.connect(lambda: self.add_new_tab(LayoutTab, "lt"))
 
         open_act = file_menu.addAction("&Open")
         open_act.setShortcut(QKeySequence.Open)
@@ -214,14 +205,14 @@ class MainDesignerWindow(QMainWindow):
 
         import_menu = self.menuBar().addMenu("&Import")
 
-        import_data_action = file_menu.addAction("Import &Data (CSV)")
-        import_data_action.triggered.connect(self.import_csv_to_merge_manager)
+        self.import_data_action = file_menu.addAction("Import &Data (CSV)")
+        self.import_data_action.triggered.connect(self.import_csv_to_merge_manager)
 
-        export_png_action = file_menu.addAction("&Export Current Tab as PNG...")
-        export_png_action.triggered.connect(self.export_current_tab_png)
+        self.export_png_action = file_menu.addAction("&Export Current Tab as PNG...")
+        self.export_png_action.triggered.connect(self.export_to_png)
 
-        export_pdf_action = file_menu.addAction("Export Current Tab as PDF...")
-        export_pdf_action.triggered.connect(self.export_to_pdf)
+        self.export_pdf_action = file_menu.addAction("Export Current Tab as PDF...")
+        self.export_pdf_action.triggered.connect(self.export_to_pdf)
 
         file_menu.addSeparator()
 
@@ -278,6 +269,14 @@ class MainDesignerWindow(QMainWindow):
         close_proj_act.triggered.connect(self.on_close_project)
         proj_menu.addAction(close_proj_act)
 
+    def update_menu_states(self, index):
+        current_tab = self.tab_widget.widget(index)
+        self.import_data_action.setEnabled(isinstance(current_tab, ComponentTab))
+        self.export_png_action.setEnabled(isinstance(current_tab, ComponentTab))
+        self.export_pdf_action.setEnabled(isinstance(current_tab, LayoutTab))
+
+
+
     # ———— Tab Handling ———— #
     def _auto_save_current_tab(self):
         pass
@@ -310,9 +309,10 @@ class MainDesignerWindow(QMainWindow):
     @Slot(int)
     def on_tab_changed(self, index: int):
         # first thing: persist whatever was open before
-        self._auto_save_current_tab()
+        # self._auto_save_current_tab()
 
         active_tab = self.tab_widget.widget(index)
+        self.update_menu_states(index)
         self.import_panel.update_for_template(active_tab.template)
         # Set the active undo stack for the selected tab
         self.undo_group.setActiveStack(active_tab.undo_stack)
@@ -331,8 +331,6 @@ class MainDesignerWindow(QMainWindow):
             self.palette_dock.show()
             self.properties_dock.show()
             self.layers_dock.show()
-            print("property_panel sizeHint:", active_tab.property_panel.sizeHint())
-            print("remove_item_btn sizeHint:", active_tab.remove_item_btn.sizeHint())
             # Place ComponentTab's widgets into the main window docks
             self.toolbar_dock.setWidget(active_tab.measure_toolbar) #
             self.palette_dock.setWidget(active_tab.palette) #
@@ -397,9 +395,7 @@ class MainDesignerWindow(QMainWindow):
             tab.template.dpi = new_dpi
             tab.scene.dpi = new_dpi
 
-
     @Slot(int, str)
-    # def on_tab_renamed(index: int, new_name: str):
     def on_tab_title_changed(self, index, new_name: str):
         sender_tab = self.get_tab_at_index(index)
         template = sender_tab.template
@@ -491,8 +487,8 @@ class MainDesignerWindow(QMainWindow):
                                        main_window=self,
                                        registry=registry,
                                        template=obj)
-            if hasattr(obj, "csv_path") and obj.csv_path:
-                self.merge_manager.load_csv(obj.csv_path, obj)
+            if hasattr(obj, "csv_path") and getattr(obj, "csv_path") is not None:
+                self.merge_manager.load_csv(obj.csv_path, template=obj)
                 print(f"Template {obj.name} successfully loaded csv at path: {obj.csv_path}")      
             idx = self.tab_widget.addTab(new_tab, Path(path).stem)
             new_tab.file_path = path
@@ -543,9 +539,9 @@ class MainDesignerWindow(QMainWindow):
             if not template:
                 continue
 
-            if getattr(template, "pid", None) == template_pid:
-                tab.palette.remove_template_by_tpid(template_pid)
-                break  # Once found, stop (unless you expect duplicates)
+            # if getattr(template, "pid", None) == template_pid:
+            #     tab.palette.remove_template_by_tpid(template_pid)
+            #     break  # Once found, stop (unless you expect duplicates)
 
     @Slot()
     def save_template(self):
@@ -556,6 +552,7 @@ class MainDesignerWindow(QMainWindow):
         if not path:
             self.save_as_template()
             return
+            
         self.write_template_to_path(tab.template, tab.registry, tab.file_path)
         self.show_status_message(f"Saved to {tab.file_path}", "success")
         # update the tab title if needed
@@ -775,43 +772,61 @@ class MainDesignerWindow(QMainWindow):
         # 4) fallback: do nothing or show “nothing to paste”
         self.statusBar().showMessage("Nothing to paste", 2000)
 
+    @Slot()
     def import_csv_to_merge_manager(self):
         active_tab = self.tab_widget.currentWidget()
         if not active_tab or not hasattr(active_tab, 'template'):
             QMessageBox.warning(self, "No Template", "No active template found")
             return
 
-        # Create custom dialog with checkbox
+        # Create file dialog
         dialog = QFileDialog(self, "Import CSV for Template", "", "CSV Files (*.csv);;All Files (*)")
-        
-        # Create checkbox widget
-        checkbox = QCheckBox("Link to current template", dialog)
-        checkbox.setChecked(True)  # Default to checked
-        
-        # Add checkbox to dialog's layout
-        layout = dialog.layout()
-        layout.addWidget(checkbox)
-        
+        dialog.setOption(QFileDialog.DontUseNativeDialog, True)
+
         # Execute dialog
         if dialog.exec() != QFileDialog.Accepted:
             return
-        
-        csv_path = dialog.selectedFiles()[0]
-        link_to_template = checkbox.isChecked()
 
-        csv_data = self.merge_manager.load_csv(csv_path, active_tab.template)
-                
-        self.import_panel.update_for_template(active_tab.template)
+        csv_path = dialog.selectedFiles()[0]
+        tmpl = active_tab.template
+        data = self.merge_manager.get_csv_data_for_template(tmpl)
+        # print("TEMPLATE @-names:", [el.name for el in tmpl.items if getattr(el, "name", "").startswith("@")])
+        # if data:
+        #     print("CSV headers:     ", data.headers)
+        #     print("Validation:      ", data.validate_headers(tmpl))
+        # else:
+        #     print("No CSVData found (check template.csv_path and file exists).")
+        data = self.merge_manager.load_csv(csv_path, active_tab.template)
+        self.import_panel.set_template(active_tab.template)
+
+        # safe debug
+        if data:
+            print(data.validate_headers(active_tab.template))
+            self.import_panel.update_for_template(active_tab.template)
+        else:
+            print("[IMPORT] No CSVData returned")
+     
 
     @Slot()
-    def export_current_tab_png(self):
-        current_tab = self.get_current_tab()
-        if not current_tab:
-            self.show_status_message("No active tab to export PNG from.", "warning")
+    def export_to_png(self):
+        active_tab = self.tab_widget.currentWidget()
+        
+        if not isinstance(active_tab, ComponentTab):
+            print("[EXPORT ERROR] Active tab is not a ComponentTab.")
             return
-        current_tab.export_png_gui()
 
+        folder = QFileDialog.getExistingDirectory(self, "Select Export Directory", str(Path.home()))
 
+        if not folder:
+            print("[EXPORT CANCELLED] No directory selected.")
+            return
+
+        export_manager = ExportManager(self.settings, active_tab.registry, self.merge_manager)
+        export_manager.export_component_to_png(active_tab.template, folder, dpi=300)
+
+        print(f"[EXPORT COMPLETED] Components exported to {folder}")
+
+    @Slot()
     def export_to_pdf(self):
         """Export the current ComponentTemplate to a multi-page PDF using ExportManager."""
         active_tab = self.tab_widget.currentWidget()

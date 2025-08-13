@@ -1,18 +1,24 @@
-from typing import Type, TYPE_CHECKING
+from pathlib import Path
+from typing import Any, Optional
+
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QLabel, QListWidget, QListWidgetItem
 from PySide6.QtCore import Qt
-from shiboken6 import isValid
+from PySide6.QtGui import QColor, QBrush
+
 from prototypyside.models.component_template import ComponentTemplate
+# If you also want to support LayoutTemplate, you can import it and treat similarly.
+
+
 
 class ImportPanel(QWidget):
     """
     Displays CSV import/merge status for the selected component template.
-    Reacts to template changes and element edits (e.g., name changes).
+    Reacts to template changes, element edits, and MergeManager events.
     """
     def __init__(self, merge_manager, parent=None):
         super().__init__(parent)
         self.merge_manager = merge_manager
-        self._current_template = None
+        self._current_template: Optional[Any] = None
 
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
@@ -30,109 +36,152 @@ class ImportPanel(QWidget):
         layout.addWidget(self.fields_list)
         layout.addStretch(1)
 
-    def refresh_ui_for_template(self, template):
-        """
-        Rebuilds the import panel UI for the given template.
-        Updates the field bindings and CSV file indicators.
-        """
-        self.update_csv_file_list()
-        self.update_fields(template)
+        # Refresh when the manager loads/clears/updates CSV
+        self.merge_manager.csv_loaded.connect(self._on_merge_event)
+        self.merge_manager.csv_updated.connect(self._on_merge_event)
+        # FIX: Connect to the now-existing csv_cleared signal
+        self.merge_manager.csv_cleared.connect(self._on_merge_event)
 
+    # --- Public API ----------------------------------------------------------
 
+    def set_template(self, template):
+        self._current_template = template
+        self.update_for_template(template)
 
     def update_for_template(self, template):
-        """
-        Update the panel to reflect a new ComponentTemplate.
-        If the same template is already active, do nothing.
-        """
-        if template == self._current_template:
-            return  # Already connected to this template
-
-        # Disconnect from previous template if valid
-        if self._current_template and isValid(self._current_template):
-            try:
-                self._current_template.template_changed.disconnect(self._on_template_changed)
-            except (RuntimeError, TypeError):
-                pass
-
-        self._current_template = template
-
-        if self._current_template and isValid(self._current_template):
-            try:
-                self._current_template.template_changed.connect(self._on_template_changed)
-            except (RuntimeError, TypeError):
-                pass
-
-        self.refresh_ui_for_template(template)  # Custom method to update display
-
-
-
-    def _disconnect_signals(self):
-        """Disconnect signals from the previous template and its elements."""
-        if self._current_template is None:
+        if not template or not isinstance(template, ComponentTemplate):
+            self.csv_list.clear()
+            self.fields_list.clear()
+            self.csv_list.addItem("No template selected")
             return
 
-        try:
-            if hasattr(self._current_template, "template_changed"):
-                self._current_template.template_changed.disconnect(self._on_template_changed)
-        except TypeError:
-            pass  # signal already disconnected
+        # No need for unwrap_component_template if we pass the correct object
+        real = template 
 
-        for item in getattr(self._current_template, "items", []):
-            try:
-                if hasattr(item, "item_changed"):
-                    item.item_changed.disconnect(self._on_template_changed)
-            except TypeError:
-                pass
-
-        self._current_template = None
-
-    def _on_template_changed(self):
-        """Triggered when elements are added/removed to the template."""
-        template = self._current_template
-        if isinstance(template, ComponentTemplate):
-            # Reconnect to any new items
-            data = self.merge_manager.get(template.pid)
-            for item in getattr(self._current_template, "items", []):
-                if hasattr(item, "item_changed"):
-                    item.item_changed.connect(self._on_template_changed)
-
-            self.update_fields(self._current_template)
-
-    def update_csv_file_list(self):
         self.csv_list.clear()
-        for key, entry in self.merge_manager.csv_data.items():
-            label = str(entry.path)
-            if entry.is_linked:
-                label += f"  ⇐  {entry.tname}"
-            item = QListWidgetItem(label)
-
-            # Highlight if linked to current template
-            if (entry.is_linked and
-                self._current_template and
-                getattr(self._current_template, "pid", None) == entry.tpid):
-                item.setSelected(True)
-                item.setBackground(Qt.lightGray)
-
-            self.csv_list.addItem(item)
-
-
-
-    def update_fields(self, template):
         self.fields_list.clear()
-        if not isinstance(template, ComponentTemplate):
-            return
-        entry = self.merge_manager.get(template.pid) or self.merge_manager.get(template.csv_path)
+        
+        # Use the new, correct method to get data
+        data = self.merge_manager.get_csv_data_for_template(real)
+        
+        if data:
+            self.csv_list.addItem(Path(getattr(data, "path", "")).name)
+            
+            # The validation logic is now centralized in CSVData
+            validation = data.validate_headers(real)
+            
+            # Sort the items for a consistent display order
+            sorted_items = sorted(validation.items())
 
-        if entry and entry.is_linked:
-            field_status = entry.validate_headers(template)
-            for field, status in field_status.items():
-                if status == "ok":
-                    label = f"{field} ✔️"
-                elif status == "missing":
-                    label = f"{field} ✖️"
-                elif status == "warn":
-                    label = f"{field} ⚠️"
-                else:
-                    label = f"{field}"
-                self.fields_list.addItem(QListWidgetItem(label))
+            for el_name, status in sorted_items:
+                self._add_field_row(el_name, status)
+        else:
+            self.csv_list.addItem("No CSV loaded")
+            # Show missing elements from the template even if no CSV is loaded
+            print(template.items)
+            if template.items != []:
+                at_elements = [el.name for el in template.items if el.name.startswith("@")]
+                for el_name in sorted(at_elements):
+                    self._add_field_row(el_name, "missing")
+
+    # --- Helpers -------------------------------------------------------------
+
+    def _add_field_row(self, label: str, status: str) -> None:
+        # Add icons as requested
+        icon_map = {
+            "ok": "✔️",
+            "warn": "⚠️",
+            "missing": "❌"
+        }
+        icon = icon_map.get(status, "")
+        
+        text = f"{icon} {label}" # Prepend icon to the text
+        item = QListWidgetItem(text)
+
+        if status == "ok":
+            item.setForeground(QColor(20, 150, 20)) # Green
+        elif status == "warn":
+            item.setForeground(QColor(200, 120, 0)) # Yellow/Orange
+        elif status == "missing":
+            item.setForeground(QColor(180, 20, 20)) # Red
+            
+        self.fields_list.addItem(item)
+
+
+    def _connect_template_signals(self) -> None:
+        """Listen to template/item changes so the panel stays current."""
+        t = self._current_template
+        if not isinstance(t, ComponentTemplate):
+            return
+
+        # If your template emits a change signal, hook it
+        if hasattr(t, "template_changed"):
+            try:
+                t.template_changed.connect(self._on_template_changed)
+            except (TypeError, RuntimeError):
+                pass
+
+        # Listen to item-level changes (rename, add/remove, etc.)
+        for item in getattr(t, "items", []):
+            if hasattr(item, "item_changed"):
+                try:
+                    item.item_changed.connect(self._on_template_changed)
+                except (TypeError, RuntimeError):
+                    pass
+
+    def _disconnect_template_signals(self) -> None:
+        t = self._current_template
+        if not t:
+            return
+
+        if hasattr(t, "template_changed"):
+            try:
+                t.template_changed.disconnect(self._on_template_changed)
+            except (TypeError, RuntimeError):
+                pass
+
+        for item in getattr(t, "items", []):
+            if hasattr(item, "item_changed"):
+                try:
+                    item.item_changed.disconnect(self._on_template_changed)
+                except (TypeError, RuntimeError):
+                    pass
+
+    # --- Slots ---------------------------------------------------------------
+
+    def _on_merge_event(self, *args) -> None:
+        """
+        Called when MergeManager reports CSV loaded/updated/cleared.
+        Only rebuild if it concerns the current template (cheap anyway).
+        """
+        if self._current_template:
+            self.update_for_template(self._current_template)
+
+    def _on_template_changed(self) -> None:
+        """Triggered when elements are added/removed/renamed on the template."""
+        if self._current_template:
+            # Reconnect to any new items and refresh the list
+            self._disconnect_template_signals()
+            self._connect_template_signals()
+            self.update_for_template(self._current_template)
+
+    # --- (Optional) existing utilities --------------------------------------
+
+    def update_csv_file_list(self) -> None:
+        """If you keep this separate view, use manager’s store to show all sources."""
+        self.csv_list.clear()
+        seen = set()
+        for entry in self.merge_manager.csv_data.values():
+            if id(entry) in seen:
+                continue
+            seen.add(id(entry))
+            label = Path(str(entry.path)).name
+            if getattr(entry, "is_linked", False):
+                label += f"  ⇐  {getattr(entry, 'tname', '')}"
+            item = QListWidgetItem(label)
+            if (getattr(entry, "is_linked", False)
+                and self._current_template
+                and getattr(self._current_template, "pid", None) == getattr(entry, "tpid", None)):
+                item.setSelected(True)
+                item.setBackground(QBrush(QColor(230, 230, 230)))
+            self.csv_list.addItem(item)

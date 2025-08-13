@@ -48,12 +48,7 @@ class ComponentScene(QGraphicsScene):
         self.dpi = settings.dpi
         self.template  = template          # QGraphicsObject, z = −100
 
-        # 1️⃣  scene rect == template rect
         self._sync_scene_rect()
-
-        # 2️⃣  add template + grid
-        # self.addItem(self.template)
-
         self.inc_grid = grid
         # self.print_lines = print_lines
         # self.print_lines.hide()
@@ -61,17 +56,22 @@ class ComponentScene(QGraphicsScene):
         self.template.template_changed.connect(self._on_template_rect_changed)
 
         # internal drag / resize bookkeeping
-        self._resizing            = False
+        # self._resizing            = False
         self._dragging_item       = None
         self._dragging_start_pos  = None
         self._drag_offset         = None
-        self.resize_handle        = None
-        self.resizing_item     = None
-        self.resize_start_geom    = None
-        self.resize_handle_type   = None
+        # self.resize_handle        = None
+        # self.resizing_item     = None
+        # self.resize_start_geom    = None
+        # self.resize_handle_type   = None
 
         self.setBackgroundBrush(Qt.lightGray)
 
+    @Slot(object, object, object)
+    def on_item_resize_finished(self, item, new_geometry, old_geometry):
+        """Creates an undo command when an item signals that its resize is complete."""
+        self.item_resized.emit(item, "geometry", new_geometry, old_geometry)
+        
     # ─────────────────────────── helpers / utils ──────────────────────────
     def _sync_scene_rect(self):
         """Make the scene rect exactly match the template’s bounding rect."""
@@ -97,21 +97,21 @@ class ComponentScene(QGraphicsScene):
         if item is not None and not item.isSelected():
             item.setSelected(True)
         self.selectionChanged.emit()
+
     # ───────────────────────────── mouse events ───────────────────────────
-    # (unchanged except calls to self.snap_to_grid keep working)
     def mousePressEvent(self, event: QGraphicsSceneMouseEvent):
         item = self.itemAt(event.scenePos(), self.views()[0].transform())
 
-        if hasattr(item, 'is_handle') and item.is_handle:  # Your ResizeHandle flag
-            print("Entering resize event")
-            self._resizing = True
-            self.resize_handle = item
-            self.resizing_item = item.parentItem()
-            # Save local position and rect at drag start (not sceneBoundingRect)
-            self.resize_start_item_geometry = self.resizing_item.geometry
-            # self.resize_start_item_rect = self.resizing_item.geometry.rect
-            event.accept()
-            return
+        # if hasattr(item, 'is_handle') and item.is_handle:  # Your ResizeHandle flag
+        #     print("Entering resize event")
+        #     self._resizing = True
+        #     self.resize_handle = item
+        #     self.resizing_item = item.parentItem()
+        #     # Save local position and rect at drag start (not sceneBoundingRect)
+        #     self.resize_start_item_geometry = self.resizing_item.geometry
+        #     # self.resize_start_item_rect = self.resizing_item.geometry.rect
+        #     event.accept()
+        #     return
 
         # Alt+click duplication
         if event.modifiers() & Qt.AltModifier and is_movable(item):
@@ -143,25 +143,24 @@ class ComponentScene(QGraphicsScene):
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event: QGraphicsSceneMouseEvent):
-        if self._resizing and self.resizing_item:
-            # Snap the current mouse position to the grid!
-            snapped_scene_pos = self.snap_to_grid(event.scenePos())
-            starting_scene_pos = self.resizing_item.mapToScene(self.resize_handle.pos())
-            delta_scene = snapped_scene_pos - starting_scene_pos
-            scene_rect = self.resizing_item.mapRectToScene(self.resizing_item.geometry.px.rect)
-            self.resizing_item.resize_from_handle(
-                self.resize_handle.handle_type,
-                delta_scene,
-                scene_rect
-            )
-            event.accept()
-            return
+            # if self._resizing and self.resizing_item:
+            #     # Snap the current mouse position to the grid!
+            #     snapped_scene_pos = self.snap_to_grid(event.scenePos())
+            #     starting_scene_pos = self.resizing_item.mapToScene(self.resize_handle.pos())
+            #     delta_scene = snapped_scene_pos - starting_scene_pos
+            #     scene_rect = self.resizing_item.mapRectToScene(self.resizing_item.geometry.px.rect)
+            #     self.resizing_item.resize_from_handle(
+            #         self.resize_handle.handle_type,
+            #         delta_scene,
+            #         scene_rect
+            #     )
+            #     event.accept()
+            #     return
 
         if self._dragging_item:
             # Calculate the new snapped position for the item based on the snapped mouse position
             # and the stored snapped offset.
             snapped_current_mouse_pos = self.snap_to_grid(event.scenePos())
-            print(f"Current drag offset =  {self._drag_offset}")
             new_snapped_pos = snapped_current_mouse_pos - self._drag_offset
             self._dragging_item.setPos(new_snapped_pos)
             event.accept()
@@ -181,21 +180,21 @@ class ComponentScene(QGraphicsScene):
             if old_pos != new_pos:
                 self.item_resized.emit(self._dragging_item, "geometry", new, old)
                 
-        elif self._resizing and self.resizing_item and self.resize_start_item_geometry:
-            # The new geometry is the current geometry of the item after resizing
-            new = self.resizing_item.geometry
-            old = self.resizing_item.geometry = self.resize_start_item_geometry
-            # The old geometry was saved when the mouse press began
-            # Create the command with the CORRECT new_geometry and old_geometry order
-            self.item_resized.emit(self.resizing_item, "geometry", new, old)
+        # elif self._resizing and self.resizing_item and self.resize_start_item_geometry:
+        #     # The new geometry is the current geometry of the item after resizing
+        #     new = self.resizing_item.geometry
+        #     old = self.resizing_item.geometry = self.resize_start_item_geometry
+        #     # The old geometry was saved when the mouse press began
+        #     # Create the command with the CORRECT new_geometry and old_geometry order
+        #     self.item_resized.emit(self.resizing_item, "geometry", new, old)
 
 
         # Reset state
-        self._resizing = False
-        self.resize_handle = None
-        self.resizing_item = None
-        self.resize_start_item_geometry = None
-        self.resize_start_item_rect = None
+        # self._resizing = False
+        # self.resize_handle = None
+        # self.resizing_item = None
+        # self.resize_start_item_geometry = None
+        # self.resize_start_item_rect = None
         self._dragging_item = None
         self._drag_offset = None
         self._dragging_start_pos = None

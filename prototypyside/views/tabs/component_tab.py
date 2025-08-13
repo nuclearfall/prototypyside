@@ -12,6 +12,8 @@ from PySide6.QtGui import QColor, QKeySequence, QShortcut, QUndoStack, QPainter
 
 from prototypyside.views.component_scene import ComponentScene
 from prototypyside.views.component_view import ComponentView
+from prototypyside.views.toolbars.font_toolbar import FontToolbar
+from prototypyside.views.palettes.element_palette import ElementPalette
 from prototypyside.views.panels.property_panel import PropertyPanel
 from prototypyside.views.panels.layers_panel import LayersListWidget
 from prototypyside.views.palettes.palettes import ComponentListWidget
@@ -101,10 +103,11 @@ class ComponentTab(QWidget):
         toolbar_container = QHBoxLayout()
         toolbar_container.setContentsMargins(0,0,0,0)
 
-        # self.create_font_toolbar()
+        self.font_toolbar = FontToolbar()
+        self.font_toolbar.font_changed.connect(self.on_property_changed)
         self.create_measure_toolbar()
-        toolbar_container.addWidget(self.measure_toolbar)
-
+        #toolbar_container.addWidget(self.measure_toolbar)
+        #toolbar_container.addWidget(self.font_toolbar)
         main_layout.addLayout(toolbar_container)
 
         # The QGraphicsView will be the dominant part of the tab
@@ -130,8 +133,6 @@ class ComponentTab(QWidget):
         # self.print_lines = PrintLines(parent=self.template)
         self.scene = ComponentScene(self.settings, template=self.template, grid=self.inc_grid) #print_lines=self.print_lines)
         self.scene.addItem(self.template)
-        self.scene.addItem(self.inc_grid)
-        # self.scene.addItem(self.print_lines)
         self.scene.setSceneRect(rect)
         # print(f"Scene rect in pixels is {self.template.geometry.to("px", dpi=self.settings.dpi).rect}")
         self.view  = ComponentView(self.scene)
@@ -181,19 +182,15 @@ class ComponentTab(QWidget):
         self.status_message_signal.emit(message, message_type, timeout_ms)
 
     def setup_component_palette(self):
-        # This will be a widget that the QMainWindow will place in a DockWidget
-        self.palette = ComponentListWidget()
+        self.palette = ElementPalette()
         components = [
             ("Text Field", "te", "T"),
             ("Image Container", "ie", "🖼️"),
             ("Vector Graphic", "ve", "⬠"),
         ]
         for name, etype, icon in components:
-            item = QListWidgetItem(f"{icon} {name}")
-            item.setData(Qt.UserRole, etype)
-            self.palette.addItem(item)
-        self.palette.setDragEnabled(True)
-        self.palette.palette_item_clicked.connect(self.clear_scene_selection)
+            self.palette.add_item(name, etype, icon)
+        self.palette.on_item_type_selected.connect(self.clear_scene_selection)
 
     def setup_property_editor(self):
         # This will be a widget that the QMainWindow will place in a DockWidget
@@ -206,7 +203,6 @@ class ComponentTab(QWidget):
         self.set_item_controls_enabled(False) # Ensure this disables the new button too
 
     def setup_layers_panel(self):
-        # This will be a widget that the QMainWindow will place in a DockWidget
         self.layers_list = LayersListWidget(self)
         self.layers_list.item_selected_in_list.connect(self.on_layers_list_item_clicked)
         self.layers_list.item_z_changed_requested.connect(self.reorder_item_z_from_list_event)
@@ -226,7 +222,6 @@ class ComponentTab(QWidget):
         self.snap_checkbox = QCheckBox("Snap to Grid")
         self.snap_checkbox.setChecked(True)
         self.snap_checkbox.stateChanged.connect(self.toggle_snap)
-        self.snap_to_grid = True
 
         # Show Grid
         self.grid_checkbox = QCheckBox("Show Grid")
@@ -242,21 +237,23 @@ class ComponentTab(QWidget):
         self.template_name_field.editingFinished.connect(self.on_template_name_changed)
         self.template_name_field.setMaximumWidth(150)
 
-        width = self.template.geometry.width # Unit Str value
-        height = self.template.geometry.height # Unit Str value
         self.template_width_field = UnitField(self.template, "width", display_unit=self.unit)
         self.template_height_field = UnitField(self.template, "height", display_unit=self.unit)
+        
         for dim in [self.template_width_field, self.template_height_field]:
             dim.setMaximumWidth(100)
-            dim.valueChanged.connect(self.on_template_geometry_changed)
-
+            dim.valueChanged.connect(self.on_property_changed)
+        self.bleed_label = QLabel("Bleed")    
+        self.template_bleed_field = UnitField(self.template, "bleed", display_unit=self.unit)
+        self.template_bleed_field.valueChanged.connect(self.on_property_changed)
+        self.template_bleed_field.setMaximumWidth(80)       
         self.border_label = QLabel("Border")
-        self.border_width_field = UnitField(self.template, "border_width", self.unit, self)
-        self.border_width_field.valueChanged.connect(self.set_template_border)
+        self.border_width_field = UnitField(self.template, "border_width", display_unit=self.unit)
+        self.border_width_field.valueChanged.connect(self.on_property_changed)
         self.border_width_field.setMaximumWidth(80)
         self.corners_label = QLabel("Corner Radius")
-        self.corners_field = UnitField(self.template, "corner_radius", self.unit, self)
-        self.corners_field.valueChanged.connect(self.on_corner_radius_change)
+        self.corners_field = UnitField(self.template, "corner_radius", display_unit=self.unit)
+        self.corners_field.valueChanged.connect(self.on_property_changed)
         self.corners_field.setMaximumWidth(80)
 
         
@@ -285,14 +282,10 @@ class ComponentTab(QWidget):
         self.measure_toolbar.update()
         self.property_panel.on_unit_change(unit)
 
-    @Slot(int)
-    def on_corner_radius_change(self, new_value: int):
-        self.template.corner_radius = new_value
-
     # called from menu/toolbar checkboxes:
     def toggle_grid(self, checked: bool):
         self._show_grid = checked
-        self.grid_visibility_changed.emit(checked)
+        self.inc_grid.setVisible(self._show_grid)
 
     def toggle_snap(self, checked: bool):
         self._snap_grid = checked
@@ -303,39 +296,17 @@ class ComponentTab(QWidget):
     #     self.print_lines.toggle_print_lines()
 
     @Slot()
-    def set_template_border(self, t, p, new, old):
-        self.on_property_changed(t, p, new, old)
-        #setattr(t, p, new)
-
-    @Slot()
     def on_template_name_changed(self):
         new = self.template_name_field.text()
         self.on_property_changed(self.template, "name", new, self.template.name)
         print(f"Name changed to {self.template.name}")
         self.tab_title_changed.emit(new)
 
-    @Slot(object, str, object, object)  # The value is a UnitStr
-    def on_template_geometry_changed(self, target, prop, new, old):
-        if prop == "width":
-            w = new
-            h = target.geometry.height
-        elif prop == "height":
-            h = new
-            w = target.geometry.width
-        old_geom = self.template.geometry
-        new_geom = UnitStrGeometry(width=w, height=h)
-        command = ResizeTemplateCommand(target, new_geom, old_geom)
-        self.undo_stack.push(command)
-        print(f"[GEOMETRY] After resize template dimensions: {target.geometry}")
-        self.scene.setSceneRect(target.geometry.px.rect)
-        self.view
-
     @Slot()
     def on_property_changed(self, target, prop, new, old):
         command = ChangePropertyCommand(target, prop, new, old)
         self.undo_stack.push(command)
         print(f"[COMPONENT TAB] Target={target}, prop={prop}, old={old}, new={new}")
-        print(f"[UNDO STACK] Pushed: {command}")
 
     def get_selected_item(self) -> Optional['ComponentElement']:
         items = self.scene.selectedItems()
@@ -365,7 +336,8 @@ class ComponentTab(QWidget):
                 new.item_changed.connect(self.on_item_data_changed)
             except RuntimeError:
                 pass  # Already connected, which shouldn't happen due to above logic
-
+            if hasattr(new, "font"):
+                self.font_toolbar.setTarget(new)
             self.property_panel.set_target(new)
             self._update_layers_selection(new)
         else:
@@ -469,15 +441,10 @@ class ComponentTab(QWidget):
             item.setSelected(True)
             self.scene.blockSignals(False)
 
-
     @Slot()
     def on_item_data_changed(self):
         self.selected_item.update()
         pass
-        # item = self.get_selected_item()
-        # if item and item == self.selected_item:
-        #     item.update()
-        #     self.scene.update()
 
     @Slot()
     def clear_scene_selection(self):
@@ -491,10 +458,7 @@ class ComponentTab(QWidget):
         command = AddElementCommand(item_type, self, new_geometry)
         self.undo_stack.push(command)
         self.selected_item = self.registry.get_last()
-        tz = self.template.zValue()
-        gz = self.inc_grid.zValue()
-        ezs = [e.zValue() for e in self.template.items]
-        print(f"[Z_ORDER] zOrdering after item placement: Template {tz}, Grid {gz}, Elements {ezs}")
+        self.selected_item.resize_finished.connect(self.scene.on_item_resize_finished)
 
     @Slot(ComponentElement, QPointF)
     def clone_item(self, original, press_scene_pos):

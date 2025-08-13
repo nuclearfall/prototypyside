@@ -128,9 +128,7 @@ class LayoutToolbar(QWidget):
         self.cols_spin.setValue(template.columns)
         self.rows_spin.blockSignals(False)
         self.cols_spin.blockSignals(False)
-        copies = len(self.parent().scene._pages)
-        print (f"Copies value? {copies}")
-        self.copies_spin.setValue(copies)
+        # self.copies_spin.setValue(copies)
 
     def update_template(self, template):
         pass

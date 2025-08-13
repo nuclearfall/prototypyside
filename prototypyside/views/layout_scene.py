@@ -45,7 +45,7 @@ class LayoutScene(QGraphicsScene):
         self.inc_grid = grid       
         self._preview_mode = False
         self._pages = []
-        self._sync_scene_rect()
+        self.sync_scene_rect()
     @property     
     def dpi(self):
         return self._dpi
@@ -54,9 +54,9 @@ class LayoutScene(QGraphicsScene):
     def dpi(self, new_dpi):
         if new_dpi != self._dpi:
             self._dpi = new_dpi
-            self._sync_scene_rect()
+            self.sync_scene_rect()
 
-    def _sync_scene_rect(self):
+    def sync_scene_rect(self):
         """Make the scene rect exactly match the template’s bounding rect."""
         r = self.template.geometry.to("px", dpi=self._dpi).rect
         self.setSceneRect(r)
@@ -64,13 +64,10 @@ class LayoutScene(QGraphicsScene):
     @Slot()
     def _on_template_rect_changed(self):
         """Keep scene and grid in sync when the template is resized."""
-        self._sync_scene_rect()
+        self.sync_scene_rect()
         self.inc_grid.prepareGeometryChange()
         self.inc_grid.update()
 
-    # def drawBackground(self, painter: QPainter, rect: QRectF):
-    #     super().drawBackground(painter, rect)
-    #     self.draw_grid(painter, rect)
 
     # Public helper for FSM / tools
     def snap_to_grid(self, pos: QPointF, level: int = 3) -> QPointF:
@@ -84,65 +81,6 @@ class LayoutScene(QGraphicsScene):
         if item is not None and not item.isSelected():
             item.setSelected(True)
         self.selectionChanged.emit()
-
-    # def draw_grid(self, painter, rect):
-    #     if not getattr(self.parent(), "show_grid", True):
-    #         return
-
-    #     unit = self.tab.settings.unit
-    #     levels = sorted(MEASURE_INCREMENT[unit].keys(), reverse=True)
-    #     num_levels = len(levels)
-
-    #     # Gray from lightest (level 3) to darkest (level 1)
-    #     gray_range = LIGHTEST_GRAY - DARKEST_GRAY
-
-    #     for i, level in enumerate(levels):
-    #         spacing = self.get_grid_spacing(level)
-
-    #         gray_value = LIGHTEST_GRAY - int(i * (gray_range / max(1, num_levels - 1)))
-    #         pen = QPen(QColor(gray_value, gray_value, gray_value))
-    #         painter.setPen(pen)
-
-    #         left = int(rect.left())
-    #         right = int(rect.right())
-    #         top = int(rect.top())
-    #         bottom = int(rect.bottom())
-
-    #         x = left - (left % spacing)
-    #         while x < right:
-    #             painter.drawLine(x, top, x, bottom)
-    #             x += spacing
-
-    #         y = top - (top % spacing)
-    #         while y < bottom:
-    #             painter.drawLine(left, y, right, y)
-    #             y += spacing
-
-
-    # def get_grid_spacing(self, level: int) -> int:
-    #     unit = self.tab.settings.unit
-    #     dpi = self.tab.settings.dpi
-    #     base = parse_dimension("1 " + unit, dpi)
-    #     increment = MEASURE_INCREMENT[unit].get(level)
-    #     if increment is None:
-    #         raise ValueError(f"Invalid grid level {level} for unit '{unit}'")
-    #     return int(round(base * increment))
-
-    # def snap_to_grid(self, pos: QPointF) -> QPointF:
-    #     if not self.is_snap_to_grid:
-    #         return pos
-    #     spacing = self.get_grid_spacing(level=3)
-    #     x = math.floor(pos.x() / spacing) * spacing
-    #     y = math.floor(pos.y() / spacing) * spacing
-    #     return QPointF(x, y)
-
-    # def _on_template_shape_changed(self):
-    #     if not self._template:
-    #         return
-    #     rect = self._template.boundingRect()
-    #     print(f"bounding rect of template item set to: {rect}")
-    #     self.setSceneRect(rect)
-    #     self.update(rect)
 
     def mousePressEvent(self, event: QGraphicsSceneMouseEvent):
         item = self.itemAt(event.scenePos(), QTransform())

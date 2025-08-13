@@ -38,45 +38,6 @@ class ComponentView(QGraphicsView):
         # Provide sensible default values, then update if scene/view are valid
         self.MIN_SCALE = 0.001 # A small default value
         self.MAX_SCALE = 100.0  # Your desired max scale
-#     def __init__(self, scene, parent=None):
-#         super().__init__(scene, parent)
-#         self.setRenderHints(QPainter.Antialiasing | QPainter.TextAntialiasing | QPainter.SmoothPixmapTransform)
-#         self.setDragMode(QGraphicsView.NoDrag)
-#         self.setAcceptDrops(True)
-#         self.viewport().setAcceptDrops(True)
-
-#         self.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
-#         self.setResizeAnchor(QGraphicsView.AnchorUnderMouse)
-#         self.setRenderHints(QPainter.Antialiasing | QPainter.TextAntialiasing | QPainter.SmoothPixmapTransform)
-
-#         # Accept touch and gestures
-#         self.setAttribute(Qt.WA_AcceptTouchEvents)
-#         self.grabGesture(Qt.PinchGesture)
-#         self.viewport().setAttribute(Qt.WA_AcceptTouchEvents)
-#         self.viewport().grabGesture(Qt.PinchGesture)
-#         self.viewport().installEventFilter(self)
-
-#         self._panning = False
-#         self.current_scale = 1.0
-#         self._last_scale = 1.0
-#         scene_rect = self.scene().sceneRect()
-#         print(f"[COMPONENT_VIEW] Scene rect from the view is {scene_rect}")
-#         view_size = QSizeF(self.viewport().width(), self.viewport().height())
-#         print(f"[COMPONENT_VIEW] View size is {self.viewport().size()}")
-#         if scene_rect.isEmpty() or view_size.isEmpty():
-#             return
-
-#         scale_x = view_size.width() / scene_rect.width()
-#         scale_y = view_size.height() / scene_rect.height()
-
-#         self.MIN_SCALE = min(scale_x, scale_y)
-
-#         self.MAX_SCALE = 10.0
-#         self._pinch_start_transform = QTransform()
-#         self._pinch_last_factor = 1.0
-#         self._gesture_active = False
-#         self.PINCH_SENSITIVITY = 2.1
-#         self._pinch_direction = None  # 'in', 'out', or None
 
     def _update_min_scale(self):
         scene_rect = self.sceneRect()

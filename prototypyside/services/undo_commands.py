@@ -53,7 +53,7 @@ class AddElementCommand(QUndoCommand):
 
         scene_pos = self.item.pos()
         # Snap to grid if enabled (in px, so reconvert)
-        if self.tab.snap_to_grid:
+        if self.tab._snap_grid:
             self.item.setPos(self.tab.scene.snap_to_grid(scene_pos))
 
         # For QGraphicsItem, setPos always uses px
@@ -175,6 +175,7 @@ class ChangePropertyCommand(QUndoCommand):
     def redo(self):
         print(f"[UNDO] Target ID: {id(self.item)}, Prop: {self.prop}, New: {self.new_value}")
         setattr(self.item, self.prop, self.new_value)
+
 
 class ResizeTemplateCommand(QUndoCommand):
     def __init__(self, template, new_geometry, old_geometry, description="Resize Template"):
