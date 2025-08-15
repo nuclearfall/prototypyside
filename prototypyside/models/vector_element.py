@@ -15,9 +15,9 @@ from prototypyside.utils.units.unit_str_geometry import UnitStrGeometry
 class VectorElement(ComponentElement):
     """A component element that renders SVG vector graphics."""
 
-    def __init__(self, pid, geometry: UnitStrGeometry, tpid=None,
+    def __init__(self, pid, registry, geometry: UnitStrGeometry, tpid=None,
                  parent: Optional[QGraphicsObject] = None, name: str = None):
-        super().__init__(pid, geometry, tpid, parent, name)
+        super().__init__(pid, registry, geometry, tpid, parent, name)
         self._renderer: Optional[QSvgRenderer] = None
         self.showPlaceholderText = True
         self.setAcceptDrops(True)
@@ -51,6 +51,7 @@ class VectorElement(ComponentElement):
             painter.save()
             painter.setPen(QPen(Qt.darkGray))
             font = painter.font()
+            font.setPixelSize(int(font.pointSize()*self._dpi/self.ldpi))
             font.setPointSize(10)
             font.setItalic(True)
             painter.setFont(font)

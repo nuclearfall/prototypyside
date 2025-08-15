@@ -3,15 +3,15 @@ from __future__ import annotations
 from typing import Optional, TYPE_CHECKING
 
 from PySide6.QtCore    import Qt, QPointF, QRectF, Signal, Slot
-from PySide6.QtGui     import QTransform
+from PySide6.QtGui     import QTransform, QPen, QColor
 from PySide6.QtWidgets import (
     QGraphicsScene, QGraphicsItem, QGraphicsSceneMouseEvent,
-    QGraphicsSceneDragDropEvent
+    QGraphicsSceneDragDropEvent, QGraphicsRectItem
 )
-
 
 from prototypyside.services.undo_commands import MoveElementCommand, ChangePropertyCommand
 from prototypyside.utils.graphics_item_helpers import is_movable
+from prototypyside.utils.units.unit_str_geometry import UnitStrGeometry
 from prototypyside.utils.units.unit_str_helpers import geometry_with_px_pos
 from prototypyside.models.component_element import ComponentElement
 
@@ -30,6 +30,8 @@ class ComponentScene(QGraphicsScene):
     item_cloned   = Signal(ComponentElement, QPointF)
     item_moved    = Signal()
     item_resized  = Signal(object, str, object, object)
+    create_item_with_dims = Signal(str, object)
+    creation_cancelled = Signal()
     selectionChanged = Signal()
 
     # ──────────────────────────────── init ────────────────────────────────
@@ -38,7 +40,6 @@ class ComponentScene(QGraphicsScene):
         settings,
         *,
         grid: "IncrementalGrid",
-        # print_lines: "PrintLines",
         template: "ComponentTemplate",
         parent=None,
     ):
@@ -46,44 +47,45 @@ class ComponentScene(QGraphicsScene):
 
         self.settings     = settings
         self.dpi = settings.dpi
+        self.unit = "px"
         self.template  = template          # QGraphicsObject, z = −100
 
-        self._sync_scene_rect()
+        self.sync_scene_rect()
         self.inc_grid = grid
-        # self.print_lines = print_lines
-        # self.print_lines.hide()
-        # React to template-size changes
         self.template.template_changed.connect(self._on_template_rect_changed)
 
         # internal drag / resize bookkeeping
-        # self._resizing            = False
         self._dragging_item       = None
         self._dragging_start_pos  = None
         self._drag_offset         = None
-        # self.resize_handle        = None
-        # self.resizing_item     = None
-        # self.resize_start_geom    = None
-        # self.resize_handle_type   = None
+        self._creation_state: str = 'idle'
+        self._creation_prefix: str | None = None
+        self._creation_start: QPointF | None = None
+        self._preview_item: QGraphicsRectItem | None = None
 
         self.setBackgroundBrush(Qt.lightGray)
+
+    # ---------- Public API ----------
+
+    @Slot(str)
+    def arm_element_creation(self, prefix: str):
+        """Step 3) Called by the palette -> scene when a type is chosen."""
+        # If we were half-way through a previous attempt, kill it.
+        if self._creation_state != 'idle':
+            self._cancel_creation_internal()
+        self._creation_prefix = prefix
+        self._creation_state = 'armed'
+        self.views()[0].setCursor(Qt.CrossCursor) if self.views() else None
+
+    @Slot()
+    def cancel_armed_creation(self):
+        """External cancellation hook (tab changes, tool change, etc.)."""
+        self._cancel_creation_internal()
 
     @Slot(object, object, object)
     def on_item_resize_finished(self, item, new_geometry, old_geometry):
         """Creates an undo command when an item signals that its resize is complete."""
         self.item_resized.emit(item, "geometry", new_geometry, old_geometry)
-        
-    # ─────────────────────────── helpers / utils ──────────────────────────
-    def _sync_scene_rect(self):
-        """Make the scene rect exactly match the template’s bounding rect."""
-        r = self.template.geometry.to("px", dpi=self.dpi).rect
-        self.setSceneRect(r)
-
-    @Slot()
-    def _on_template_rect_changed(self):
-        """Keep scene and grid in sync when the template is resized."""
-        self._sync_scene_rect()
-        self.inc_grid.prepareGeometryChange()
-        self.inc_grid.update()
 
     # Public helper for FSM / tools
     def snap_to_grid(self, pos: QPointF, level: int = 4) -> QPointF:
@@ -98,26 +100,46 @@ class ComponentScene(QGraphicsScene):
             item.setSelected(True)
         self.selectionChanged.emit()
 
+    # ─────────────────────────── helpers / utils ──────────────────────────
+    def sync_scene_rect(self):
+        """Make the scene rect exactly match the template’s bounding rect."""
+        r = self.template.geometry.to("px", dpi=self.dpi).rect
+        if self.template.include_bleed:
+            r = self.template.bleed_rect.px.rect
+        print(f"Bleed? {self.template.include_bleed} {r}")
+        self.setSceneRect(r)
+        self.update()
+
+    @Slot()
+    def _on_template_rect_changed(self):
+        """Keep scene and grid in sync when the template is resized."""
+        self.sync_scene_rect()
+        self.inc_grid.prepareGeometryChange()
+        self.inc_grid.update()
+
     # ───────────────────────────── mouse events ───────────────────────────
     def mousePressEvent(self, event: QGraphicsSceneMouseEvent):
-        item = self.itemAt(event.scenePos(), self.views()[0].transform())
+        # We need the item under the cursor for both your logic and creation logic
+        item = self.itemAt(event.scenePos(), self.views()[0].transform()) if self.views() else None
 
-        # if hasattr(item, 'is_handle') and item.is_handle:  # Your ResizeHandle flag
-        #     print("Entering resize event")
-        #     self._resizing = True
-        #     self.resize_handle = item
-        #     self.resizing_item = item.parentItem()
-        #     # Save local position and rect at drag start (not sceneBoundingRect)
-        #     self.resize_start_item_geometry = self.resizing_item.geometry
-        #     # self.resize_start_item_rect = self.resizing_item.geometry.rect
-        #     event.accept()
-        #     return
+        # --- NEW: creation path (Step 4a / 4b) ---
+        if self._creation_state == 'armed':
+            # If the user pressed LMB on blank canvas (no ComponentElement), begin creation
+            if event.button() == Qt.LeftButton and (item is None or not isinstance(item, ComponentElement)):
+                self._creation_state = 'dragging'
+                self._creation_start = self.snap_to_grid(event.scenePos()) if hasattr(self, "snap_to_grid") else event.scenePos()
+                self._ensure_preview_item()
+                self._update_preview(self._creation_start, self._creation_start)
+                event.accept()
+                return
+            # Otherwise (pressed on an element, or not LMB), cancel creation and fall through to normal behavior
+            self._cancel_creation_internal()
+            # No return here—let your existing logic (dup/move/select...) run
 
         # Alt+click duplication
         if event.modifiers() & Qt.AltModifier and is_movable(item):
             # emit both the item to clone and the raw scene‐pos
             self._alt_drag_started = True
-            print(f"Item: {item}, event: {event} and scenePos {event.scenePos()}")
             self.item_cloned.emit(item, event.scenePos())
             event.accept()
             return
@@ -125,41 +147,26 @@ class ComponentScene(QGraphicsScene):
         if is_movable(item):  # For your item type, using the helper function
             self._dragging_item = item
             self.select_exclusive(self._dragging_item)
-
-            # Calculate the offset from the snapped *item's top-left corner* to the snapped *mouse press position*.
-            # The item's position (pos()) is relative to its parent, which for top-level items is the scene's origin (0,0).
-            # So, item.pos() is already in scene coordinates for top-level items.
-            print(f"Is there any item? {item}")
-            print(f"Snap position? {item.pos()}")
             snapped_item_pos_at_press = self.snap_to_grid(item.pos())
-            snapped_mouse_press_pos = self.snap_to_grid(event.scenePos())
+            snapped_mouse_press_pos   = self.snap_to_grid(event.scenePos())
             self._drag_offset = snapped_mouse_press_pos - snapped_item_pos_at_press
-            print (f"On click, snapped item at press: {snapped_item_pos_at_press}, snapped mouse press pos {snapped_mouse_press_pos}, and drag offset {self._drag_offset}")
-            self._dragging_start_pos = QPointF(item.x(), item.y()) # Store the item's position before drag
-            item.setPos(snapped_item_pos_at_press) # Snap item to grid immediately
+            self._dragging_start_pos = QPointF(item.x(), item.y())  # Store the item's position before drag
+            item.setPos(snapped_item_pos_at_press)                  # Snap item to grid immediately
             event.accept()
             return
 
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event: QGraphicsSceneMouseEvent):
-            # if self._resizing and self.resizing_item:
-            #     # Snap the current mouse position to the grid!
-            #     snapped_scene_pos = self.snap_to_grid(event.scenePos())
-            #     starting_scene_pos = self.resizing_item.mapToScene(self.resize_handle.pos())
-            #     delta_scene = snapped_scene_pos - starting_scene_pos
-            #     scene_rect = self.resizing_item.mapRectToScene(self.resizing_item.geometry.px.rect)
-            #     self.resizing_item.resize_from_handle(
-            #         self.resize_handle.handle_type,
-            #         delta_scene,
-            #         scene_rect
-            #     )
-            #     event.accept()
-            #     return
+        # --- NEW: creation preview dragging ---
+        if self._creation_state == 'dragging' and self._creation_start is not None:
+            current = self.snap_to_grid(event.scenePos()) if hasattr(self, "snap_to_grid") else event.scenePos()
+            self._update_preview(self._creation_start, current)
+            event.accept()
+            return
 
+        # --- YOUR EXISTING LOGIC (unchanged) ---
         if self._dragging_item:
-            # Calculate the new snapped position for the item based on the snapped mouse position
-            # and the stored snapped offset.
             snapped_current_mouse_pos = self.snap_to_grid(event.scenePos())
             new_snapped_pos = snapped_current_mouse_pos - self._drag_offset
             self._dragging_item.setPos(new_snapped_pos)
@@ -169,6 +176,33 @@ class ComponentScene(QGraphicsScene):
         super().mouseMoveEvent(event)
 
     def mouseReleaseEvent(self, event: QGraphicsSceneMouseEvent):
+        # --- NEW: release to create element (Step 6) ---
+        if self._creation_state == 'dragging' and self._creation_start is not None and event.button() == Qt.LeftButton:
+            end  = self.snap_to_grid(event.scenePos()) if hasattr(self, "snap_to_grid") else event.scenePos()
+            rect = QRectF(self._creation_start, end).normalized()
+
+            if rect.width() >= 1e-6 and rect.height() >= 1e-6:
+                # scene is in logical units; build UnitStrGeometry with (0,0,w,h) rect and top-left pos
+                geom = UnitStrGeometry(
+                    rect=QRectF(0, 0, rect.width(), rect.height()),
+                    pos=QPointF(rect.x(), rect.y()),
+                    unit=self.unit  # your scene already uses logical display units
+                )
+                prefix = self._creation_prefix or ""
+                self._teardown_preview()
+                self._creation_state  = 'idle'
+                self._creation_prefix = None
+                self._creation_start  = None
+                if self.views():
+                    self.views()[0].unsetCursor()
+                self.create_item_with_dims.emit(prefix, geom)
+                event.accept()
+                return
+            else:
+                # trivial rect: cancel and fall through
+                self._cancel_creation_internal()
+
+        # --- YOUR EXISTING LOGIC (unchanged) ---
         # Commit move to undo stack (if needed)
         if self._dragging_item and self._dragging_start_pos is not None:
             geom = self._dragging_item.geometry
@@ -179,30 +213,32 @@ class ComponentScene(QGraphicsScene):
 
             if old_pos != new_pos:
                 self.item_resized.emit(self._dragging_item, "geometry", new, old)
-                
-        # elif self._resizing and self.resizing_item and self.resize_start_item_geometry:
-        #     # The new geometry is the current geometry of the item after resizing
-        #     new = self.resizing_item.geometry
-        #     old = self.resizing_item.geometry = self.resize_start_item_geometry
-        #     # The old geometry was saved when the mouse press began
-        #     # Create the command with the CORRECT new_geometry and old_geometry order
-        #     self.item_resized.emit(self.resizing_item, "geometry", new, old)
-
-
-        # Reset state
-        # self._resizing = False
-        # self.resize_handle = None
-        # self.resizing_item = None
-        # self.resize_start_item_geometry = None
-        # self.resize_start_item_rect = None
+                    
         self._dragging_item = None
         self._drag_offset = None
         self._dragging_start_pos = None
 
         super().mouseReleaseEvent(event)
 
+    # Cancel on any other “first action” that isn’t a mouse press.
+    def keyPressEvent(self, event):
+        if self._creation_state == 'armed':
+            self._cancel_creation_internal()
+        super().keyPressEvent(event)
+
+    def wheelEvent(self, event):
+        if self._creation_state == 'armed':
+            self._cancel_creation_internal()
+        super().wheelEvent(event)
+
+    def focusOutEvent(self, event):
+        if self._creation_state == 'armed':
+            self._cancel_creation_internal()
+        super().focusOutEvent(event)
 
     def dragEnterEvent(self, event: QGraphicsSceneDragDropEvent):
+        if self._creation_state == 'armed':
+            self._cancel_creation_internal()
         if event.mimeData().hasFormat('text/plain'):
             event.acceptProposedAction()
         else:
@@ -230,3 +266,46 @@ class ComponentScene(QGraphicsScene):
                 super().dropEvent(event)
         else:
             super().dropEvent(event)
+
+    # ---------- Helpers ----------
+    def _clicked_on_component_element(self, scene_pos: QPointF) -> bool:
+        """True if any existing element is under the click."""
+        for it in self.items(scene_pos):
+            # Ignore our own temporary preview rect if present
+            if it is self._preview_item:
+                continue
+            # If your background/template rect is a known type, you can skip it here as well.
+
+            # Treat any ComponentElement as “occupied”
+            if isinstance(it, _ElementBase):
+                return True
+        return False
+
+    def _ensure_preview_item(self):
+        if self._preview_item is None:
+            self._preview_item = QGraphicsRectItem()
+            pen = QPen(QColor(50, 120, 255))
+            pen.setStyle(Qt.DashLine)
+            pen.setCosmetic(True)
+            self._preview_item.setPen(pen)
+            self._preview_item.setBrush(Qt.NoBrush)
+            self._preview_item.setZValue(10_000)
+            self.addItem(self._preview_item)
+
+    def _update_preview(self, a: QPointF, b: QPointF):
+        if self._preview_item:
+            self._preview_item.setRect(QRectF(a, b).normalized())
+
+    def _teardown_preview(self):
+        if self._preview_item:
+            self.removeItem(self._preview_item)
+            self._preview_item = None
+
+    def _cancel_creation_internal(self):
+        self._teardown_preview()
+        self._creation_state  = 'idle'
+        self._creation_prefix = None
+        self._creation_start  = None
+        self.creation_cancelled.emit()
+        if self.views():
+            self.views()[0].unsetCursor()

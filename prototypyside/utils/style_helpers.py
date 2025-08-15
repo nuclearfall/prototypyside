@@ -1,4 +1,4 @@
-# style_helpers
+# style_helpers.py
 from PySide6.QtCore import Qt
 
 def split_alignment(alignment: Qt.AlignmentFlag):

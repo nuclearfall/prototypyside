@@ -16,13 +16,25 @@ def parse_prop_name(s: str) -> Tuple[str, str]:
     """
     m = re.match(r'^([^_]+)_(.*)$', s)
     if m:
-        # group(1) is everything up to the first “_”
-        # group(2) is everything after it (including any further underscores)
         return m.group(1), m.group(2)
-
     else:
         # no underscore found
         return s, ''
+
+def obj_from_prop(tab, template, objstr, undo_stack=None) -> object:
+    obj_types = {
+        "layout": LayoutTemplate,
+        "component": ComponentTemplate,
+    }
+    ostr, prop = parse_prop_name(ostr)
+    if prop and isinstance(template, obj_types.get(ostr, None)):
+        if hasttr(template, prop) and undo_stack:
+            command = ChangePropertiesCommand()
+
+
+
+        
+
 
 PAGE_SIZES = {
     # North American Standard & Common Wide-Format Sizes
@@ -44,7 +56,7 @@ PRINT_POLICIES = {
     'Letter: 3x3 Standard 2.5"x3.5" Cards': {
         "page_size": "Letter (8.5x11 inches)",
         "geometry": UnitStrGeometry(width="8.5in", height="11in", unit="in", dpi=300),
-        "orientation": False,
+        "is_landscape": False,
         "rows": 3,
         "columns": 3,
         "whitespace": [
@@ -62,9 +74,9 @@ PRINT_POLICIES = {
     'Letter: 2x4 Standard 2.5"x3.5" Cards': {
         "page_size": "Letter (8.5x11 inches)",
         "geometry": UnitStrGeometry(width="8.5in", height="11in", unit="in", dpi=300),
-        "orientation": True,
-        "rows": 4,
-        "columns": 2,
+        "is_landscape": True,
+        "rows": 2,
+        "columns": 4,
         "whitespace": [
             UnitStr("0.75in", dpi=300),
             UnitStr("0.75in", dpi=300),
@@ -78,7 +90,7 @@ PRINT_POLICIES = {
     'Letter: 10x13 Small 0.5" Tokens': {
         "page_size": "Letter (8.5x11 inches)",
         "geometry": UnitStrGeometry(width="8.5in", height="11in", unit="in", dpi=300),
-        "orientation": False,
+        "is_landscape": False,
         "rows": 13,
         "columns": 9,
         "whitespace": [
@@ -93,7 +105,7 @@ PRINT_POLICIES = {
     'Letter: 7x10 Medium 0.75" Tokens': {
         "page_size": "Letter (8.5x11 inches)",
         "geometry": UnitStrGeometry(width="8.5in", height="11in", unit="in", dpi=300),
-        "orientation": False,
+        "is_landscape": False,
         "rows": 10,
         "columns": 7,
         "whitespace": [
@@ -108,7 +120,7 @@ PRINT_POLICIES = {
     'Letter: 6x9 Standard 1.0" Tokens': {
         "page_size": "Letter (8.5x11 inches)",
         "geometry": UnitStrGeometry(width="8.5in", height="11in", unit="in", dpi=300),
-        "orientation": False,
+        "is_landscape": False,
         "rows": 8,
         "columns": 6,
         "whitespace": [
@@ -122,14 +134,83 @@ PRINT_POLICIES = {
     }
 }
 
-class PageManager:
+class Policy:
+    # app: MainWindow
+    # registry: ProtoRegistry
+    # layout: LayoutTemplate
+    # components: Dict[str, ComponentTemplate]
+    # policy: Dict[str, Dict]
+    def __init__(self, layout, policy_key, app=None, registry=None, merge_manager=None, components={}):
+        self.app = app
+        self.registry = self.registry or app.registry if app else None
+        self.merge_manager = merge_manager or app.merge_manager if app else None
+        self.registry = registry or app.registry if app else None
+        self.layout = layout
+        self.policy = PRINT_PARAMS.get(policy_key)
+        self.csv_data = self.scan_for_csv()
+        self.components = components or self.scan_for_comps()
 
-    def set_policy_props(self, layout, policy, undo_stack):
+    def setParams(self, params):
+        self.page_manager = page_manager
+        self.layout = layout
+        self.policy_name = policy_key
+        self.layout.policy = page_manager.setPolicyParams(policy_key)
+
+    def scan_for_csv(self, merge_manager=None):
+        merge_manager = merge_manager or self.merge_manager
+
+
+    def scan_for_components(self):
+        tpid = resolve_pid(layout.content)
+        if tpid and self.registry:
+            comp = self.registry.global_get(tpid)
+            if comp:
+                self.components[tpid] = comap
+        # Search the page for all unique template clones clones by tpid.
+        self.components = {**self.components, **{c.tpid: c for s in self.slots for c in s if isinstance(c, ComponentTemplate)}}
+
+
+class PageManager:
+    def __init__(self, settings, registry, components, parent=None):
+        settings.unit_changed.connect(self.set_unit)
+        settings.dpi_changed.connect(self.set_dpi)
+        self.unit = self.settings.unit
+        self.dpi = self.settigns.dpilayouts=[]
+        self.policies = None
+    #     self.policies = {l.pid: {
+    #         l.pid: Policy().set_params(l, self.registry, self.layout, components=components)} for l in layouts if isinstance(l, LayoutTemplate)
+    #     }
+    #     # since dicts are guaranteed ordered we easily get the last layout
+    #     self._current = self.layouts.items()[-1]
+    # }
+    @property
+    def current(self):
+        return self._current
+
+    @current.setter
+    def current(self, pid):
+        entry = self.layouts.get(pid, None)
+        if entry:
+            return entry.get("layout")
+        return None 
+
+    def lget(self, pid):
+        return self.layouts.get(pid)
+
+    def cgets(self, pid):
+        entry = self.layouts.get(pid, None)
+        if entry:      
+            return entry.get("components")
+        return None
+
+    def setPolicyParams(self, layout, policy, undo_stack):
         m = re.match(r'^([^_]+)_(.*)$', s)
         if policy not in self.policies or not self.policies.get(policy):
             return
         params = [(p, v) for p, v in policies.get(policy).items()]
-        prop_names = new_values = old_values = []
+        lay_prop_names = []
+        lay_new_values = []
+        lay_old_values = []
 
         for prop_key, value in params:
             _, prop = parse_prop_name(prop_key)
@@ -138,7 +219,8 @@ class PageManager:
                 new_values.append(value)
                 old_values.append(getattr(template, prop))
 
-        page_props_command = ChangePropertiesCommand(template, prop_names, new_values, old_values)
+        print(f"Properties to be changed: {[pk for pk in params.keys()]}")
+        page_props_command = ChangePropertiesCommand(templates, prop_names, new_values, old_values)
         undo_stack.push(page_props_command)
         pritn(template.to_dict())
 
@@ -163,7 +245,7 @@ class PageManager:
 
         # 1) Page geometry & orientation
         page_geo = template.geometry  # UnitStrGeometry
-        orientation = template.orientation  # "portrait" or "landscape"
+        orientation = template.is_landscape  # "portrait" or "landscape"
 
         # 2) Fill defaults if needed
         if whitespace is None:

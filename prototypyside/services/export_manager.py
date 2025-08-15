@@ -1,16 +1,21 @@
+# export_manager.py
 from math import ceil
+from pathlib import Path
+from itertools import zip_longest
+
 from PySide6.QtCore import QSizeF
-from PySide6.QtGui  import QPainter, QPdfWriter, QImage, QPageSize, QPageLayout
+from PySide6.QtGui  import QPainter, QColor, QPdfWriter, QImage, QPageSize, QPageLayout
 from PySide6.QtWidgets import QGraphicsScene, QStyleOptionGraphicsItem
 
 from prototypyside.models.layout_slot import LayoutSlot
+from prototypyside.models.component_template import ComponentTemplate
 from prototypyside.models.text_element import TextElement
 from prototypyside.models.vector_element import VectorElement
+from prototypyside.utils.units.unit_str import UnitStr, unitstr_from_raw
 from prototypyside.utils.units.unit_str_geometry import UnitStrGeometry
 from prototypyside.utils.proto_helpers import resolve_pid
 from PySide6.QtCore import Qt, QSizeF, QRectF, QMarginsF, QPointF
-from pathlib import Path
-from itertools import zip_longest
+
 
 class ExportManager:
     # Here we're setting dpi to 600 and downscaling to 300 for print.
@@ -21,7 +26,6 @@ class ExportManager:
         self.settings.print_dpi = 300
         self.registry = registry
         self.merge_manager = merge_manager
-
 
     def paginate(self, layout, copies=1):
         registry = self.registry
@@ -67,64 +71,181 @@ class ExportManager:
 
                 # export_manager.py
                 for el in comp_inst.items:
-                    name = getattr(el, "name", "") or ""
+                    name = getattr(el, "name", "") and name.startswith("@")
                     if not name.startswith("@"):
                         continue
 
-                    # Try exact header first (e.g., '@top_text'), then normalized ('top_text')
-                    v = row.get(name)
-                    if v in (None, ""):
-                        v = row.get(name.lstrip("@"))
-                    if v is None:
-                        v = ""
-
-                    # Apply to element
-                    # (adjust to your element API)
-                    if hasattr(el, "content"):        # TextElement/VectorElement in your codebase
+                    v = row.get(name, None)
+                    if v and el.content:
                         el.content = v
 
+                # ensure that the image is recreated (if Text or Vector they're painted separately)
                 slot.invalidate_cache()
 
         return pages
 
-    def export_component_to_png(self, template, output_dir, dpi=300):
+    def export_component_to_png(self, template, output_dir):
+        """
+        PNG export with per-row overrides and bleed-aware geometry.
+        Depends on ComponentTemplate.include_bleed to set _bleed_rect.
+        """
+        # use canonical dpi for everything. DPI for comp_inst is set by LayoutSlot.dpi property
+        dpi = self.settings.dpi
+        # --- helpers --------------------------------------------------------------
+        def _truthy(v) -> bool:
+            if isinstance(v, bool): return v
+            s = str(v).strip().lower()
+            return s in ("1", "true", "yes", "y", "on")
+
+        def _maybe_qcolor(v):
+            if isinstance(v, QColor): return v
+            s = str(v).strip()
+            if s.startswith("#"):
+                c = QColor(s);  return c if c.isValid() else None
+            parts = [p.strip() for p in s.split(",")]
+            try:
+                if len(parts) == 3:
+                    r,g,b = map(int, parts); return QColor(r,g,b)
+                if len(parts) == 4:
+                    r,g,b,a = map(int, parts); return QColor(r,g,b,a)
+            except Exception:
+                pass
+            c = QColor(s); return c if c.isValid() else None
+
+        def _maybe_unitstr(v):
+            if isinstance(v, UnitStr): return v
+            return UnitStr(str(v), "px", )
+
+        def _valid_image_path(p):
+            try:
+                path = Path(str(p)).expanduser()
+                return path.is_file()
+            except Exception:
+                return False
+
+        # --- setup ---------------------------------------------------------------
         output_dir = Path(output_dir)
         output_dir.mkdir(parents=True, exist_ok=True)
 
         if template.csv_path:
             csv_data = self.merge_manager.load_csv(template.csv_path, template)
             rows = csv_data.rows
+            validation = csv_data.validate_headers(template)
+            missing = [k for k, v in validation.items() if v == "missing"]
+            if missing:
+                print(f"[EXPORT ERROR] Missing CSV headers for: {', '.join(missing)}")
+                raise ValueError(f"Export aborted due to missing headers: {', '.join(missing)}")
         else:
-            rows = [{}]  # single empty row for static content
+            rows = [{}]
 
-        validation = csv_data.validate_headers(template) if template.csv_path else {}
-        missing = [k for k, v in validation.items() if v == "missing"]
-        if missing:
-            print(f"[EXPORT ERROR] Missing CSV headers for: {', '.join(missing)}")
-            raise ValueError(f"Export aborted due to missing headers: {', '.join(missing)}")
+        # background aliases
+        bg_aliases = ("@bg", "@background", "@background_image", "@bg_image")
+
+        # supported overrides (strip '@' → attr)
+        override_map = {
+            # exclude "@background_image": "background_image" as it's handled seperately
+            "@include_bleed":    "include_bleed",
+            "@bg_color":         "bg_color",
+            "@border_width":     "border_width",
+            "@border_color":     "border_color",
+        }
 
         for i, row in enumerate(rows, start=1):
+            if not isinstance(template, ComponentTemplate):
+                raise TypeError("Export must be a ComponentTemplate.")
             comp_inst = self.registry.clone(template)
-            # Apply CSV data to bound elements
-            for el in comp_inst.items:
-                if el.name.startswith("@"):  # CSV-bound element
-                    val = row.get(el.name, "")
-                    el.content = val
-            # We're not going to register the slot.
+
+            # --- (A) per-row template overrides (before any painting) -------------
+            # A1) background image via aliases (first valid path wins)
+            bg_val = None
+            for key in bg_aliases:
+                v = row.get(key, None)
+                if v and _valid_image_path(v):
+                    setattr(comp_inst, "background_image", v)
+                    break
+
+            # A2) explicit overrides
+            for at_key, attr in override_map.items():
+                if at_key not in row:
+                    continue
+                val = row[at_key]
+
+                if attr == "include_bleed":
+                    setattr(comp_inst, attr, _truthy(val))
+
+                elif attr in ("bg_color", "border_color"):
+                    qc = _maybe_qcolor(val)
+                    if qc is not None:
+                        setattr(comp_inst, attr, qc)
+
+                elif attr == "border_width":
+                    setattr(comp_inst, "border_width", unitstr_from_raw(attr, dpi=dpi))
+
+            # --- (B) bind CSV-driven element content ------------------------------
+            for el in getattr(comp_inst, "items", []):
+                if getattr(el, "name", "").startswith("@"):
+                    v = row.get(el.name, None)
+                    # if there isn't row data, let slot handle item.content if present.
+
+            # --- (C) render via LayoutSlot; geometry depends on bleed ------------
+            # choose geometry
+            slot_geometry = comp_inst.geometry if not comp_inst.include_bleed else comp_inst.bleed_rect
+
             slot = LayoutSlot(
-                    pid=resolve_pid('ls'),
-                    geometry=template.geometry, 
-                    registry=self.registry)
+                pid=resolve_pid('ls'),
+                geometry=slot_geometry,
+                registry=self.registry
+            )
 
             scene = QGraphicsScene()
             scene.addItem(slot)
-            
             slot.content = comp_inst
-            slot.dpi = 300
+            slot.dpi = dpi
+
             image = slot.image
-            filename = f"{template.name}_{i}.png"
+            filename = f"{template.name}_{i}{'_bleed' if comp_inst.include_bleed else ''}.png"
             image.save(str(output_dir / filename), "PNG")
             print(f"Exported component to {filename}")
+
+
+    # def export_component_to_png(self, template, output_dir, dpi=300):
+    #     output_dir = Path(output_dir)
+    #     output_dir.mkdir(parents=True, exist_ok=True)
+
+    #     if template.csv_path:
+    #         csv_data = self.merge_manager.load_csv(template.csv_path, template)
+    #         rows = csv_data.rows
+    #     else:
+    #         rows = [{}]  # single empty row for static content
+
+    #     validation = csv_data.validate_headers(template) if template.csv_path else {}
+    #     missing = [k for k, v in validation.items() if v == "missing"]
+    #     if missing:
+    #         print(f"[EXPORT ERROR] Missing CSV headers for: {', '.join(missing)}")
+    #         raise ValueError(f"Export aborted due to missing headers: {', '.join(missing)}")
+
+    #     for i, row in enumerate(rows, start=1):
+    #         comp_inst = self.registry.clone(template)
+    #         # Apply CSV data to bound elements
+    #         for el in comp_inst.items:
+    #             if el.name.startswith("@"):  # CSV-bound element
+    #                 val = row.get(el.name, "")
+    #                 el.content = val
+    #         # We're not going to register the slot.
+    #         slot = LayoutSlot(
+    #                 pid=resolve_pid('ls'),
+    #                 geometry=template.geometry, 
+    #                 registry=self.registry)
+
+    #         scene = QGraphicsScene()
+    #         scene.addItem(slot)
+            
+    #         slot.content = comp_inst
+    #         slot.dpi = 300
+    #         image = slot.image
+    #         filename = f"{template.name}_{i}.png"
+    #         image.save(str(output_dir / filename), "PNG")
+    #         print(f"Exported component to {filename}")
 
     def export_to_pdf(self, layout, output_path, scale_to_300=False):
         pages = self.paginate(layout)
@@ -235,5 +356,3 @@ class ExportManager:
                 painter.restore()
 
         painter.end()
-
-

@@ -33,8 +33,6 @@ class TextElement(ComponentElement):
             parent: Optional[QGraphicsObject] = None, name: str = None,
             font: QFont = QFont("Arial", 12)):
         super().__init__(pid, registry, geometry, tpid, parent, name)
-        self.registry = registry
-        self.ldpi = registry.ldpi
         self._font = font
         self._font_scale = int(font.pointSize()*self._dpi/self.ldpi)
         self._font.setPixelSize(self._font_scale)
@@ -71,7 +69,6 @@ class TextElement(ComponentElement):
         inst = super().from_dict(data, registry, is_clone)
         inst.pid = resolve_pid("te") if is_clone else data["pid"]
         font_str = data.get("font")
-        print(f"font string is {font_str}, at ")
         inst._font = QFont(data.get("font"))
         inst._font_scale = int(inst._font.pointSize()*inst._dpi/inst.ldpi)
         inst._font.setPixelSize(inst._font_scale)
@@ -81,31 +78,26 @@ class TextElement(ComponentElement):
     def paint(self, painter, option, widget=None):
         painter.save()
         font = self._font
-        print(f"Font size prior to painting is {self._font.pixelSize()}")
         # Convert geometry to px at current DPI
         rect = self.geometry.to("px", dpi=self.dpi).rect
-        print(f'Rect dimensions are {self.geometry.px.rect} at {self.dpi}')
-
-        # Set font size using DPI scaling
-        painter.setRenderHint(QPainter.TextAntialiasing, True)
-        painter.setRenderHint(QPainter.Antialiasing, True)
 
 
+        # 1) Draw bg/border/handles from the base class (includes display_only outline)
+        painter.save()
+        super().paint(painter, option, widget)
+        painter.restore()
+        
         # Set color
         painter.setPen(QPen(self.color))
+
         doc = QTextDocument()
-        # font.setPixelSize(int(font.pointSizeF() * self.dpi / 72.0))  # px = pt * dpi / 72
-        print(f"Font size while painting is {font.pixelSize()}")
         doc.setDefaultFont(font)
-        # Draw unformatted text
-        #painter.drawText(rect, self.alignment_flags, self.content or "")
-        # Text styling
         ctx = QAbstractTextDocumentLayout.PaintContext()
         ctx.palette.setColor(QPalette.Text, self.color)
         doc.setDocumentMargin(0)
         doc.setDefaultTextOption(QTextOption(self.alignment_flags))
         doc.setPlainText(self.content or "")
-        #doc.setTextWidth(rect.width())
+        doc.setTextWidth(rect.width())
 
         # Clip if text overflows rect
         if doc.size().height() > rect.height():
@@ -113,6 +105,8 @@ class TextElement(ComponentElement):
 
         # Paint at correct position in px space
         painter.translate(rect.topLeft())
+        painter.setRenderHint(QPainter.TextAntialiasing, True)
+        painter.setRenderHint(QPainter.Antialiasing, True)
         doc.documentLayout().draw(painter, ctx)
 
         painter.restore()

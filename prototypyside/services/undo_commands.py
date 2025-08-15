@@ -141,26 +141,6 @@ class ResizeElementCommand(QUndoCommand):
         self.item.geometry = self.new_geometry
         self.item.blockSignals(False)
 
-class ResizeAndMoveElementCommand(QUndoCommand):
-    pass
-    # def __init__(self, item, new_geometry, old_geometry, description="Resize/Move Element"):
-    #     super().__init__(description)
-    #     geom = item.geometry
-    #     print(f"Element rect and pos prior to move and resize: {geom.px.rect} at {geom.px.pos}.")
-    #     self.item = item
-    #     self.new_geometry = new_geometry
-    #     self.old_geometry = old_geometry
-
-    # def undo(self):
-    #     # Prevent re-entrancy when setting the item's geometry
-    #     self.item.geometry = self.old_geometry
-
-    # def redo(self):
-    #     # Prevent re-entrancy when setting the item's geometry
-    #     self.item.geometry = self.new_geometry
-
-
-
 class ChangePropertyCommand(QUndoCommand):
     def __init__(self, item, prop, new_value, old_value, description="Change Item Property"):
         super().__init__(description)
@@ -283,29 +263,3 @@ class ChangePropertiesCommand(QUndoCommand):
             # only apply if it’s out of sync
             if getattr(self.item, prop) != new:
                 setattr(self.item, prop, new)
-
-
-        
-# class PropertyChangeCommand:
-#     def __init__(self, sender_pid, target_pid, packet, mail_room):
-#         self.sender_pid = sender_pid
-#         self.target_pid = target_pid
-#         self.packet = packet
-#         self.mail_room = mail_room
-#         self.undo_packet = generate_undo_packet(packet)
-
-#     def redo(self):
-#         self.mail_room.send_packet(self.sender_pid, self.target_pid, self.packet)
-
-#     def undo(self):
-#         self.mail_room.send_packet(self.sender_pid, self.target_pid, self.undo_packet)
-
-
-
-# def generate_undo_packet(packet: dict) -> dict:
-#     # Make a shallow copy so we don't mutate the original packet
-#     undo_packet = packet.copy()
-#     # Swap new and old values
-#     undo_packet["new"], undo_packet["old"] = packet["old"], packet["new"]
-#     return undo_packet
-

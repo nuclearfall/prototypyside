@@ -9,19 +9,6 @@ def get_class_from_name(module_path, class_name):
     return getattr(module, class_name)
 
 
-
-OBJECT_ONLY: Dict[str, str] = {
-    # "clw": "ComponentListWidget",
-    # "cv": "ComponentView",
-    # "ep": "ElementPalette",
-    # "ip": "ImportPanel",
-    # "llw": "LayersListWidget",
-    # "lpp": "LayoutPropertyPanel",
-    # "lv": "LayoutView",
-    # "rh": "ResizeHandle",
-}
-
-
 REGISTERED: Dict[str, str] = {
     "ie": "ImageElement",
     "te": "TextElement",
@@ -47,17 +34,6 @@ def get_object_type(self, pid_str: str) -> Optional[Type]:
     """
     prefix = get_prefix(pid_str) # Assume get_prefix handles invalid PID_STR formats by returning None or raising
     return self._PROTO_OBJECT_CLASSES.get(prefix)
-
-# def parse_pid(pid_str: str) -> Tuple[Optional[str], Optional[str]]:
-#     pattern = r"^([a-zA-Z0-9]+)(?:_(.*))?$"
-#     match = re.match(pattern, pid_str)
-#     return (match.group(1), match.group(2)) if match else (None, None)
-
-# Replaced with resolve pid which validates a pid and issues a new one if invalid.
-# def resolve_pid(prefix: str) -> str:
-#     if prefix not in REGISTERED_PREFIXES:
-#         raise ValueError(f"Invalid prefix '{prefix}'. Valid: {sorted(REGISTERED_PREFIXES)}")
-#     return f"{prefix}_{uuid.uuid4().hex}"
 
 def parse_pid(pid_str: str) -> Tuple[Optional[str], Optional[str]]:
     # Accepts both prefix and full pid

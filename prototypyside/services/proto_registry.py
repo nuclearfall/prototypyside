@@ -9,15 +9,16 @@ from PySide6.QtCore import QObject, Signal
 
 from prototypyside.services.proto_factory import ProtoFactory
 from prototypyside.utils.proto_helpers import resolve_pid, get_prefix 
-# Import your model classes
+from prototypyside.utils.units.unit_str_geometry import UnitStrGeometry
+from prototypyside.views.overlays.incremental_grid import IncrementalGrid
+
 from prototypyside.models.component_template import ComponentTemplate
 from prototypyside.models.component_element import ComponentElement
 from prototypyside.models.text_element import TextElement
 from prototypyside.models.image_element import ImageElement
 from prototypyside.models.layout_template import LayoutTemplate
 from prototypyside.models.layout_slot import LayoutSlot
-from prototypyside.utils.units.unit_str_geometry import UnitStrGeometry
-from prototypyside.views.overlays.incremental_grid import IncrementalGrid
+
 
 BASE_NAMES = {
     "ie": "Image Element",
@@ -30,7 +31,6 @@ BASE_NAMES = {
     "ls": "Layout Slot",
 }
 
-
 class ProtoRegistry(QObject):
 
     object_registered = Signal(str)  # pid
@@ -39,7 +39,6 @@ class ProtoRegistry(QObject):
     def __init__(self, ldpi=144.0, parent=None, root=None):
         super().__init__(parent)
         self._factory = ProtoFactory()
-
         self.ldpi = ldpi
         self._is_root = isinstance(self, RootRegistry)
         self.root = self if self._is_root else root
@@ -288,16 +287,6 @@ class ProtoRegistry(QObject):
         return vals[0] if vals else None
 
 
-    # class ObjectRegistry(ProtoRegistry):
-    #     def __init__(self):
-    #         super().__init__()
-    #         self.pid = resolve_pid("obj_reg")
-    #         self._object_registry = None   # Or omit entirely if not needed
-
-    #     def set_object_registry(self):
-    #         # Prevent recursion: ObjectRegistry does not need its own object registry
-    #         self._object_registry = None 
-
 class RootRegistry(ProtoRegistry):
     object_registered = Signal(str)
     object_deregistered = Signal(str)
@@ -324,7 +313,7 @@ class RootRegistry(ProtoRegistry):
                 del child._orphans[key]
 
             child.root = None
-            child.logical_display_units = self.logical_display_units
+            child.ldpi = self.ldpi
             self._children.remove(child)
 
 

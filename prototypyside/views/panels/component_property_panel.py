@@ -8,7 +8,7 @@ from PySide6.QtGui import QColor, QFont, QTextOption, QKeyEvent
 from typing import Optional, Any, TYPE_CHECKING
 
 # Assuming these modules are in the same directory or accessible via python path
-from prototypyside.widgets.unit_field import UnitField, UnitStrGeometryField
+from prototypyside.widgets.unit_str_field import UnitStrField
 from prototypyside.utils.units.unit_str_geometry import UnitStrGeometry
 
 from prototypyside.widgets.color_picker import ColorPickerWidget
@@ -36,7 +36,7 @@ class FocusTextEdit(QTextEdit):
     """
     editingFinished = Signal(object, str, object, object)
 
-    def __init__(self, target_comp=None, content_key="content", parent=None):
+    def __init__(self, layout, target_comp, content_key="content", parent=None):
         super().__init__(parent)
         self.setWordWrapMode(QTextOption.WordWrap)
         self._content_key = content_key
@@ -114,7 +114,7 @@ class ComponentPropertyPanel(QWidget):
         self.width_field = UnitStrField()
         self.bg_color_picker = ColorPickerWidget()
         self.border_color_picker = ColorPickerWidget()
-        self.border_width_field = UnitField(property_name="border_width", display_unit=display_unit)
+        self.border_width_field = UnitStrField(property_name="border_width", display_unit=display_unit)
         
         # Conditional widgets
         self.keep_aspect_checkbox = QCheckBox("Keep Aspect Ratio")
@@ -183,7 +183,7 @@ class ComponentPropertyPanel(QWidget):
         """
         Called when the user (or the containing Tab) wants
         to switch display units (e.g. "px" → "in" → "cm").
-        This will re-target the two UnitFields so they
+        This will re-target the two UnitStrFields so they
         re-fetch their model values and reformat in the new unit.
         """
         self._display_unit = display_unit

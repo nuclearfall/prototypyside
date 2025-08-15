@@ -23,9 +23,9 @@ class ImageElement(ComponentElement):
                         True),
     }
 
-    def __init__(self, pid, geometry: UnitStrGeometry, tpid = None, 
+    def __init__(self, pid, registry, geometry: UnitStrGeometry, tpid = None, 
             parent: Optional[QGraphicsObject] = None, name: str = None):
-        super().__init__(pid, geometry, tpid, parent, name)
+        super().__init__(pid, registry, geometry, tpid, parent, name)
 
         self._pixmap: Optional[QPixmap] = None
         # _content is handled by ComponentElement
@@ -36,7 +36,7 @@ class ImageElement(ComponentElement):
 
         self.setAcceptDrops(True)
 
-    # override the content getter/setter
+    # --- Image-specific Property Getters and Setters ---
     @property
     def content(self):
         return self._content
@@ -54,7 +54,6 @@ class ImageElement(ComponentElement):
         self.item_changed.emit()
         self.update()
 
-    # --- Image-specific Property Getters and Setters ---
     @property
     def keep_aspect(self) -> bool:
         return self._keep_aspect
@@ -99,6 +98,7 @@ class ImageElement(ComponentElement):
             painter.setPen(QPen(Qt.darkGray))
             font = painter.font()
             font.setPointSize(10)
+            font.setPixelSize(int(font.pointSize()*self._dpi/self.ldpi))
             font.setItalic(True)
             painter.setFont(font)
             painter.drawText(rect, self.alignment_flags,

@@ -184,12 +184,7 @@ class LayoutSlot(QGraphicsObject):
     @content.setter
     def content(self, obj):
         self._content = obj
-
-        ### Next 4 lines are DEBUGGING ONLY 
         geometry = self.geometry if isinstance(self._content, ComponentTemplate) else None
-        if geometry:
-            print(f"Slot {self._pid} has content sized: {geometry.rect.width()}x{geometry.rect.height()}")
-        # print(f"Slot content items are {self._content.items}")
         self.invalidate_cache()
         self.update()
 
@@ -239,15 +234,15 @@ class LayoutSlot(QGraphicsObject):
 
     def paint(self, painter, option, widget=None):
         """
-        Paints the layout slot including its border, hover state, and rendered content
-        (if any). The rendered content is drawn using unit-scaled QImage.
+        Paints the layout slot including its hover state and rendered raster 
+        content (if any). The rendered content is drawn using unit-scaled QImage. 
+        For export, all text and vectors are drawn as vectors on top of
+        rasterized content
 
         Parameters:
             painter: QPainter used by the scene or exporter
             option: QStyleOptionGraphicsItem from the scene
             widget: Optional widget context (unused)
-            unit (str): 'px', 'in', 'mm', etc.
-            dpi (int): Dots-per-inch used for physical unit conversion
         """
         rect = self.geometry.to(self.unit, dpi=self.dpi).rect
 
@@ -278,11 +273,9 @@ class LayoutSlot(QGraphicsObject):
 
         painter.drawImage(rect, self._cache_image)
 
-
     def _render_to_image(self):
         """
         Renders the content (ComponentTemplate) of this slot to an offscreen image.
-
         This image is DPI-aware and scaled based on the logical unit.
         """
         rect = self.geometry.to(self.unit, dpi=self.dpi).rect
@@ -298,105 +291,51 @@ class LayoutSlot(QGraphicsObject):
 
         # Align drawing to image origin
         img_painter.translate(-rect.topLeft())
+        
+        # Fix: Translate painter by bleed amount if component has include_bleed enabled
+        bleed_offset = QPointF(0, 0)
+        if (self._content and 
+            isinstance(self._content, ComponentTemplate) and 
+            self._content.include_bleed):
+            bleed_px = self._content.bleed.to("px", dpi=self.dpi)
+            bleed_offset = QPointF(bleed_px, bleed_px)
+            img_painter.translate(bleed_offset)
 
         # Render template background + border
-
-        self._content.paint(img_painter, option)
+        if self._content:
+            self._content.paint(img_painter, option)
 
         # Render elements in z-order
-        for item in sorted(self._content.items, key=lambda e: e.zValue()):
-            if (not self.render_text and isinstance(item, TextElement)) or \
-               (not self.render_vector and isinstance(item, VectorElement)):
-                # Skip drawing; will be rendered as vector later
-                continue
-            img_painter.save()
-            img_painter.translate(item.pos())
+        if self._content:
+            for item in sorted(self._content.items, key=lambda e: e.zValue()):
+                if (not self.render_text and isinstance(item, TextElement)) or \
+                   (not self.render_vector and isinstance(item, VectorElement)):
+                    # Skip drawing; will be rendered as vector later
+                    continue
+                img_painter.save()
+                # Fix: Adjust element position by bleed offset
+                adjusted_pos = item.pos() + bleed_offset
+                img_painter.translate(adjusted_pos)
 
-            item_bounds = item.boundingRect()
-            img_painter.setClipRect(QRectF(0, 0, item_bounds.width(), item_bounds.height()))
+                item_bounds = item.boundingRect()
+                img_painter.setClipRect(QRectF(0, 0, item_bounds.width(), item_bounds.height()))
 
-            # >>> add rotation about the element’s local center <<<
-            rotation = getattr(item, "rotation", 0) or 0
-            if rotation:
-                # rotate around the center of the element’s local rect
-                cx = item_bounds.width() * 0.5
-                cy = item_bounds.height() * 0.5
-                img_painter.translate(cx, cy)
-                img_painter.rotate(rotation)
-                img_painter.translate(-cx, -cy)
+                # >>> add rotation about the element’s local center <<<
+                rotation = getattr(item, "rotation", 0) or 0
+                if rotation:
+                    # rotate around the center of the element’s local rect
+                    cx = item_bounds.width() * 0.5
+                    cy = item_bounds.height() * 0.5
+                    img_painter.translate(cx, cy)
+                    img_painter.rotate(rotation)
+                    img_painter.translate(-cx, -cy)
 
-            item.paint(img_painter, option, widget=None)
-            img_painter.restore()
+                item.paint(img_painter, option, widget=None)
+                img_painter.restore()
 
         return image
 
-    #### COMMENTING OUT JUST UNTIL I MAKE SURE THEY'RE NOT BEING MYSTERIOUSLY USED ELSEWHERE
-    # def _render_items(self, painter: QPainter) -> None:
-    #     """
-    #     Paints every item inside this slot's content template onto the given QPainter.
 
-    #     - The painter is assumed to be pre-scaled for physical units (e.g., 1 inch = dpi pixels).
-    #     - All geometry values should be used in logical units (from `UnitStrGeometry.to(self.unit, dpi)`).
-    #     - Items are drawn in z-order (lowest to highest).
-    #     - Each item's own `paint(...)` method is reused to support custom rendering.
-
-    #     Parameters
-    #     ----------
-    #     painter : QPainter
-    #         A painter already set up and scaled to match the target export resolution.
-    #     unit : str
-    #         The logical unit system (e.g., 'px', 'in', 'mm'). Used for size/position.
-    #     dpi : int
-    #         The dots-per-inch to convert units into physical pixels.
-    #     """
-    #     option = QStyleOptionGraphicsItem()
-
-    #     # Draw background/border of template itself
-    #     self._content.paint(painter, option, widget=None)
-
-    #     # Draw each item in z-order
-    #     for item in sorted(self._content.items, key=lambda e: e.zValue()):
-    #         painter.save()
-
-    #         # Logical position of the item in the template
-    #         pos = item.geometry.to(self.unit, dpi=self.dpi).pos
-    #         painter.translate(pos.x(), pos.y())
-
-    #         # Optional rotation
-    #         rotation = getattr(item, "rotation", lambda: 0)()
-    #         if rotation:
-    #             painter.rotate(rotation)
-
-    #         # Delegate to the item's own unit-aware paint method
-    #         item.paint(painter, option, widget=None)
-
-    #         painter.restore()
-
-    # def _render_background(self, painter: QPainter):
-    #     """
-    #     Draw the background color or image for this slot's content template.
-
-    #     Parameters
-    #     ----------
-    #     painter : QPainter
-    #         A QPainter instance already aligned with the page coordinate system.
-    #     unit : str
-    #         Logical unit system (e.g., 'px', 'in', 'mm') for resolution conversion.
-    #     dpi : int
-    #         Dots-per-inch to convert unit-based geometry to physical pixels.
-    #     """
-    #     rect = self.geometry.to(self.unit, dpi=self.dpi).rect
-
-    #     bg_color = getattr(self._content, "background_color", None)
-    #     bg_image_path = getattr(self._content, "background_image", None)
-
-    #     if bg_color:
-    #         painter.fillRect(rect, QColor(bg_color))
-
-    #     if bg_image_path:
-    #         pixmap = QPixmap(bg_image_path)
-    #         if not pixmap.isNull():
-    #             painter.drawPixmap(rect, pixmap, pixmap.rect())
 
     def invalidate_cache(self):
         self._cache_image = None

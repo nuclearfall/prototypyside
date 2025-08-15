@@ -20,7 +20,6 @@ class ResizeHandle(QGraphicsRectItem):
         size = HANDLE_SIZE
         half_size = size / 2
         super().__init__(-half_size, -half_size, size, size, parent_item)
-
         self.setBrush(QBrush(HANDLE_COLOR))
         self.setPen(QPen(HANDLE_COLOR.darker(150)))
 
@@ -68,13 +67,7 @@ class ResizeHandle(QGraphicsRectItem):
         self.parent_item._active_handle = self.handle_type
 
         # NEW: delegate to the parent to compute sx/sy and stash pre-resize state
-        if hasattr(self.parent_item, "begin_handle_resize"):
-            self.parent_item.begin_handle_resize(self, event)
-        else:
-            # Fallback to old behavior if you keep it around
-            if hasattr(self.parent_item, "store_pre_resize_state"):
-                self.parent_item.store_pre_resize_state()
-
+        self.parent_item.begin_handle_resize(self, event)
 
     def mouseMoveEvent(self, event: QGraphicsSceneMouseEvent):
         event.accept()
@@ -86,8 +79,4 @@ class ResizeHandle(QGraphicsRectItem):
         event.accept()
         self.drag_started = False
         self.parent_item._active_handle = None
-        if hasattr(self.parent_item, "end_handle_resize"):
-            self.parent_item.end_handle_resize()
-
-
-
+        self.parent_item.end_handle_resize()

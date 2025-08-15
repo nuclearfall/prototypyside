@@ -24,21 +24,17 @@ ROUNDING_INCREMENT = {
     "pt": Decimal("1"),
 }
 
-# class UnitStr:
-# <<<<<<< Updated upstream:prototypyside/utils/units/unit_str.py
-#     """
-#     Stores any dimension *internally* in inches, based on a given DPI.
-
-#     The constructor logic for determining the input unit is as follows:
-#     1. If `raw` is a string with a unit (e.g., "1.5in"), that unit is used.
-#     2. If `raw` is a number (e.g., 1.5) or a string without a unit, the
-#        `unit` parameter is used.
-#     3. If the `unit` parameter is also not provided, it defaults to 'px'.
-#     """
-
-#
-# =======
 class UnitStr:
+    """
+    Stores any dimension *internally* in inches, based on a given DPI.
+
+    The constructor logic for determining the input unit is as follows:
+    1. If `raw` is a string with a unit (e.g., "1.5in"), that unit is used.
+    2. If `raw` is a number (e.g., 1.5) or a string without a unit, the
+       `unit` parameter is used.
+    3. If `raw` is a UnitStr, return the UnitStr with value converted for this dpi.
+    3. If the `unit` parameter is also not provided, it defaults to 'px'.
+    """
     __items__ = ("_raw", "_value", "_unit", "_dpi", "_cache")
     value: float
     unit: str
@@ -63,7 +59,9 @@ class UnitStr:
         self._raw = str(raw)
         self._dpi = dpi
         self._cache = {}
-        internal_unit = "in"  # Internal storage is always inches
+        # all values are stored in physical units. px values are immediately
+        # converted to interntal_unit, which is `in`
+        internal_unit = "in"
 
         if isinstance(raw, UnitStr):
             self._raw = raw._raw
@@ -234,3 +232,98 @@ class UnitStr:
         if to_u == "in":
             return inches
         return (inches * INCHES_TO_UNITS[to_u]).quantize(Decimal("1E-6"), rounding=ROUND_HALF_UP)
+
+    # --- arithmetic -------------------------------------------------
+    def _as_decimal_inches(self) -> Decimal:
+        """Internal helper: value as Decimal inches."""
+        return self._value  # already Decimal inches
+
+    def __add__(self, other):
+        """
+        Add lengths.
+
+        UnitStr + UnitStr -> UnitStr (inches)
+        UnitStr + (int|float|Decimal) -> UnitStr  [number interpreted as inches]
+        """
+        if isinstance(other, UnitStr):
+            total_in = self._as_decimal_inches() + other._as_decimal_inches()
+            return UnitStr(f"{total_in} in", dpi=self._dpi)
+        elif isinstance(other, (int, float, Decimal)):
+            total_in = self._as_decimal_inches() + Decimal(str(other))
+            return UnitStr(f"{total_in} in", dpi=self._dpi)
+        return NotImplemented
+
+    def __radd__(self, other):
+        # support (number + UnitStr)
+        if isinstance(other, (int, float, Decimal)):
+            total_in = Decimal(str(other)) + self._as_decimal_inches()
+            return UnitStr(f"{total_in} in", dpi=self._dpi)
+        return NotImplemented
+
+    def __mul__(self, other):
+        """
+        Multiply lengths or scale.
+
+        UnitStr * (int|float|Decimal) -> UnitStr  [scales length]
+        UnitStr * UnitStr -> Decimal               [area in square inches]
+        """
+        if isinstance(other, (int, float, Decimal)):
+            scaled_in = (self._as_decimal_inches() * Decimal(str(other)))
+            return UnitStr(f"{scaled_in} in", dpi=self._dpi)
+        if isinstance(other, UnitStr):
+            # return area (square inches) as Decimal
+            return (self._as_decimal_inches() * other._as_decimal_inches())
+        return NotImplemented
+
+    def __rmul__(self, other):
+        # support (number * UnitStr)
+        if isinstance(other, (float, Decimal)):
+            inch_val = Decimal(str(other)) * self._as_decimal_inches()
+        if isinstance(other, int):
+            inch_val = other * self.value
+        return UnitStr(f"{inch_val} in", dpi=self._dpi)
+        return NotImplemented
+
+    def __sub__(self, other):
+        """
+        Subtract lengths.
+
+        UnitStr - UnitStr -> UnitStr (inches)
+        UnitStr - (int|float|Decimal) -> UnitStr  [number interpreted as inches]
+        """
+        if isinstance(other, UnitStr):
+            diff_in = self._as_decimal_inches() - other._as_decimal_inches()
+            return UnitStr(f"{diff_in} in", dpi=self._dpi)
+        elif isinstance(other, (int, float, Decimal)):
+            diff_in = self._as_decimal_inches() - Decimal(str(other))
+            return UnitStr(f"{diff_in} in", dpi=self._dpi)
+        return NotImplemented
+
+    def __rsub__(self, other):
+        if isinstance(other, (int, float, Decimal)):
+            diff_in = Decimal(str(other)) - self._as_decimal_inches()
+            return UnitStr(f"{diff_in} in", dpi=self._dpi)
+        return NotImplemented
+
+
+def unitstr_from_raw(raw, dpi):
+    UNIT_RE = re.compile(r"^\s*(-?[0-9]+(?:\.[0-9]+)?)\s*([a-zA-Z]+)?\s*$")
+    value: str = ""
+    unit: str = ""
+    if isinstance(raw, str):
+        m = UNIT_RE.fullmatch(raw.strip())
+        if not m:
+            raise ValueError(f"Invalid dimension string: {raw!r}")
+        value, unit = m.groups()
+        unit = unit if unit else "px"
+    elif isinstance(raw, (float, int, Decimal)):
+        value = raw
+        unit = "px"
+    elif isinstance(raw, UnitStr):
+        value = raw.value
+        unit = raw.unit
+        return UnitStr(value, unit=unit, dpi=dpi)
+    else:
+        raise TypeError(f"raw must be str, int, or float, Decimal, UnitStr not {type(raw)}")
+
+    return UnitStr(value, unit=unit, dpi=dpi)

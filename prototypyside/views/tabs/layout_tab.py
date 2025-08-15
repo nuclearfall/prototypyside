@@ -1,5 +1,5 @@
 # layout_tab.py
-
+from functools import partial
 from typing import Optional, List
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QSplitter, QLabel, QGridLayout,
@@ -15,7 +15,8 @@ from prototypyside.services.app_settings import AppSettings
 from prototypyside.views.panels.layout_property_panel import LayoutPropertyPanel
 from prototypyside.views.toolbars.layout_toolbar import LayoutToolbar
 from prototypyside.views.palettes.layout_palette import LayoutPalette
-from prototypyside.widgets.unit_field import UnitField
+from prototypyside.widgets.unit_str_field import UnitStrField
+from prototypyside.widgets.unit_strings_field import UnitStringsField
 from prototypyside.views.layout_scene import LayoutScene
 from prototypyside.views.layout_view import LayoutView
 from prototypyside.utils.unit_converter import to_px
@@ -71,25 +72,17 @@ class LayoutTab(QWidget):
         # initialise from current flags
         self.inc_grid.setVisible(self._show_grid)
 
-        print(f"Scene rect is: {self.scene.sceneRect()}")
-        # print(f"[LAYOUT_TAB] From __init__: Template rows and columns prior to initially setting grid {template.rows}, {template.columns}")
         self._template.setGrid(self.registry, rows=template.rows, columns=template.columns)
-        # print(f"[LAYOUT_TAB] From __init__: Template rows and columns after initially setting grid {template.rows}, {template.columns}")
+   
         self._create_layout_toolbar()
         self._create_layout_palette()
-
         self._create_property_panel()
-        self.margin_spacing_panel = self._create_margin_spacing_panel()
         self.remove_item_btn = QPushButton("Remove Assignment")
-        
-        #self.remove_item_btn.clicked.connect(self._on_remove_item)
 
         # Connect signals to handler methods
         self.scene.component_dropped.connect(self.on_component_dropped)
         self.layout_toolbar.display_flag_changed.connect(self.on_display_flag_changed)
         self.layout_toolbar.number_of_copies.connect(self.on_layout_copy_count_changed)
-        # self._template.marginsChanged.connect(self.on_template_margin_changed)
-        # self._template.spacingChanged.connect(self.on_template_spacing_changed)
         # self.layout_palette.palette_selection_changed.connect(self.on_palette_selection_change)
         self.layout_palette.select_template.connect(self.on_confirm_template)
         self.layout_palette.remove_template.connect(self.on_remove_template)
@@ -98,7 +91,52 @@ class LayoutTab(QWidget):
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.addWidget(self.view)
 
-        self.refresh_panels()
+    # --- UI creation stubs --- #
+
+    def _create_property_panel(self) -> QWidget:
+        """Create panel with margin and spacing controls"""
+        unit = self.settings.unit
+        dpi = self.settings.dpi
+
+        self.property_panel = QWidget()
+        layout = QVBoxLayout(self.property_panel)
+        layout.setContentsMargins(0, 0, 0, 0)
+        
+        # Add section headers
+        layout.addWidget(QLabel("Margins and Spacing"))
+
+        
+        self.ws_fields = UnitStringsField(
+            target_item=self.template,
+            property_name="whitespace",
+            labels=["Top Margin", "Bottom Margin", "Left Margin", 
+                        "Right Margin", "Horizontal Spacing", "Veritical Spacing"],
+            display_unit=self.settings.display_unit,
+            decimal_places=4)
+
+        self.ws_fields.valueChanged.connect(self.on_property_changed)
+        layout.addWidget(self.ws_fields)
+        return self.property_panel
+
+    def _create_layout_toolbar(self) -> QWidget:
+        self.layout_toolbar = LayoutToolbar(self.settings, parent=self)
+
+        # Connect signals
+        self.layout_toolbar.page_size_changed.connect(self.on_page_size_changed)
+        self.layout_toolbar.orientation_property_change.connect(self.on_orientation_changed)
+        self.layout_toolbar.grid_size_changed.connect(self.on_grid_size_changed)
+        self.layout_toolbar.autofill_changed.connect(self.on_auto_fill_changed)
+        self.layout_toolbar.pagination_policy_changed.connect(self.pagination_policy_changed)
+
+        self.layout_toolbar.apply_template(self.template)
+
+        return self.layout_toolbar
+
+    def _create_layout_palette(self) -> QWidget:
+        self.layout_palette = LayoutPalette(self.main_window.registry, parent=self)
+        # print("LayoutPalette sizeHint:", self.layout_palette.sizeHint())
+        # Return a widget listing all open component templates
+        pass
 
     # called from menu/toolbar checkboxes:
     def toggle_grid(self, checked: bool):
@@ -109,21 +147,6 @@ class LayoutTab(QWidget):
         self._snap_grid = checked
         self.grid_snap_changed.emit(checked)
 
-    @property
-    def dpi(self): return self._dpi
-
-    @property
-    def unit(self):
-        return self._unit
-    
-    @property
-    def template(self):
-        return self._template
-
-    @template.setter
-    def template(self, new):
-        if new != self.template and isinstance(new, LayoutTemplate):
-            self._template = new
 
     def focusInEvent(self, event):
         super().focusInEvent(event)
@@ -148,116 +171,28 @@ class LayoutTab(QWidget):
             return self.registry.get(self._selected_item_pid)
         return None
 
-    # --- UI creation stubs (fill in as needed) ---
-    # layout_tab.py (new method)
+    @property
+    def dpi(self): return self._dpi
 
-    def _create_margin_spacing_panel(self) -> QWidget:
-        """Create panel with margin and spacing controls"""
-        unit, dpi = self.settings.unit, self.settings.dpi
+    @property
+    def unit(self):
+        return self._unit
+    
+    @property
+    def template(self):
+        return self._template
 
-        self.margin_panel = QWidget()
-        layout = QVBoxLayout(self.margin_panel)
-        layout.setContentsMargins(0, 0, 0, 0)
-        
-        # Add section headers
-        layout.addWidget(QLabel("<b>Margins</b>"))
-        
-        # Create grid for margin controls
-        margin_grid = QGridLayout()
-        margin_grid.setSpacing(5)
-        top, bottom, left, right = self.template.margins
-
-        # Top margin
-        self.margin_top = UnitField(self.template, "margin_top", display_unit=self.settings.display_unit, )
-        margin_grid.addWidget(QLabel("Top:"), 0, 0)
-        margin_grid.addWidget(self.margin_top, 0, 1)
-        
-        # Bottom margin
-        self.margin_bottom = UnitField(self.template, "margin_bottom", display_unit=self.settings.display_unit, )
-        margin_grid.addWidget(QLabel("Bottom:"), 1, 0)
-        margin_grid.addWidget(self.margin_bottom, 1, 1)
-        
-        # Left margin
-        self.margin_left = UnitField(self.template, "margin_left", display_unit=self.settings.display_unit, )
-        margin_grid.addWidget(QLabel("Left:"), 2, 0)
-        margin_grid.addWidget(self.margin_left, 2, 1)
-        
-        # Right margin
-        self.margin_right = UnitField(self.template, "margin_right", display_unit=self.settings.display_unit, )
-        margin_grid.addWidget(QLabel("Right:"), 3, 0)
-        margin_grid.addWidget(self.margin_right, 3, 1)
-        
-        layout.addLayout(margin_grid)
-        
-        # Add spacing section
-        layout.addWidget(QLabel("<b>Spacing</b>"))
-        
-        # Create grid for spacing controls
-        spacing_grid = QGridLayout()
-        spacing_grid.setSpacing(5)
-        
-        # Horizontal spacing
-        self.spacing_x = UnitField(self.template, "spacing_x", display_unit=self.settings.display_unit, )
-        spacing_grid.addWidget(QLabel("Horizontal:"), 0, 0)
-        spacing_grid.addWidget(self.spacing_x, 0, 1)
-        
-        # Vertical spacing
-        self.spacing_y = UnitField(self.template, "spacing_y", display_unit=self.settings.display_unit, )
-        spacing_grid.addWidget(QLabel("Vertical:"), 1, 0)
-        spacing_grid.addWidget(self.spacing_y, 1, 1)
-        spacing_grid.sizeHint()
-        layout.addLayout(spacing_grid)
-        layout.addStretch(1)
-        
-        # Connect signals
-        for name, field in [
-            ("margin_top", self.margin_top),
-            ("margin_bottom", self.margin_bottom),
-            ("margin_left", self.margin_left),
-            ("margin_right", self.margin_right),
-        ]:
-            field.valueChanged.connect(
-                self.on_template_margin_changed)
-
-        for name, field in [("spacing_x", self.spacing_x),
-                            ("spacing_y", self.spacing_y)]:
-            field.valueChanged.connect(
-                self.on_template_spacing_changed)           
-        # print("MarginPanel sizeHint:", self.margin_panel.sizeHint())
-        return self.margin_panel
-
-    def _create_layout_toolbar(self) -> QWidget:
-        self.layout_toolbar = LayoutToolbar(self.settings, parent=self)
-
-        # Connect signals
-        self.layout_toolbar.page_size_changed.connect(self.on_page_size_changed)
-        self.layout_toolbar.orientation_changed.connect(self.on_orientation_changed)
-        self.layout_toolbar.grid_size_changed.connect(self.on_grid_size_changed)
-        self.layout_toolbar.autofill_changed.connect(self.on_auto_fill_changed)
-        self.layout_toolbar.pagination_policy_changed.connect(self.pagination_policy_changed)
-        self.layout_toolbar.apply_template(self.template)
-
-        return self.layout_toolbar
-
-    def _create_layout_palette(self) -> QWidget:
-        self.layout_palette = LayoutPalette(self.main_window.registry, parent=self)
-        # print("LayoutPalette sizeHint:", self.layout_palette.sizeHint())
-        # Return a widget listing all open component templates
-        pass
-
-    def _create_property_panel(self) -> QWidget:
-        # Changed to set self.property_panel instead of self.layout_property_panel
-        self.property_panel = LayoutPropertyPanel(parent=self)
-        # print("PropertyPanel sizeHint:", self.property_panel.sizeHint())
-        # Return a property panel reflecting the selected template
-        pass
+    @template.setter
+    def template(self, new):
+        if new != self.template and isinstance(new, LayoutTemplate):
+            self._template = new
 
     # --- Grid/Scene Logic ---
     @Slot()
     def on_property_changed(self, target, prop, new, old):
         command = ChangePropertyCommand(target, prop, new, old)
         self.undo_stack.push(command)
-        print(f"[COMPONENT TAB] Target={target}, prop={prop}, old={old}, new={new}")
+        print(f"[LAYOUTTAB] Target={target}, prop={prop}, old={old}, new={new}")
         print(f"[UNDO STACK] Pushed: {command}")
         
     @Slot(str)
@@ -286,36 +221,16 @@ class LayoutTab(QWidget):
         self.scene.setSceneRect(self.template.boundingRect())
         # self._refreshGrid()
 
-    @Slot(bool)
-    def on_orientation_changed(self, landscape: bool):
+    @Slot(str, bool, bool)
+    def on_orientation_changed(self, prop, new, old):
         t = self.template
-        old = t.orientation
-        new = landscape
-        command = ChangePropertyCommand(t, "orientation", new, old)
-        if old == new:
-            return  # no change, no-op
-        t.updateGrid()
+        print(f"BoundingRect before change: {t.boundingRect()}")
+        self.on_property_changed(t, prop, new, old)
+        print(f"BoundingRect after change: {t.boundingRect()}")
         self.scene.setSceneRect(t.boundingRect())
-        self.view.fitInView(t.boundingRect(), Qt.KeepAspectRatio)
-        self.scene
 
-        # # 🔁 Swap row/col spinbox values (but keep logical count the same)
-        # r = self.layout_toolbar.rows_spin.value()
-        # c = self.layout_toolbar.cols_spin.value()
-        # self.layout_toolbar.rows_spin.blockSignals(True)
-        # self.layout_toolbar.cols_spin.blockSignals(True)
-        # self.layout_toolbar.rows_spin.setValue(c)
-        # self.layout_toolbar.cols_spin.setValue(r)
-        # self.layout_toolbar.rows_spin.blockSignals(False)
-        # self.layout_toolbar.cols_spin.blockSignals(False)
-
-        # 🔁 Push undo and orientation change
-
-        command = ChangePropertyCommand(t, "orientation", new, old)
-        self.undo_stack.push(command)
-        self.scene.setSceneRect(self.template.boundingRect())
-        self.template.updateGrid()
-        self.view.fitInView(self.scene.sceneRect(), Qt.KeepAspectRatio)
+        t.updateGrid()
+        self.scene.sync_scene_rect()
 
     def cleanup(self):
         self.scene.clear()  # Clears all graphics items
@@ -376,27 +291,11 @@ class LayoutTab(QWidget):
         self.scene.populate_with_clones(value, self.template, self.registry)
         # self.view.fitInView(self.scene.sceneRect(), Qt.KeepAspectRatio)
 
-    # def _refreshGrid(self):
-    #     tpl = self.template
-    #     tpl.setGrid(self.registry, tpl.rows, tpl.columns)
-    #     tpl.update()
-
-    def on_template_margin_changed(self, t, p, n, o):
-        # For consistency, use a loop to update all margins
-        command = ChangePropertyCommand(t, p, n, o)
-
+    @Slot(object, str, list, list)
+    def on_whitespace_changed(self, target, prop, new, old):
+        command = ChangePropertyCommand(target, prop, new, old)
         self.undo_stack.push(command)
-        # self._refreshGrid()
-
-    def on_template_spacing_changed(self, t, p, n, o):
-        # This method is called whenever spacing_x or spacing_y changes
-        print("Spacing changed, update layout as needed.")
-        # self.scene.clear()
-        command = ChangePropertyCommand(t, p, n, o)
-        self.undo_stack.push(command)
-        # self.template.spacing_x = self.spacing_x.valueChanged()
-        # self.template.spacing_y = self.spacing_y.valueChanged()
-        # self._refreshGrid()
+        self.template.updateGrid()
 
     def _on_policy_change(self, policy_name: str):
         # 1. Store on template (persists to JSON)
@@ -409,34 +308,6 @@ class LayoutTab(QWidget):
         self._refresh_scene_preview()
 
     # --- Selection and Placement Logic ---
-
-    # @Slot(str)
-    # def on_palette_selection_change(self, pid: str):
-    #     """
-    #     When a component template is selected in the layout palette,
-    #     this sets it as the content template used by the layout.
-    #     """
-    #     print(f"Pid coming from palette is {pid}")
-    #     ct = self.registry.global_get(pid)
-    #     if ct is None:
-    #         print(f"[WARN] No ComponentTemplate found for PID: {pid}")
-    #         return
-
-    #     try:
-    #         _ = ct.scene()  # Touch the scene to trigger a RuntimeError if deleted
-    #     except RuntimeError:
-    #         print(f"[ERROR] Qt object for ComponentTemplate {pid} has been deleted.")
-    #         return
-
-    #     # Set the layout template's content reference
-    #     old = self.template.content
-    #     self.on_property_changed()
-    #     print(f"[INFO] Layout content set to ComponentTemplate: {ct.name} ({ct.pid})")
-
-    #     # Optionally trigger any UI updates
-    #     self.template.invalidateCache()
-    #     self.template.update()
-
     @Slot()
     def on_scene_selection_changed(self):
         selected_items = self.scene.selectedItems()
@@ -469,28 +340,7 @@ class LayoutTab(QWidget):
         
         command = CloneComponentToEmptySlotsCommand(self.registry, self.template, component)
 
-        # else:
-        #     slot = self.template.get_item_at_position(scene_pos)
-        #     command = CloneComponentTemplateToSlotCommand(self.registry, component, slot)
-
         self.undo_stack.push(command)
-
-
-
-    # @Slot(str, QPointF)
-    # def on_component_dropped(self, tpid: str, scene_pos: QPointF):
-    #     # print(item, scene_pos)
-
-    #     temp = self.registry.global_get(tpid)
-    #     item = self.template.get_item_at_position(scene_pos)
-    #     print(item.pid)
-    #     # print(template.pid)
-    #     clone = self.template.registry.clone(item)
-    #     item.content = temp
-
-
-    #     # command = CloneComponentTemplateToSlotCommand(self.registry, template, slot)
-    #     # self.undo_stack.push(command)
 
     # --- Undo/Redo Integration ---
     def push_undo_command(self, command):

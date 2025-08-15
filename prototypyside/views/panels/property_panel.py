@@ -8,7 +8,8 @@ from PySide6.QtGui import QColor, QFont, QTextOption, QKeyEvent
 from typing import Optional, Any
 
 # Assuming these modules are in the same directory or accessible via python path
-from prototypyside.widgets.unit_field import UnitField, UnitStrGeometryField
+from prototypyside.widgets.unit_str_field import UnitStrField
+from prototypyside.widgets.unit_str_geometry_field import UnitStrGeometryField
 from prototypyside.utils.units.unit_str_geometry import UnitStrGeometry
 from prototypyside.models.component_element import ComponentElement
 from prototypyside.models.image_element import ImageElement
@@ -58,7 +59,6 @@ class FocusTextEdit(QTextEdit):
         new_value = self.toPlainText()
         if new_value != self._original_value:
             self.editingFinished.emit(self._target_item, self._content_key, new_value, self._original_value)
-            print(f"LOSE_FOCUS_TEXT_EDIT {self._target_item.pid}, {new_value} from {self._original_value}")
             self._original_value = new_value  # Update original value for next edit
         super().focusOutEvent(event)
 
@@ -90,10 +90,11 @@ class PropertyPanel(QWidget):
     # Emits (target_object, property_name, old_value, new_value)
     property_changed = Signal(object, str, object, object)
 
-    def __init__(self, display_unit:str, parent: Optional[QWidget] = None):
+    def __init__(self, target, display_unit:str, dpi: int = 300, parent: Optional[QWidget] = None):
         super().__init__(parent)
-        self.target_item: Optional[ComponentElement] = None
+        self.target_item = target
         self._display_unit = display_unit
+        self.dpi = dpi
         self.undo_stack = getattr(parent, "undo_stack", None)
         # Main layout
         self.main_layout = QVBoxLayout(self)
@@ -108,8 +109,6 @@ class PropertyPanel(QWidget):
         self.main_layout.addWidget(self.main_frame)
 
         # --- Create all possible widgets ---
-        self.pid_label = QLabel()
-        self.tpid_label = QLabel()
         self.name_edit = FocusLineEdit()
 
         # Content widgets in a stacked layout
@@ -120,12 +119,12 @@ class PropertyPanel(QWidget):
         self.content_stack.addWidget(self.content_text_edit)
         self.content_stack.addWidget(self.content_path_button)
 
-        self.geometry_field = UnitStrGeometryField()
+        self.geometry_field = UnitStrGeometryField(target, "geometry", labels=["Width", "Height", "X", "Y"], display_unit=display_unit, dpi=self.dpi)
         self.rotation_field = RotationField()
         self.color_picker = ColorPickerWidget()
         self.bg_color_picker = ColorPickerWidget()
         self.border_color_picker = ColorPickerWidget()
-        self.border_width_field = UnitField(property_name="border_width", display_unit=display_unit)
+        self.border_width_field = UnitStrField(property_name="border_width", display_unit=display_unit)
         
         # Alignment ComboBox
         self.alignment_map = {
@@ -144,8 +143,6 @@ class PropertyPanel(QWidget):
         self.keep_aspect_checkbox = QCheckBox("Keep Aspect Ratio")
 
         # Add widgets to layout
-        self.form_layout.addRow("PID:", self.pid_label)
-        self.form_layout.addRow("Template PID:", self.tpid_label)
         self.form_layout.addRow("Name:", self.name_edit)
         self.form_layout.addRow("Content:", self.content_stack)
         self.form_layout.addRow("Geometry:", self.geometry_field)
@@ -188,8 +185,6 @@ class PropertyPanel(QWidget):
             widget.blockSignals(True)
 
         # Populate common fields
-        self.pid_label.setText(item.pid)
-        self.tpid_label.setText(item.tpid or "N/A")
         self.name_edit.setText(item.name)
         self.content_text_edit.setTarget(item, "content")
         self.geometry_field.setTarget(item, "geometry", display_unit=self._display_unit)
@@ -235,7 +230,7 @@ class PropertyPanel(QWidget):
         """
         Called when the user (or the containing Tab) wants
         to switch display units (e.g. "px" → "in" → "cm").
-        This will re-target the two UnitFields so they
+        This will re-target the two UnitStrFields so they
         re-fetch their model values and reformat in the new unit.
         """
         self._display_unit = display_unit
@@ -260,8 +255,6 @@ class PropertyPanel(QWidget):
     def _populate_fields(self):
         """Fill every widget from self.target_item’s current state."""
         el = self.target_item
-        self.pid_label.setText(el.pid)
-        self.tpid_label.setText(el.tpid or "N/A")
         self.name_edit.setText(el.name)
 
         # geometry / colors / border
@@ -342,10 +335,8 @@ class PropertyPanel(QWidget):
     @Slot()
     def _on_rotation_finished(self):
         if not self.target_item:
-            print("no target item")
             return
         new_value = float(self.rotation_field.angle())  # 0–360 normalized by RotationField
-        print(f"setting rotation to {new_value}")
         old_value = float(getattr(self.target_item, "rotation", 0.0) or 0.0)
         self.property_changed.emit(self.target_item, "rotation", new_value, old_value)
 

@@ -17,11 +17,11 @@ from prototypyside.views.palettes.element_palette import ElementPalette
 from prototypyside.views.panels.property_panel import PropertyPanel
 from prototypyside.views.panels.layers_panel import LayersListWidget
 from prototypyside.views.palettes.palettes import ComponentListWidget
-from prototypyside.widgets.unit_field import UnitField
+from prototypyside.widgets.unit_str_field import UnitStrField
+from prototypyside.widgets.unit_str_geometry_field import UnitStrGeometryField
 from prototypyside.utils.units.unit_str_helpers import geometry_with_px_pos
 from prototypyside.utils.units.unit_str_geometry import UnitStrGeometry
 from prototypyside.views.overlays.incremental_grid import IncrementalGrid
-# from prototypyside.views.overlays.print_lines import PrintLines
 from prototypyside.models.component_template import ComponentTemplate
 from prototypyside.models.component_element import ComponentElement
 from prototypyside.models.text_element import TextElement
@@ -31,7 +31,7 @@ from prototypyside.services.app_settings import AppSettings
 
 from prototypyside.services.undo_commands import (
     AddElementCommand, RemoveElementCommand, CloneElementCommand,
-    ResizeTemplateCommand, ChangePropertyCommand, ChangePropertyCommand
+    ResizeTemplateCommand, ChangePropertyCommand
 )
 
 if TYPE_CHECKING:
@@ -151,7 +151,6 @@ class ComponentTab(QWidget):
         # initialise from current flags
         self.inc_grid.setVisible(self._show_grid)
 
-
         # Connect signals specific to this tab's template and scene
         self.template.template_changed.connect(self.update_component_scene)
         self.template.item_z_order_changed.connect(self.update_layers_panel)
@@ -167,12 +166,17 @@ class ComponentTab(QWidget):
 
     @Slot()
     def update_component_scene(self):
-        """Updates the scene dimensions and view based on the current template."""
         if not self.scene or not self.template:
             return
+        # keep the checkbox/field in sync with the current model value
+        self.bleed_checkbox.blockSignals(True)
+        self.bleed_checkbox.setChecked(bool(getattr(self.template, "include_bleed", False)))
+        self.bleed_checkbox.blockSignals(False)
+
+        self.template_bleed_field.setEnabled(self.bleed_checkbox.isChecked())
 
         self.view.setSceneRect(self._template.geometry.px.rect)
-
+        self.scene.sync_scene_rect()
         self.scene.update()
 
     def get_template_name(self) -> str:
@@ -191,10 +195,18 @@ class ComponentTab(QWidget):
         for name, etype, icon in components:
             self.palette.add_item(name, etype, icon)
         self.palette.on_item_type_selected.connect(self.clear_scene_selection)
+        # User clicks a type in the palette; scene arms creation mode.
+        self.palette.on_item_type_selected.connect(self.scene.arm_element_creation)
+
+        # If scene cancels (mouse move, key, focus, or invalid press), clear the palette highlight.
+        self.scene.creation_cancelled.connect(self.palette.clear_active_selection)
+
+        # --- NEW: Scene -> Tab (Step 6 → 7) ---
+        self.scene.create_item_with_dims.connect(self.add_item_with_dims)
 
     def setup_property_editor(self):
         # This will be a widget that the QMainWindow will place in a DockWidget
-        self.property_panel = PropertyPanel(display_unit=self.unit, parent=self)
+        self.property_panel = PropertyPanel(None, display_unit=self.unit, parent=self, dpi=self.settings.dpi)
         self.property_panel.property_changed.connect(self.on_property_changed)
         # self.property_panel.geometry_changed.connect(self.on_geometry_changed)
         self.remove_item_btn = QPushButton("Remove Selected Element")
@@ -228,57 +240,51 @@ class ComponentTab(QWidget):
         self.grid_checkbox.setChecked(True)
         self.grid_checkbox.stateChanged.connect(self.toggle_grid)
 
-        # self.print_line_checkbox = QCheckBox("Print Lines")
-        # self.print_line_checkbox.setChecked(True)
-        # self.print_line_checkbox.stateChanged.connect(self.toggle_print_lines)
 
-        self.template_name_field = QLineEdit()
-        self.template_name_field.setPlaceholderText(self.template.name)
-        self.template_name_field.editingFinished.connect(self.on_template_name_changed)
-        self.template_name_field.setMaximumWidth(150)
+        self.template_dims_field = UnitStrGeometryField(self.template, "geometry", labels=["Width", "Height"], display_unit=self.settings.display_unit, 
+                decimal_places=2, stack_cls=QHBoxLayout, dpi=self.dpi)
+        self.template_dims_field.valueChanged.connect(self.on_property_changed)
+        self.template_dims_field.setMaximumWidth(250)
+ 
+        self.bleed_label = QLabel("Bleed")
+        self.bleed_checkbox = QCheckBox("Add Bleed")
 
-        self.template_width_field = UnitField(self.template, "width", display_unit=self.unit)
-        self.template_height_field = UnitField(self.template, "height", display_unit=self.unit)
-        
-        for dim in [self.template_width_field, self.template_height_field]:
-            dim.setMaximumWidth(100)
-            dim.valueChanged.connect(self.on_property_changed)
-        self.bleed_label = QLabel("Bleed")    
-        self.template_bleed_field = UnitField(self.template, "bleed", display_unit=self.unit)
+        self.bleed_checkbox.setChecked(bool(getattr(self.template, "include_bleed", False)))
+        self.bleed_checkbox.toggled.connect(self.toggle_bleed)
+        self.template_bleed_field = UnitStrField(self.template, "bleed", display_unit=self.unit)
         self.template_bleed_field.valueChanged.connect(self.on_property_changed)
-        self.template_bleed_field.setMaximumWidth(80)       
+        self.template_bleed_field.setMaximumWidth(60)   
+        self.template_bleed_field.setEnabled(self.bleed_checkbox.isChecked())    
         self.border_label = QLabel("Border")
-        self.border_width_field = UnitField(self.template, "border_width", display_unit=self.unit)
+        self.border_width_field = UnitStrField(self.template, "border_width", display_unit=self.unit)
         self.border_width_field.valueChanged.connect(self.on_property_changed)
-        self.border_width_field.setMaximumWidth(80)
+        self.border_width_field.setMaximumWidth(60)
         self.corners_label = QLabel("Corner Radius")
-        self.corners_field = UnitField(self.template, "corner_radius", display_unit=self.unit)
+        self.corners_field = UnitStrField(self.template, "corner_radius", display_unit=self.unit)
         self.corners_field.valueChanged.connect(self.on_property_changed)
-        self.corners_field.setMaximumWidth(80)
+        self.corners_field.setMaximumWidth(60)
 
-        
-        self.measure_toolbar.addWidget(QLabel("Template:"))
-        self.measure_toolbar.addWidget(self.template_name_field)
         self.measure_toolbar.addSeparator()
         self.measure_toolbar.addWidget(QLabel("Unit:"))
         self.measure_toolbar.addWidget(self.unit_selector)
         self.measure_toolbar.addWidget(self.grid_checkbox)
-        # self.measure_toolbar.addWidget(self.print_line_checkbox)
-        self.measure_toolbar.addWidget(self.template_width_field)
-        self.measure_toolbar.addWidget(self.template_height_field)
         self.measure_toolbar.addWidget(self.snap_checkbox)
+        self.measure_toolbar.addSeparator()
+        self.measure_toolbar.addWidget(self.template_dims_field)
+        self.measure_toolbar.addSeparator()
         self.measure_toolbar.addWidget(self.border_label)
         self.measure_toolbar.addWidget(self.border_width_field)
         self.measure_toolbar.addWidget(self.corners_label)
         self.measure_toolbar.addWidget(self.corners_field)
-
+        self.measure_toolbar.addWidget(self.bleed_label)
+        self.measure_toolbar.addWidget(self.bleed_checkbox)
+        self.measure_toolbar.addWidget(self.template_bleed_field)
         self.layout().addWidget(self.measure_toolbar)
 
     @Slot(str)
     def on_unit_change(self, unit: str):
         self.settings.unit = unit
-        self.template_width_field.on_unit_change(unit)
-        self.template_height_field.on_unit_change(unit)
+        self.template_dims_field.on_unit_change(unit)
         self.measure_toolbar.update()
         self.property_panel.on_unit_change(unit)
 
@@ -291,16 +297,20 @@ class ComponentTab(QWidget):
         self._snap_grid = checked
         self.grid_snap_changed.emit(checked)
 
-    # def toggle_print_lines(self, show:bool):
-    #     self._print_lines = show
-    #     self.print_lines.toggle_print_lines()
+    def toggle_bleed(self, checked: bool):
+        new = bool(checked)
+        old = bool(getattr(self.template, "include_bleed", False))
+        if new == old:
+            # nothing to do; avoids spurious undo entries
+            return
 
-    @Slot()
-    def on_template_name_changed(self):
-        new = self.template_name_field.text()
-        self.on_property_changed(self.template, "name", new, self.template.name)
-        print(f"Name changed to {self.template.name}")
-        self.tab_title_changed.emit(new)
+        self.on_property_changed(self.template, "include_bleed", new, old)
+
+        # Enable/disable the bleed value field alongside the checkbox
+        self.template_bleed_field.setEnabled(new)
+
+        # Let scene resize if your scene rect depends on bleed rect
+        self.scene.sync_scene_rect()
 
     @Slot()
     def on_property_changed(self, target, prop, new, old):
@@ -451,9 +461,25 @@ class ComponentTab(QWidget):
         if self.scene.selectedItems():
             self.scene.clearSelection()
 
+    @Slot(str, object)
+    def add_item_with_dims(self, prefix: str, geom: UnitStrGeometry):
+        """
+        Scene finished a click-drag create. Make it undoable via AddElementCommand.
+        Select the created item and wire the resize_finished signal.
+        """
+        # 100% matches your requested signature and flow
+        command = AddElementCommand(prefix, self, geom)
+        self.undo_stack.push(command)
+
+        # Select last-created element (assuming registry.get_last returns the new element)
+        self.selected_item = self.registry.get_last()
+
+        # When user finishes adjusting handles, let the scene reconcile state
+        self.selected_item.resize_finished.connect(self.scene.on_item_resize_finished)
+
     def add_item_from_drop(self, scene_pos: QPointF, item_type: str):
         self.scene.clearSelection()
-        rect = UnitStrGeometry(width="0.5in", height="0.25in", dpi=self.template.dpi)
+        rect = UnitStrGeometry(width="0.75in", height="0.5in", dpi=self.template.dpi)
         new_geometry = geometry_with_px_pos(rect, scene_pos, dpi=self.dpi)
         command = AddElementCommand(item_type, self, new_geometry)
         self.undo_stack.push(command)

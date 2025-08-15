@@ -377,7 +377,7 @@ class MainDesignerWindow(QMainWindow):
             prop_layout = QVBoxLayout(prop_container)
             prop_layout.setContentsMargins(0, 0, 0, 0)
             prop_layout.addWidget(active_tab.property_panel)
-            prop_layout.addWidget(active_tab.margin_spacing_panel)
+            # prop_layout.addWidget(active_tab.margin_spacing_panel)
             prop_layout.addWidget(active_tab.remove_item_btn, alignment=Qt.AlignCenter)
             prop_layout.addStretch(1)
             self.properties_dock.setWidget(prop_container)
@@ -564,6 +564,8 @@ class MainDesignerWindow(QMainWindow):
     @Slot()
     def save_as_template(self):
         tab = self.get_current_tab()
+        template = tab.template
+        old_name = template.name
         if not tab:
             return
 
@@ -574,9 +576,13 @@ class MainDesignerWindow(QMainWindow):
 
         self.write_template_to_path(tab.template, tab.registry, path)
         tab.file_path = path
+
         self.show_status_message(f"Saved to {path}", "success")
         idx = self.tab_widget.indexOf(tab)
-        self.tab_widget.setTabText(idx, Path(path).stem)
+        new_name = Path(path).stem
+        tab.on_property_changed(template, "name", new_name, old_name)
+        self.tab_widget.setTabText(idx, new_name)
+
 
     def write_template_to_path(self, template, registry, path: str):
         try:
@@ -792,18 +798,11 @@ class MainDesignerWindow(QMainWindow):
         csv_path = dialog.selectedFiles()[0]
         tmpl = active_tab.template
         data = self.merge_manager.get_csv_data_for_template(tmpl)
-        # print("TEMPLATE @-names:", [el.name for el in tmpl.items if getattr(el, "name", "").startswith("@")])
-        # if data:
-        #     print("CSV headers:     ", data.headers)
-        #     print("Validation:      ", data.validate_headers(tmpl))
-        # else:
-        #     print("No CSVData found (check template.csv_path and file exists).")
         data = self.merge_manager.load_csv(csv_path, active_tab.template)
         self.import_panel.set_template(active_tab.template)
 
         # safe debug
         if data:
-            print(data.validate_headers(active_tab.template))
             self.import_panel.update_for_template(active_tab.template)
         else:
             print("[IMPORT] No CSVData returned")
@@ -824,7 +823,7 @@ class MainDesignerWindow(QMainWindow):
             return
 
         export_manager = ExportManager(self.settings, active_tab.registry, self.merge_manager)
-        export_manager.export_component_to_png(active_tab.template, folder, dpi=300)
+        export_manager.export_component_to_png(active_tab.template, folder)
 
         print(f"[EXPORT COMPLETED] Components exported to {folder}")
 

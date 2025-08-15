@@ -1,3 +1,6 @@
+from typing import Optional, TYPE_CHECKING
+import math
+
 from PySide6.QtWidgets import (
     QGraphicsScene, QGraphicsItem, QGraphicsSceneMouseEvent, QGraphicsSceneDragDropEvent,
     QGraphicsRectItem
@@ -5,25 +8,17 @@ from PySide6.QtWidgets import (
 from PySide6.QtCore import Slot, Qt, QSizeF, QRectF, QPointF, Signal
 from PySide6.QtGui import QColor, QPen, QPainter, QBrush, QPixmap, QTransform
 
-# Import your existing DesignerGraphicsView
 from prototypyside.views.layout_view import LayoutView
-# Import the model and view-item class
-from prototypyside.models.layout_template import LayoutTemplate
-#from prototypyside.views.layout_template_item import LayoutTemplateItem
 from prototypyside.config import MEASURE_INCREMENT, LIGHTEST_GRAY, DARKEST_GRAY
-from prototypyside.utils.unit_converter import parse_dimension
-
-from typing import Optional, TYPE_CHECKING
-import math
 
 if TYPE_CHECKING:
     from prototypyside.views.overlays.incremental_grid import IncrementalGrid
-    from prototypyside.models.layout_template import LayoutTemplate
+    from prototypyside.models.component_template import ComponentTemplate
 
 
 class LayoutScene(QGraphicsScene):
     """
-    A QGraphicsScene tailored for LayoutTemplateItem:
+    A QGraphicsScene tailored for LayoutTemplate:
     - Manages a single LayoutTemplateItem
     - Adjusts sceneRect when template changes
     """
@@ -60,7 +55,8 @@ class LayoutScene(QGraphicsScene):
         """Make the scene rect exactly match the template’s bounding rect."""
         r = self.template.geometry.to("px", dpi=self._dpi).rect
         self.setSceneRect(r)
-
+        self.inc_grid.prepareGeometryChange()
+        self.inc_grid.update()
     @Slot()
     def _on_template_rect_changed(self):
         """Keep scene and grid in sync when the template is resized."""
