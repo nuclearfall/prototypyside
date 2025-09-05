@@ -1,9 +1,14 @@
 # prototypyside/config.py
-
+from __future__ import annotations
+from os import fspath
+from pathlib import Path
+from typing import Callable, Optional, TypeVar, Union, Iterable
 from PySide6.QtGui import Qt, QColor, QPageSize
 from enum import Enum, auto
 
-from prototypyside.utils.units.unit_str_geometry import UnitStrGeometry
+from prototypyside.services.proto_class import ProtoClass
+
+
 
 # --- Constants for Resize Handles ---
 HANDLE_SIZE = 8
@@ -22,11 +27,27 @@ ALIGNMENT_MAP = {
     "Bottom Right": Qt.AlignBottom | Qt.AlignRight,
 }
 
-HORIZONTAL_ALIGNMENT = {
-    "left": Qt.AlignLeft,
-    "center": Qt.AlignCenter,
-    "right": Qt.AlignRight
+VMAP = {
+    "Top":    Qt.AlignTop,
+    "Center": Qt.AlignVCenter,
+    "Bottom": Qt.AlignBottom,
 }
+
+HMAP = {
+    "Left":    Qt.AlignLeft,
+    "Center":  Qt.AlignHCenter,
+    "Right":   Qt.AlignRight,
+    "Justify": Qt.AlignJustify,
+}
+
+HMAP_REV = {v: k for k, v in HMAP.items()}
+VMAP_REV = {v: k for k, v in VMAP.items()}
+
+def hflag(h: str) -> Qt.Alignment:
+    return HMAP.get(h, Qt.AlignLeft)
+
+def vflag(v: str) -> Qt.Alignment:
+    return VMAP.get(v, Qt.AlignTop)
 
 PAGE_UNITS = {
     "in": QPageSize.Unit.Inch,
@@ -39,49 +60,49 @@ PAGE_SIZES = {
         {
             "display":  "Letter (8.5 × 11 in)",
             "qpage_size": QPageSize.Letter,
-            "geometry": UnitStrGeometry(width="8.5in", height="11in"),
+            "geometry": ProtoClass.UG.new(width="8.5in", height="11in"),
             "unit": "in"
         },
     "legal": {
             "display": "Legal (8.5 × 14 in)",
             "qpage_size": QPageSize.Legal,
-            "geometry": UnitStrGeometry(width="8.5in", height="14in"),
+            "geometry": ProtoClass.UG.new(width="8.5in", height="14in"),
             "unit": "in"
         },
     "a4": {
             "display": "A4 (210 × 297 mm)",
             "qpage_size": QPageSize.A4,
-            "geometry": UnitStrGeometry(width="210mm", height="297mm"),
+            "geometry": ProtoClass.UG.new(width="210mm", height="297mm"),
             "unit": "mm"
     },
     "a5": {
             "display": "A5 (148 × 210 mm)",
             "qpage_size": QPageSize.A5,
-            "geometry": UnitStrGeometry(width="148mm", height="210mm"),
+            "geometry": ProtoClass.UG.new(width="148mm", height="210mm"),
             "unit": "mm"
     },
     "tabloid": {
         "display": "Tabloid (11 × 17 in)",
         "qpage_size": QPageSize.Tabloid,
-        "geometry": UnitStrGeometry(width="11in", height="17in"),
+        "geometry": ProtoClass.UG.new(width="11in", height="17in"),
         "unit": "in"
     },
     "executive": {
         "display": "(7.25 × 10.5 in)",
         "qpage_size": QPageSize.Executive,
-        "geometry": UnitStrGeometry(width="7.25in", height="10.5in"),
+        "geometry": ProtoClass.UG.new(width="7.25in", height="10.5in"),
         "unit": "in"
     },
     "b5": {
         "display": "B5 (176 × 250 mm)",
         "qpage_size": QPageSize.B5,
-        "geometry": UnitStrGeometry(width="176mm", height="250mm"),
+        "geometry": ProtoClass.UG.new(width="176mm", height="250mm"),
 
     },
     "custom": {
         "display": "Custom...",
         "qpage_size": None,
-        "geometry": None # Must enter custom_geometry in UnitStrGeometryField
+        "geometry": None # Must enter custom_geometry in ProtoClass.UGField
     }
 }
 

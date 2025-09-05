@@ -25,7 +25,7 @@ def test_create_page_from_layout_template():
     # 5) Check nested slot clones
     # Slots aren't cloned!!!
     #    We expect each LayoutSlot in the page to be a fresh object
-    # for original_slot, cloned_slot in zip(layout_template.slots, page.slots):
+    # for original_slot, cloned_slot in zip(layout_template.items, page.items):
     #     # Slot‐level PID
     #     assert cloned_slot.pid != original_slot.pid
     #     # Registered
@@ -39,7 +39,7 @@ def test_create_page_from_layout_template():
     
     # 6) Deep‐equality of non‐geometry fields
     #    (Customize these to your schema)
-    # for orig, clone in zip(layout_template.slots, page.slots):
+    # for orig, clone in zip(layout_template.items, page.items):
     #     assert orig.row == clone.row
     #     assert orig.column == clone.column
 

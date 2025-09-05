@@ -1,6 +1,3 @@
-# prototypyside/utils/unit_str_geometry.py
-from __future__ import annotations
-
 from dataclasses import replace
 from decimal import Decimal
 from typing import Optional, Union, Tuple
@@ -46,22 +43,17 @@ class UnitStrGeometry:
     """
 
     __slots__ = (
-        "_rect_x", "_rect_y", "_w", "_h", "_pos_x", "_pos_y",
+        "_xy", "_x", "_y",
         "_unit", "_dpi", "_print_dpi", "_cache"
     )
 
     def __init__(
         self,
-        rect: Optional[QRectF] = None,
-        pos: Optional[QPointF] = None,
-        size: Optional[QSizeF] = None,
+        point: Optional[Tuple[Number, Number]]
         *,
         x:      Number | None = None,
         y:      Number | None = None,
-        rect_x: Number | None = None,
-        rect_y: Number | None = None,
-        width:  Number | None = None,
-        height: Number | None = None,
+        qpoint: QPointF = None,
         dpi:    int | None    = None,
         print_dpi: int        = 300,
         unit:   Optional[str] = None,
@@ -73,8 +65,15 @@ class UnitStrGeometry:
         self._unit = (unit or "in").lower().replace('"', "in")
 
         # Unpack Qt types (assumed authored in pixels unless already UnitStr)
-        rx = rect.x()     if isinstance(rect, QRectF) else rect_x
-        ry = rect.y()     if isinstance(rect, QRectF) else rect_y
+        rx = None
+        ry = None
+        if point:
+            rx = UnitStr(point[0])
+            ry = UnitStr(point[1])
+            potential_unit = poi
+        if qpoint:
+            rx = qpoint.x() if isinstance(rect, QPointF)
+            ry = qpoint.y() if isinstance(rect, QPointF)
         rw = rect.width() if isinstance(rect, QRectF) else width
         rh = rect.height()if isinstance(rect, QRectF) else height
 
@@ -93,18 +92,20 @@ class UnitStrGeometry:
                 return UnitStr(v, dpi=self._dpi)
             # Bare numbers default to geometry.unit; strings may embed units like "px@72"
             return UnitStr(0 if v is None else v, unit=self._unit, dpi=self._dpi)
-
+        if unit and unit in 
         self._rect_x = U(rx)
         self._rect_y = U(ry)
-        self._w      = U(rw)
-        self._h      = U(rh)
-        self._pos_x  = U(px)
-        self._pos_y  = U(py)
 
         # small per-instance conversion cache (unit,dpi)-> float tuples
         self._cache: dict[tuple[str, int, str], Tuple[float, ...]] = {}
 
     # ---- basic props --------------------------------------------------------
+    def _parse_point(self, point):
+        if not point or len(point) > 2:
+            raise ValueError(f'point parameter must be a tuple with at least 2 values (x, y)')
+        try:
+            unit = 
+            rx = UnitStr
 
     @property
     def unit(self) -> str:

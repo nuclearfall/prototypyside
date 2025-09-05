@@ -2,17 +2,20 @@ from PySide6.QtWidgets import QGraphicsItem
 from PySide6.QtGui     import QPainter, QPen, QColor, QBrush
 from PySide6.QtCore    import QRectF, Qt
 
-from prototypyside.utils.units.unit_str import UnitStr
+from prototypyside.services.proto_class import ProtoClass
 
-# You’ll need your UnitStr class in scope:
-# from yourpackage.unit_str import UnitStr
+if TYPE_CHECKING:
+    from prototypyside.utils.units.unit_str import UnitStr
+
+# You’ll need your ProtoClass.US class in scope:
+# from yourpackage.unit_str import ProtoClass
 
 class PrintLines(QGraphicsItem):
     
     def __init__(
         self,
         
-        bleed_size: UnitStr = UnitStr("0.125in", dpi=300),
+        bleed_size: "UnitStr" = ProtoClass.US.new("0.125in", dpi=300),
         bleed_color: QColor = QColor(Qt.blue),      # 50%-alpha black
         cut_color:   QColor = QColor(Qt.red),
         safe_color:  QColor = QColor(255, 255, 0, 255),

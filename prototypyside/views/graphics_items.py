@@ -10,7 +10,7 @@ from prototypyside.config import (
 )
 
 if TYPE_CHECKING:
-    from prototypyside.models.game_component_element import ComponentElement
+    from prototypyside.models.component_element import ComponentElement
 else:
     ComponentElement = object
 
@@ -60,6 +60,10 @@ class ResizeHandle(QGraphicsRectItem):
         elif handle_type in [HandleType.LEFT_CENTER, HandleType.RIGHT_CENTER]:
             return QCursor(Qt.SizeHorCursor)
         return QCursor(Qt.ArrowCursor)
+
+    @classmethod
+    def handle_size(cls):
+        return HANDLE_SIZE
 
     def mousePressEvent(self, event: QGraphicsSceneMouseEvent):
         event.accept()

@@ -19,13 +19,13 @@ from prototypyside.models.component_template import ComponentTemplate
 from prototypyside.models.layout_template import LayoutTemplate
 from prototypyside.models.layout_slot import LayoutSlot
 <<<<<<< Updated upstream
-from prototypyside.utils.units.unit_str import UnitStr
-from prototypyside.utils.units.unit_str_geometry import UnitStrGeometry
+from prototypyside.utils.units.unit_str import ProtoClass.US
+from prototypyside.utils.units.unit_str_geometry import ProtoClasseometry
 =======
-from prototypyside.utils.units.unit_str import UnitStr
-from prototypyside.utils.units.unit_str_geometry import UnitStrGeometry
+from prototypyside.utils.units.unit_str import ProtoClass.US
+from prototypyside.utils.units.unit_str_geometry import ProtoClasseometry
 >>>>>>> Stashed changes
-from prototypyside.utils.proto_helpers import resolve_pid
+ 
 
 # ── FIXTURES ────────────────────────────────────────────────────────────────
 @pytest.fixture(scope="module")
@@ -43,7 +43,7 @@ def registry():
     return ProtoRegistry(parent=root, root=root)
 
 # ── SHARED GEOMETRY FOR MODELS ───────────────────────────────────────────────
-usg = UnitStrGeometry(x=0.0, y=0.0, width=2.5, height=3.5, unit="in", dpi=300)
+usg = ProtoClass.UG.new(x=0.0, y=0.0, width=2.5, height=3.5, unit="in", dpi=300)
 
 # ── UTILITY: deep compare _ignoring_ geometry keys ───────────────────────────
 GEOM_KEYS = {
@@ -73,8 +73,8 @@ def assert_deep_equal_skip_geometry(a, b, ignore_keys=("pid","name")):
 
 # ── TEST 1: Units (no PID) ──────────────────────────────────────────────────
 UNIT_SAMPLES = [
-    ("unit_str",         UnitStr("3.5in", dpi=300)),
-    ("unit_str_geometry",UnitStrGeometry(x=0.0,y=0.0,width=0.02,height=0.02,unit="in",dpi=72)),
+    ("unit_str",         ProtoClass.US.new("3.5in", dpi=300)),
+    ("unit_str_geometry",ProtoClass.UG.new(x=0.0,y=0.0,width=0.02,height=0.02,unit="in",dpi=72)),
 ]
 
 @pytest.mark.parametrize("name,instance", UNIT_SAMPLES)
@@ -89,12 +89,12 @@ def test_units_schema_and_roundtrip(name, instance, validator):
 
 # ── TEST 2: Registry-backed models ───────────────────────────────────────────
 MODEL_FACTORIES = [
-    ("text_element",       lambda reg: TextElement(resolve_pid("te"), geometry=usg)),
-    ("image_element",      lambda reg: ImageElement(resolve_pid("ie"), geometry=usg)),
-    ("vector_element",     lambda reg: VectorElement(resolve_pid("ve"), geometry=usg)),
-    ("component_template", lambda reg: ComponentTemplate(resolve_pid("ct"), geometry=usg, registry=reg)),
-    ("layout_template",    lambda reg: LayoutTemplate(resolve_pid("lt"), geometry=usg, registry=reg)),
-    ("layout_slot",        lambda reg: LayoutSlot(resolve_pid("ls"), geometry=usg)),
+    ("text_element",       lambda reg: TextElement(("te"), geometry=usg)),
+    ("image_element",      lambda reg: ImageElement(("ie"), geometry=usg)),
+    ("vector_element",     lambda reg: VectorElement(("ve"), geometry=usg)),
+    ("component_template", lambda reg: ComponentTemplate(("ct"), geometry=usg, registry=reg)),
+    ("layout_template",    lambda reg: LayoutTemplate(("lt"), geometry=usg, registry=reg)),
+    ("layout_slot",        lambda reg: LayoutSlot(("ls"), geometry=usg)),
 ]
 
 @pytest.mark.parametrize("name,factory", MODEL_FACTORIES)

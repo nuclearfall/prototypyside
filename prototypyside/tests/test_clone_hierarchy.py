@@ -38,7 +38,7 @@ def test_clone_preserves_hierarchy_without_sharing():
         assert child.parentItem() is not original, (
             f"{child} still points at old parent!"
         )
-        # If you know the direct container (e.g. clone.slots_group), you can also:
+        # If you know the direct container (e.g. clone.items_group), you can also:
         # assert child.parentItem() in collect_items(clone), (
         #     f"{child.parentItem()} isn’t under {clone}"
         # )

@@ -5,7 +5,7 @@ import sys
 os.environ['QT_QPA_PLATFORM'] = 'offscreen'
 from PySide6.QtWidgets import QApplication, QGraphicsRectItem
 
-from prototypyside.utils.graphics_item_helpers import rotate_item, rotate_every_other
+from prototypyside.utils.graphics_item_helpers import rotate_by, rotate_every_other
 
 app = QApplication(sys.argv)
 

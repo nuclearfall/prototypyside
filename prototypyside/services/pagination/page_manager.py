@@ -1,56 +1,60 @@
-import re
-import math
-import uuid
-from typing import Dict, List, Tuple, Any, TYPE_CHECKING
+# import re
+# import math
+# import uuid
+# from typing import Dict, List, Tuple, Any, List, Optional, Sequence, TYPE_CHECKING
+# # services/page_manager.py
+# from dataclasses import dataclass
+# from math import ceil
+# from PySide6.QtCore import QRectF, QPointF 
 
+# from PySide6.QtWidgets import QGraphicsItem, QGraphicsObject, QGraphicsItemGroup, QGraphicsScene 
 from prototypyside.utils.units.unit_str import UnitStr
 from prototypyside.utils.units.unit_str_geometry import UnitStrGeometry
-from prototypyside.services.undo_commands import ChangePropertiesCommand
-if TYPE_CHECKING:
-    from prototypyside.models.layout_template import LayoutTemplate
+# from prototypyside.services.undo_commands import ChangePropertiesCommand
+# from prototypyside.models.page_model import Page
 
-def parse_prop_name(s: str) -> Tuple[str, str]:
-    """
-    Splits `s` into (before, after) at the *first* underscore.
-    If there is no underscore, returns (s, '').
-    """
-    m = re.match(r'^([^_]+)_(.*)$', s)
-    if m:
-        return m.group(1), m.group(2)
-    else:
-        # no underscore found
-        return s, ''
+# if TYPE_CHECKING:
+#     from prototypyside.models.layout_template import LayoutTemplate
+#     from prototypyside.models.layout_slot import LayoutSlot
 
-def obj_from_prop(tab, template, objstr, undo_stack=None) -> object:
-    obj_types = {
-        "layout": LayoutTemplate,
-        "component": ComponentTemplate,
-    }
-    ostr, prop = parse_prop_name(ostr)
-    if prop and isinstance(template, obj_types.get(ostr, None)):
-        if hasttr(template, prop) and undo_stack:
-            command = ChangePropertiesCommand()
+# def parse_prop_name(s: str) -> Tuple[str, str]:
+#     """
+#     Splits `s` into (before, after) at the *first* underscore.
+#     If there is no underscore, returns (s, '').
+#     """
+#     m = re.match(r'^([^_]+)_(.*)$', s)
+#     if m:
+#         return m.group(1), m.group(2)
+#     else:
+#         # no underscore found
+#         return s, ''
+
+# def obj_from_prop(tab, template, objstr, undo_stack=None) -> object:
+#     obj_types = {
+#         "layout": "LayoutTemplate",
+#         "component": ComponentTemplate,
+#     }
+#     ostr, prop = parse_prop_name(ostr)
+#     if prop and isinstance(template, obj_types.get(ostr, None)):
+#         if hasttr(template, prop) and undo_stack:
+#             command = ChangePropertiesCommand()
 
 
+# PAGE_SIZES = {
+#     # North American Standard & Common Wide-Format Sizes
+#     "Letter (8.5x11 inches)": UnitStrGeometry(width="8.5in", height="11.0in", unit="in"),
+#     "Legal (8.5x14 inches)": UnitStrGeometry(width="8.5in", height="14.0in", unit="in"),
+#     "Tabloid / Ledger (11x17 inches)": UnitStrGeometry(width="11.0in", height="17.0in", unit="in"),
+#     "Super B (13x19 inches)": UnitStrGeometry(width="13.0in", height="19.0in", unit="in"),
 
-        
-
-
-PAGE_SIZES = {
-    # North American Standard & Common Wide-Format Sizes
-    "Letter (8.5x11 inches)": UnitStrGeometry(width="8.5in", height="11.0in", unit="in"),
-    "Legal (8.5x14 inches)": UnitStrGeometry(width="8.5in", height="14.0in", unit="in"),
-    "Tabloid / Ledger (11x17 inches)": UnitStrGeometry(width="11.0in", height="17.0in", unit="in"),
-    "Super B (13x19 inches)": UnitStrGeometry(width="13.0in", height="19.0in", unit="in"),
-
-    # International Standard (ISO 216 "A" Series) & Common Wide-Format Sizes
-    "A4 (210x297 mm)": UnitStrGeometry(width="210mm", height="297mm", unit="mm"),
-    "A3 (297x420 mm)": UnitStrGeometry(width="297mm", height="420mm", unit="mm"),
-    "A3+ (329x483 mm)": UnitStrGeometry(width="329mm", height="483mm", unit="mm"), # Equivalent to Super B
-    "A2 (420x594 mm)": UnitStrGeometry(width="420mm", height="594mm", unit="mm"),
-    "A1 (594x841 mm)": UnitStrGeometry(width="594mm", height="841mm", unit="mm"),
-    "A0 (841x1189 mm)": UnitStrGeometry(width="841mm", height="1189mm", unit="mm"),
-}
+#     # International Standard (ISO 216 "A" Series) & Common Wide-Format Sizes
+#     "A4 (210x297 mm)": UnitStrGeometry(width="210mm", height="297mm", unit="mm"),
+#     "A3 (297x420 mm)": UnitStrGeometry(width="297mm", height="420mm", unit="mm"),
+#     "A3+ (329x483 mm)": UnitStrGeometry(width="329mm", height="483mm", unit="mm"), # Equivalent to Super B
+#     "A2 (420x594 mm)": UnitStrGeometry(width="420mm", height="594mm", unit="mm"),
+#     "A1 (594x841 mm)": UnitStrGeometry(width="594mm", height="841mm", unit="mm"),
+#     "A0 (841x1189 mm)": UnitStrGeometry(width="841mm", height="1189mm", unit="mm"),
+# }
 
 PRINT_POLICIES = {
     'Letter: 3x3 Standard 2.5"x3.5" Cards': {
@@ -67,7 +71,7 @@ PRINT_POLICIES = {
             UnitStr("0.0in", dpi=300),   # spacing_x
             UnitStr("0.0in", dpi=300)    # spacing_y
         ],
-        "duplex": False,
+        "duplex_print": False,
         "oversized": False,
         "lock_at": 1
     },
@@ -85,8 +89,41 @@ PRINT_POLICIES = {
             UnitStr("0.0in", dpi=300),
             UnitStr("0.0in", dpi=300)
         ],
-        "lock_at": 2
+        "duplexed": False # checked by the ExportManager to alternate page rotation
     },
+    'Letter: 2x4 Standard 2.5"x3.5" Cards (Folded)': {
+        "page_size": "Letter (8.5x11 inches)",
+        "geometry": UnitStrGeometry(width="8.5in", height="11in", unit="in", dpi=300),
+        "is_landscape": True,
+        "rows": 2,
+        "columns": 4,
+        "whitespace": [
+            UnitStr("0.75in", dpi=300),
+            UnitStr("0.75in", dpi=300),
+            UnitStr("0.5in", dpi=300),
+            UnitStr("0.5in", dpi=300),
+            UnitStr("0.0in", dpi=300),
+            UnitStr("0.0in", dpi=300)
+        ],
+        "item_indicies": {"index": [4, 5, 6, 7], "rotation": 180}
+    },
+    'Letter: 2x4 Standard 2.5"x3.5" Cards': {
+        "page_size": "Letter (8.5x11 inches)",
+        "geometry": UnitStrGeometry(width="8.5in", height="11in", unit="in", dpi=300),
+        "is_landscape": True,
+        "rows": 2,
+        "columns": 4,
+        "whitespace": [
+            UnitStr("0.75in", dpi=300),
+            UnitStr("0.75in", dpi=300),
+            UnitStr("0.5in", dpi=300),
+            UnitStr("0.5in", dpi=300),
+            UnitStr("0.0in", dpi=300),
+            UnitStr("0.0in", dpi=300)
+        ],
+        "items": {"index": [0, 1, 2, 3, 4, 5, 6, 7, 8], "rotation": 180},
+        "duplex_print": True 
+    },    
     'Letter: 10x13 Small 0.5" Tokens': {
         "page_size": "Letter (8.5x11 inches)",
         "geometry": UnitStrGeometry(width="8.5in", height="11in", unit="in", dpi=300),
@@ -134,208 +171,171 @@ PRINT_POLICIES = {
     }
 }
 
-class Policy:
-    # app: MainWindow
-    # registry: ProtoRegistry
-    # layout: LayoutTemplate
-    # components: Dict[str, ComponentTemplate]
-    # policy: Dict[str, Dict]
-    def __init__(self, layout, policy_key, app=None, registry=None, merge_manager=None, components={}):
-        self.app = app
-        self.registry = self.registry or app.registry if app else None
-        self.merge_manager = merge_manager or app.merge_manager if app else None
-        self.registry = registry or app.registry if app else None
-        self.layout = layout
-        self.policy = PRINT_PARAMS.get(policy_key)
-        self.csv_data = self.scan_for_csv()
-        self.components = components or self.scan_for_comps()
 
-    def setParams(self, params):
-        self.page_manager = page_manager
-        self.layout = layout
-        self.policy_name = policy_key
-        self.layout.policy = page_manager.setPolicyParams(policy_key)
+# class PageManager:
+#     def __init__(self, registry, settings):
+#         self.registry = registry
+#         self.settings = settings
 
-    def scan_for_csv(self, merge_manager=None):
-        merge_manager = merge_manager or self.merge_manager
+#     # EDITOR: add a live root under the scene and parent the page's slots
+#     def mount(self, layout_template, scene: QGraphicsScene, page_index: int):
+#         # Ensure grid is up-to-date (rows/cols/whitespace)
+#         layout_template.updateGrid()
 
+#         angle = self._page_angle(layout_template, page_index)
+#         rect_px = layout_template.geometry.to("px", dpi=self.settings.dpi).rect
 
-    def scan_for_components(self):
-        tpid = resolve_pid(layout.content)
-        if tpid and self.registry:
-            comp = self.registry.global_get(tpid)
-            if comp:
-                self.components[tpid] = comap
-        # Search the page for all unique template clones clones by tpid.
-        self.components = {**self.components, **{c.tpid: c for s in self.slots for c in s if isinstance(c, ComponentTemplate)}}
+#         root = QGraphicsItemGroup()
+#         root.setRotation(angle)
+#         root.setPos(0, 0)
+#         scene.addItem(root)
 
+#         # Pick the slots that belong to this page (flat list = one page; if pagination == CSV-driven, we still mount visible slots only)
+#         visible_slots = layout_template.items
+#         slot_angles = self._slot_angles(layout_template, page_index, visible_slots)
 
-class PageManager:
-    def __init__(self, settings, registry, components, parent=None):
-        settings.unit_changed.connect(self.set_unit)
-        settings.dpi_changed.connect(self.set_dpi)
-        self.unit = self.settings.unit
-        self.dpi = self.settigns.dpilayouts=[]
-        self.policies = None
-    #     self.policies = {l.pid: {
-    #         l.pid: Policy().set_params(l, self.registry, self.layout, components=components)} for l in layouts if isinstance(l, LayoutTemplate)
-    #     }
-    #     # since dicts are guaranteed ordered we easily get the last layout
-    #     self._current = self.layouts.items()[-1]
-    # }
-    @property
-    def current(self):
-        return self._current
+#         # Parent slots to root for this page view
+#         for sl in visible_slots:
+#             sl.setParentItem(root)
 
-    @current.setter
-    def current(self, pid):
-        entry = self.layouts.get(pid, None)
-        if entry:
-            return entry.get("layout")
-        return None 
+#         page = Page(index=page_index, angle=angle, rect_px=rect_px, slot_angles=slot_angles)
+#         return page, root
 
-    def lget(self, pid):
-        return self.layouts.get(pid)
+#     # EDITOR: remove previously mounted root
+#     def unmount(self, scene: QGraphicsScene, root_item: QGraphicsItem):
+#         if root_item and root_item.scene() is scene:
+#             scene.removeItem(root_item)
 
-    def cgets(self, pid):
-        entry = self.layouts.get(pid, None)
-        if entry:      
-            return entry.get("components")
-        return None
+#     # EXPORT: build a page graph OFF-scene (mirrors mount semantics)
+#     def snapshot(self, layout_template, page_index: int):
+#         layout_template.updateGrid()
 
-    def setPolicyParams(self, layout, policy, undo_stack):
-        m = re.match(r'^([^_]+)_(.*)$', s)
-        if policy not in self.policies or not self.policies.get(policy):
-            return
-        params = [(p, v) for p, v in policies.get(policy).items()]
-        lay_prop_names = []
-        lay_new_values = []
-        lay_old_values = []
+#         angle = self._page_angle(layout_template, page_index)
+#         rect_px = layout_template.geometry.to("px", dpi=self.settings.dpi).rect
 
-        for prop_key, value in params:
-            _, prop = parse_prop_name(prop_key)
-            if hasattr(template, prop):
-                prop_names.append(prop)
-                new_values.append(value)
-                old_values.append(getattr(template, prop))
+#         root = QGraphicsItemGroup()
+#         root.setRotation(angle)
+#         root.setPos(0, 0)
 
-        print(f"Properties to be changed: {[pk for pk in params.keys()]}")
-        page_props_command = ChangePropertiesCommand(templates, prop_names, new_values, old_values)
-        undo_stack.push(page_props_command)
-        pritn(template.to_dict())
+#         visible_slots = []
+#         for sl in layout_template.items:
+#             # Shallow “export clone”: reuse the slot item, but do not attach to the live scene
+#             # If you truly need isolation, clone slots here instead of reusing
+#             sl.setParentItem(root)
+#             visible_slots.append(sl)
+
+#         slot_angles = self._slot_angles(layout_template, page_index, visible_slots)
+#         page = Page(index=page_index, angle=angle, rect_px=rect_px, slot_angles=slot_angles)
+#         return page, root
+
+#     # SHARED: page count is a pure function of rows/cols × CSV rows × copies
+#     def compute_page_count(self, layout_template, csv_rows_count: int | None, copies: int = 1) -> int:
+#         slots_per_page = max(len(layout_template.items), 1)
+#         rows = max(csv_rows_count or 1, 1)
+#         return ceil(rows / slots_per_page) * max(copies, 1)
+
+#     # Helpers (extend later for duplex/landscape/item-rotation per policy)
+#     def _page_angle(self, layout_template, page_index: int) -> float:
+#         return 0.0  # hook up if you support per-page rotation
+
+#     def _slot_angles(self, layout_template, page_index: int, slots: list["LayoutSlot"]) -> list[float]:
+#         # Return absolute per-slot angles (e.g., for item_rotation policy)
+#         return [0.0] * len(slots)
 
 
-    def grid_by_slots_dims(
-        template: "LayoutTemplate",
-        slot_dim: UnitStrGeometry = UnitStrGeometry(width="2.5in", height="3.5in", unit="in", dpi=300),
-        whitespace: List[UnitStr] = [
-                UnitStr("0.25in", dpi=300),
-                UnitStr("0.25in", dpi=300),
-                UnitStr("0.5in", dpi=300),
-                UnitStr("0.5in", dpi=300),
-                UnitStr("0.0in", dpi=300),
-                UnitStr("0.0in", dpi=300),
-            ]
-    ) -> Tuple[Dict[str, Any], Tuple[str, str]]:
-        """
-        Compute the densest grid of slot_dim rectangles on the template.page,
-        respecting at least the given whitespace [top, bottom, left, right, spacing_x, spacing_y].
-        Returns (policies_dict, (message, level)).
-        """
+# # class PageManager:
+# #     def __init__(self, registry, settings):
+# #         self._registry = registry     # your ProtoRegistry/root
+# #         self._settings = settings     # AppSettings (unit, dpi)
 
-        # 1) Page geometry & orientation
-        page_geo = template.geometry  # UnitStrGeometry
-        orientation = template.is_landscape  # "portrait" or "landscape"
+# #     # ---- math helpers -----------------------------------------------------
+# #     @staticmethod
+# #     def _norm(deg: float) -> float:
+# #         d = deg % 360.0
+# #         return d + 360.0 if d < 0 else d
 
-        # 2) Fill defaults if needed
-        if whitespace is None:
-            # margins: .5in all around, zero spacing
-            whitespace = [
-                UnitStr("0.5in", dpi=300),
-                UnitStr("0.5in", dpi=300),
-                UnitStr("0.5in", dpi=300),
-                UnitStr("0.5in", dpi=300),
-                UnitStr("0.0in", dpi=300),
-                UnitStr("0.0in", dpi=300),
-            ]
-        top, bottom, left, right, spacing_x, spacing_y = whitespace
+# #     @staticmethod
+# #     def page_rotation_deg(is_landscape: bool, duplex: bool, page_index: int) -> float:
+# #         base = 90.0 if is_landscape else 0.0
+# #         if duplex and (page_index % 2 == 1):
+# #             base += 180.0
+# #         return (base % 360.0)
 
-        # 3) Convert everything to pixels for exact math
-        pw = float(page_geo.to("px", dpi=300).width)
-        ph = float(page_geo.to("px", dpi=300).height)
-        sw = float(slot_dim.to("px", dpi=slot_dim.dpi).width)
-        sh = float(slot_dim.to("px", dpi=slot_dim.dpi).height)
-        mx = float(spacing_x.to("px", dpi=spacing_x.dpi))
-        my = float(spacing_y.to("px", dpi=spacing_y.dpi))
-        ml = float(left.to("px", dpi=left.dpi))
-        mr = float(right.to("px", dpi=right.dpi))
-        mt = float(top.to("px", dpi=top.dpi))
-        mb = float(bottom.to("px", dpi=bottom.dpi))
+# #     # ---- compute a Page descriptor ----------------------------------------
+# #     def build_page(self, template, page_index: int) -> Page:
+# #         dpi = self._settings.dpi
+# #         page_rect = template.geometry.to("px", dpi=dpi).rect  # QRectF
+# #         angle = self.page_rotation_deg(template.is_landscape, template.duplex_print, page_index)
 
-        # 4) Try both orientations of slot (allow rotation)
-        def compute_counts(slot_w, slot_h):
-            avail_w = pw - (ml + mr)
-            avail_h = ph - (mt + mb)
-            cols = max(0, math.floor((avail_w + mx) / (slot_w + mx)))
-            rows = max(0, math.floor((avail_h + my) / (slot_h + my)))
-            return rows, cols
+# #         # Per-slot final angles
+# #         custom = template.item_rotation if getattr(template, "item_rotation", None) else []
+# #         slot_angles: List[float] = []
+# #         for idx, slot in enumerate(template.slots):  # row-major
+# #             base = getattr(slot, "base_rotation", 0.0) or 0.0
+# #             add  = custom[idx] if idx < len(custom) else 0.0
+# #             slot_angles.append(self._norm(angle + base + add))
 
-        r1, c1 = compute_counts(sw, sh)
-        r2, c2 = compute_counts(sh, sw)
-        # pick whichever packs more slots
-        if r2 * c2 > r1 * c1:
-            rows, cols = r2, c2
-            sw, sh = sh, sw  # we’ll record rotated dims
-        else:
-            rows, cols = r1, c1
+# #         return Page(index=page_index, angle=angle, rect_px=page_rect, slot_angles=slot_angles)
 
-        # 5) If nothing fits, bail out
-        if rows < 1 or cols < 1:
-            return {}, ("Slot dimensions too large to fit on page", "error")
+# #     # ---- GUI mounting (live) ----------------------------------------------
+# #     def mount(self, template, scene, page_index: int) -> tuple[Page, QGraphicsItemGroup]:
+# #         """
+# #         Returns (Page, page_root).
+# #         page_root is added to the scene; template becomes a child of page_root.
+# #         Slots remain children of template.
+# #         """
+# #         page = self.build_page(template, page_index)
 
-        # 6) Compute leftover space and grow margins symmetrically
-        used_w = cols * sw + (cols - 1) * mx
-        used_h = rows * sh + (rows - 1) * my
-        extra_w = pw - used_w
-        extra_h = ph - used_h
+# #         # 1) Create the page root container
+# #         root = QGraphicsItemGroup()
+# #         scene.addItem(root)
 
-        final_ml = (extra_w / 2.0)
-        final_mr = extra_w - final_ml
-        final_mt = (extra_h / 2.0)
-        final_mb = extra_h - final_mt
+# #         # 2) Parent the template under the root (keep slots under template)
+# #         template.setParentItem(root)
+# #         template.setPos(0, 0)  # if your template already lives at (0,0), this is redundant
 
-        # Convert back to UnitStr (in the template’s unit)
-        def px_to_unitstr(px: float) -> UnitStr:
-            # px → inches → desired unit
-            inches = px / template.geometry.dpi
-            return UnitStr(f"{inches}in", dpi=template.geometry.dpi)
+# #         # 3) Apply per-slot *relative* rotation (exclude page angle!)
+# #         custom = getattr(template, "item_rotation", None) or []
+# #         for idx, slot in enumerate(template.slots):
+# #             # make sure origin is sensible for rotation
+# #             slot.setTransformOriginPoint(slot.boundingRect().center())
+# #             base = getattr(slot, "base_rotation", 0.0) or 0.0
+# #             add  = custom[idx] if idx < len(custom) else 0.0
+# #             slot.setRotation((base + add) % 360.0)
 
-        final_whitespace = [
-            px_to_unitstr(final_mt),
-            px_to_unitstr(final_mb),
-            px_to_unitstr(final_ml),
-            px_to_unitstr(final_mr),
-            spacing_x,
-            spacing_y,
-        ]
+# #         # 4) Set the page rotation on the root *after* children are in place,
+# #         #    and rotate around the page center
+# #         root.setTransformOriginPoint(page.rect_px.center())
+# #         root.setRotation(page.angle)
 
-        # 7) Build the policy entry
-        # Unique key
-        # key = f"custom_{uuid.uuid4().hex[:8]}"
-        desc = (
-            f"Custom: {rows}×{cols} grid of "
-            f"{slot_dim.width}×{slot_dim.height} slots on "
-            f"{orientation.capitalize()} page"
-        )
+# #         return page, root
 
-        policy = {
-            desc: {
-                # "description": desc,
-                "page_geometry": page_geo,
-                "page_orientation": orientation,
-                "page_whitespace": final_whitespace,
-                "slot_geometry": slot_dim,
-            }
-        }
+# #     # ---- unmount (GUI cleanup) --------------------------------------------
+# #     def unmount(self, scene, page_root_item: QGraphicsItem) -> None:
+# #         if page_root_item is None:
+# #             return
+# #         scene.removeItem(page_root_item)
 
-        return policy, ("", "Info")
+# #     # ---- export snapshot (frozen) -----------------------------------------
+# #     def snapshot(self, template, page_index: int):
+# #         """
+# #         For export: deep-clone the needed objects into an off-scene structure.
+# #         Returns (Page, cloned_root_item) that ExportManager can render.
+# #         """
+# #         page = self.build_page(template, page_index)
+
+# #         # Clone a minimal tree (template -> slots -> component templates -> elements)
+# #         # Use your ProtoRegistry/Factory to clone with new PIDs.
+# #         clone_lt = self._registry.clone(template)  # per your existing API
+# #         # Create a dedicated root for the cloned page
+# #         cloned_root = QGraphicsObject()
+# #         cloned_root.setTransformOriginPoint(page.rect_px.center())
+# #         cloned_root.setRotation(page.angle)
+
+# #         # Add cloned slots under cloned_root; apply angles
+# #         for idx, cslot in enumerate(clone_lt.slots):
+# #             cslot.setParentItem(cloned_root)
+# #             cslot.setTransformOriginPoint(cslot.boundingRect().center())
+# #             cslot.setRotation(page.slot_angles[idx])
+
+# #         return page, cloned_root

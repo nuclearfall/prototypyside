@@ -11,11 +11,11 @@ _app = QApplication(sys.argv)
 from prototypyside.services.proto_registry import RootRegistry, ProtoRegistry
 from prototypyside.models.component_template import ComponentTemplate
 from prototypyside.models.layout_template import LayoutTemplate
-from prototypyside.utils.units.unit_str_geometry import UnitStrGeometry
-from prototypyside.utils.proto_helpers import resolve_pid
+from prototypyside.utils.units.unit_str_geometry import ProtoClasseometry
+ 
 
 # Shared geometry for tests
-usg = UnitStrGeometry(x=0, y=0, width=4, height=2, unit="in", dpi=300)
+usg = ProtoClass.UG.new(x=0, y=0, width=4, height=2, unit="in", dpi=300)
 
 # Keys to skip in deep comparison (geometry & linking fields)
 GEOM_KEYS = {
@@ -56,7 +56,7 @@ def registry():
 
 
 def test_component_template_clone(registry):
-    orig = ComponentTemplate(resolve_pid("ct"), geometry=usg, registry=registry)
+    orig = ComponentTemplate(("ct"), geometry=usg, registry=registry)
     child = registry.create("te", geometry=usg)
     orig.items.append(child)
 
@@ -79,7 +79,7 @@ def test_component_template_clone(registry):
 
 
 def test_layout_template_clone(registry):
-    orig = LayoutTemplate(resolve_pid("lt"), geometry=usg, registry=registry)
+    orig = LayoutTemplate(("lt"), geometry=usg, registry=registry)
     slot = registry.create("ls", geometry=usg)
     orig.items = [[slot]]
 

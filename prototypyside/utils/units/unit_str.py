@@ -1,22 +1,31 @@
-# unit_str.py
+# unit_str.py  (drop-in replacement with "raw px@source" + "unit px@target" support)
+
+from __future__ import annotations
 
 import re
-from decimal import Decimal, ROUND_HALF_UP
+from decimal import Decimal, getcontext, ROUND_HALF_UP
 from typing import Union, Optional
 
-UNIT_RE = re.compile(r"^\s*(-?[0-9]+(?:\.[0-9]+)?)\s*([a-zA-Z]+)?\s*$")
+# ----- Decimal context
+_CTX = getcontext()
+_CTX.prec = 34
+_CTX.rounding = ROUND_HALF_UP
 
-# How many inches per unit
+# ----- Parsing
+NUM_UNIT_RE = re.compile(
+    r"^\s*(-?(?:\d+(?:\.\d+)?|\.\d+))\s*([a-zA-Z\"']+)?(?:@(\d+))?\s*$"
+)
+UNIT_ONLY_RE = re.compile(r"^\s*([a-zA-Z\"']+)\s*(?:@(\d+))?\s*$")
+
+# ----- Canonical unit tables (inches as canonical internal)
 UNITS_TO_INCHES = {
     "in": Decimal("1"),
     "mm": Decimal("1") / Decimal("25.4"),
     "cm": Decimal("1") / Decimal("2.54"),
     "pt": Decimal("1") / Decimal("72"),
 }
-# Inverse mapping for output
 INCHES_TO_UNITS = {u: (Decimal("1") / v) for u, v in UNITS_TO_INCHES.items()}
 
-# How we round human-readable values
 ROUNDING_INCREMENT = {
     "in": Decimal("0.01"),
     "mm": Decimal("0.1"),
@@ -24,99 +33,169 @@ ROUNDING_INCREMENT = {
     "pt": Decimal("1"),
 }
 
+_Q_IN  = Decimal("1E-9")   # internal grid (inches)
+_Q_OUT = Decimal("1E-6")   # output grid (target units)
+
+
+def _normalize_unit_token(u: str | None) -> str | None:
+    if not u:
+        return None
+    u = u.lower().strip().replace('"', "in").replace("''", "in").replace("“", "in").replace("”", "in")
+    if u in ("inch", "inches"):
+        return "in"
+    if u in ("pixel", "pixels"):
+        return "px"
+    return u
+
+
+def _parse_unit_maybe_at(unit_blob: str | None) -> tuple[Optional[str], Optional[int]]:
+    if not unit_blob:
+        return None, None
+    m = UNIT_ONLY_RE.fullmatch(unit_blob)
+    if not m:
+        raise ValueError(f"Invalid unit token: {unit_blob!r}")
+    unit_tok, dpi_str = m.groups()
+    unit = _normalize_unit_token(unit_tok)
+    dpi = int(dpi_str) if dpi_str is not None else None
+    if dpi is not None and dpi <= 0:
+        raise ValueError(f"DPI must be > 0, got {dpi}")
+    return unit, dpi
+
+
 class UnitStr:
     """
-    Stores any dimension *internally* in inches, based on a given DPI.
+    Physically-correct scalar dimension stored internally as **Decimal inches**.
 
-    The constructor logic for determining the input unit is as follows:
-    1. If `raw` is a string with a unit (e.g., "1.5in"), that unit is used.
-    2. If `raw` is a number (e.g., 1.5) or a string without a unit, the
-       `unit` parameter is used.
-    3. If `raw` is a UnitStr, return the UnitStr with value converted for this dpi.
-    3. If the `unit` parameter is also not provided, it defaults to 'px'.
+    Supports 'px@<dpi>' in raw and/or unit.
+
+    Rule (requested): If raw has 'px@src' and unit is 'px@tgt' and no explicit dpi=,
+                      interpret src as source DPI and tgt as target DPI (object's working DPI).
     """
-    __items__ = ("_raw", "_value", "_unit", "_dpi", "_cache")
-    value: float
-    unit: str
-    dpi: float
- 
+    __slots__ = ("_raw", "_value", "_unit", "_dpi", "_cache")
+
     def __init__(
         self,
         raw: Union[str, float, int, Decimal, "UnitStr"],
         unit: Optional[str] = None,
         *,
-        dpi: int = 300,
+        dpi: Optional[int] = None,
     ):
-        """
-        Create a new UnitStr.
-
-        Args:
-            raw: The value, either as a string ("1in", "100") or number.
-            unit: The unit for `raw` if it's a number or a unitless string.
-                  If not provided, defaults to 'px'.
-            dpi: The dots-per-inch resolution for 'px' conversion.
-        """
         self._raw = str(raw)
-        self._dpi = dpi
-        self._cache = {}
-        # all values are stored in physical units. px values are immediately
-        # converted to interntal_unit, which is `in`
+        explicit_dpi = int(dpi) if dpi is not None else None
+        self._cache: dict[tuple[str, int], float] = {}
+
         internal_unit = "in"
 
+        # Clone
         if isinstance(raw, UnitStr):
-            self._raw = raw._raw
+            self._raw   = raw._raw
             self._value = raw._value
-            self._unit = internal_unit
-            self._dpi = dpi  # Allow overriding DPI on clone
+            self._unit  = internal_unit
+            self._dpi   = explicit_dpi if explicit_dpi is not None else raw._dpi
             return
 
-        val_decimal: Decimal
-        input_unit: Optional[str] = None
+        # Parse raw
+        input_val: Decimal
+        raw_unit: Optional[str] = None
+        raw_dpi_from_at: Optional[int] = None
 
         if isinstance(raw, str):
-            m = UNIT_RE.fullmatch(raw.strip())
+            m = NUM_UNIT_RE.fullmatch(raw.strip())
             if not m:
                 raise ValueError(f"Invalid dimension string: {raw!r}")
-            value_str, unit_from_str = m.groups()
-            val_decimal = Decimal(value_str)
-            if unit_from_str:
-                input_unit = unit_from_str.lower().replace('"', "in")
+            value_str, unit_blob, dpi_at_str = m.groups()
+            input_val = Decimal(value_str)
+            if unit_blob:
+                raw_unit, raw_dpi_from_at = _parse_unit_maybe_at(unit_blob)
+            if dpi_at_str is not None:
+                raw_dpi_from_at = int(dpi_at_str)
+                if raw_dpi_from_at <= 0:
+                    raise ValueError(f"DPI must be > 0, got {raw_dpi_from_at}")
         elif isinstance(raw, (int, float, Decimal)):
-            val_decimal = Decimal(str(raw))
+            input_val = Decimal(str(raw))
         else:
             raise TypeError(f"Unsupported type for UnitStr: {type(raw)}")
 
-        # If unit wasn't in the string, use the `unit` param, or default to 'px'.
-        if input_unit is None:
-            input_unit = (unit or "px").lower().replace('"', "in")
+        # Parse unit param (may also include @dpi)
+        param_unit: Optional[str] = None
+        param_dpi_from_at: Optional[int] = None
+        if unit is not None:
+            param_unit, param_dpi_from_at = _parse_unit_maybe_at(unit)
 
-        if input_unit == "px":
-            self._value = self._px_to_physical(val_decimal, internal_unit, self._dpi)
-        elif input_unit in UNITS_TO_INCHES:
-            self._value = self._convert_between_phys(val_decimal, input_unit, internal_unit)
+        # Resolve final unit: raw unit (if present) else param unit else 'px'
+        final_unit = _normalize_unit_token(raw_unit) or _normalize_unit_token(param_unit) or "px"
+
+        # Classify DPIs into source vs target per the new rule
+        source_dpi: Optional[int] = None
+        target_dpi_candidate: Optional[int] = None
+
+        # Source from raw if raw is px@src
+        if raw_dpi_from_at is not None and (raw_unit == "px"):
+            source_dpi = raw_dpi_from_at
+
+        # If raw provided a source dpi and unit is 'px@tgt' and no explicit dpi given,
+        # treat unit's @dpi as TARGET DPI.
+        if (source_dpi is not None and
+            param_unit == "px" and
+            param_dpi_from_at is not None and
+            explicit_dpi is None):
+            target_dpi_candidate = param_dpi_from_at
         else:
-            raise ValueError(f"Unsupported unit: {input_unit}")
+            # Otherwise, any @dpi on the unit is a SOURCE hint
+            if param_unit == "px" and param_dpi_from_at is not None:
+                # If we already had a source_dpi from raw and it's different, it's ambiguous
+                if source_dpi is not None and source_dpi != param_dpi_from_at:
+                    raise ValueError(
+                        f"Conflicting source DPIs: raw@{source_dpi} vs unit@{param_dpi_from_at}"
+                    )
+                source_dpi = source_dpi or param_dpi_from_at
+
+        # Determine target DPI
+        if explicit_dpi is not None:
+            # explicit dpi wins as TARGET; if we also derived a target_dpi_candidate, ensure agreement
+            if target_dpi_candidate is not None and target_dpi_candidate != explicit_dpi:
+                raise ValueError(
+                    f"Conflicting target DPIs: unit@{target_dpi_candidate} vs dpi={explicit_dpi}"
+                )
+            target_dpi = explicit_dpi
+            if target_dpi <= 0:
+                raise ValueError(f"DPI must be > 0, got {target_dpi}")
+        elif target_dpi_candidate is not None:
+            target_dpi = target_dpi_candidate
+        elif source_dpi is not None:
+            target_dpi = source_dpi
+        else:
+            target_dpi = 300
+
+        # Convert to internal inches
+        if final_unit == "px":
+            px_dpi_for_input = source_dpi if source_dpi is not None else target_dpi
+            self._value = (input_val / Decimal(px_dpi_for_input)).quantize(_Q_IN)
+        elif final_unit in UNITS_TO_INCHES:
+            self._value = (input_val * UNITS_TO_INCHES[final_unit]).quantize(_Q_IN)
+        else:
+            raise ValueError(f"Unsupported unit: {final_unit!r}")
 
         self._unit = internal_unit
+        self._dpi  = target_dpi
 
+    # --------- convenience constructors
     @classmethod
     def from_px(cls, px: Union[int, float, Decimal], *, dpi: int = 300) -> "UnitStr":
-        """Convenience constructor to create a UnitStr from a pixel value."""
         return cls(raw=px, unit="px", dpi=dpi)
 
+    # --------- properties
     @property
     def dpi(self) -> int:
         return self._dpi
 
     @property
     def value(self) -> Decimal:
-        """Numeric value in the internal physical unit (inches)."""
-        return self._value
+        return self._value  # inches
 
     @property
     def unit(self) -> str:
-        """The internal storage unit (always inches)."""
-        return self._unit
+        return self._unit   # 'in'
 
     # convenience aliases
     @property
@@ -124,206 +203,133 @@ class UnitStr:
     @property
     def mm(self)   -> float: return self.to("mm")
     @property
+    def cm(self)   -> float: return self.to("cm")
+    @property
     def pt(self)   -> float: return self.to("pt")
     @property
     def px(self)   -> float: return self.to("px")
 
-    def to(self, target: str, dpi: int | None = None) -> float:
-        """
-        Convert to target unit. Pixel conversion needs a valid dpi
-        (defaults to the one supplied at construction).
-        """
-        dpi = dpi or self._dpi
-        target = target.lower().replace('"', "in")
+    # --------- conversion
+    def to(self, target: str, dpi: Optional[int] = None) -> float:
+        target_unit, dpi_from_unit = _parse_unit_maybe_at(target)
+        target = target_unit or "in"
+        dpi_from_call = int(dpi) if dpi is not None else None
 
-        key = (target, dpi)
+        if target == "px":
+            effective_dpi = (
+                dpi_from_call
+                if dpi_from_call is not None
+                else (dpi_from_unit if dpi_from_unit is not None else self._dpi)
+            )
+            if effective_dpi <= 0:
+                raise ValueError("DPI must be > 0 for pixel conversion")
+        else:
+            effective_dpi = self._dpi
+
+        key = (target, effective_dpi)
         if key in self._cache:
             return self._cache[key]
 
         if target == "px":
-            if dpi <= 0:
-                raise ValueError("DPI must be > 0 for pixel conversion")
-            result = float((self._value * dpi).quantize(Decimal("1E-6")))
+            out = (self._value * Decimal(effective_dpi)).quantize(_Q_OUT)
         elif target in INCHES_TO_UNITS:
-            result = float((self._value * INCHES_TO_UNITS[target]).quantize(Decimal("1E-6")))
+            out = (self._value * INCHES_TO_UNITS[target]).quantize(_Q_OUT)
         else:
-            raise ValueError(f"Cannot convert to unsupported unit: {target}")
+            raise ValueError(f"Cannot convert to unsupported unit: {target!r}")
 
-        self._cache[key] = result
-        return result
+        f = float(out)
+        self._cache[key] = f
+        return f
 
     def fmt(self, fmt: str = "g", unit: str | None = None, dpi: int | None = None) -> str:
-        """Return a formatted string (fmt) in unit (default self.unit), using given DPI for px."""
-        unit = (unit or self.unit).lower().replace('"', "in")
-        val = self.to(unit, dpi=dpi or self._dpi)
-        return f"{format(val, fmt)} {unit}"
+        u_blob = unit or self.unit
+        val = self.to(u_blob, dpi=dpi)
+        u, _ = _parse_unit_maybe_at(u_blob)
+        u = u or "in"
+        return f"{format(val, fmt)} {u}"
 
     @property
     def round(self) -> "UnitStr":
-        """Returns a new UnitStr rounded to a human-friendly increment for its native unit."""
         inc = ROUNDING_INCREMENT.get(self.unit, Decimal("0.01"))
-        # Round the value in its native unit (inches)
-        value_in_unit = self.value
-        rounded_val = round(value_in_unit / inc) * inc
-        return UnitStr(f"{rounded_val} {self.unit}", dpi=self._dpi)
+        rounded_in = (self.value / inc).to_integral_value(rounding=ROUND_HALF_UP) * inc
+        return UnitStr(f"{rounded_in} in", dpi=self._dpi)
 
-    # def to_dict(self) -> dict:
-    #     # only persist the semantic bits
-    #     return {
-    #         "value": self.value,
-    #         "unit":  self.unit,
-    #     }
-
-    # @classmethod
-    # def from_dict(cls, data: dict) -> "UnitStr":
-    #     # re-attach the current DPI (or pass it in from context)
-    #     return cls(
-    #         value=data["value"],
-    #         unit=data["unit"],
-    #     )
     def to_dict(self) -> dict:
-        """JSON-friendly dump of the value in all supported units."""
-        data = {u: self.to(u) for u in ("in", "mm", "cm", "pt", "px")}
-        return data
+        return {u: self.to(u) for u in ("in", "mm", "cm", "pt", "px")}
 
     @classmethod
-    def from_dict(
-        cls,
-        data: dict,
-        *,
-        unit: str = "in",
-        dpi: int = 300,
-    ) -> "UnitStr":
-        """Rebuild a UnitStr from a dictionary, preferring physical units."""
-        unit = unit.lower().replace('"', "in")
-
-        if unit in data:
-            return cls(f"{data[unit]} {unit}", dpi=dpi)
-
-        for u in ("in", "mm", "cm", "pt"):
-            if u in data:
-                return cls(f"{data[u]} {u}", dpi=dpi)
-
+    def from_dict(cls, data: dict, *, unit: str = "in", dpi: int = 300) -> "UnitStr":
+        u, u_dpi = _parse_unit_maybe_at(unit)
+        u = u or "in"
+        if u in data:
+            if u == "px" and u_dpi is not None:
+                return cls(f"{data[u]} px@{u_dpi}", dpi=dpi)
+            return cls(f"{data[u]} {u}", dpi=dpi)
+        for alt in ("in", "mm", "cm", "pt"):
+            if alt in data:
+                return cls(f"{data[alt]} {alt}", dpi=dpi)
         if "px" in data:
             return cls(data["px"], unit="px", dpi=dpi)
-
         raise ValueError("UnitStr.from_dict: no recognised unit found in data")
 
+    # --------- arithmetic in inches
+    def _as_decimal_inches(self) -> Decimal:
+        return self._value
+
+    def __add__(self, other):
+        if isinstance(other, UnitStr):
+            return UnitStr(f"{(self._as_decimal_inches() + other._as_decimal_inches()).quantize(_Q_IN)} in", dpi=self._dpi)
+        if isinstance(other, (int, float, Decimal)):
+            return UnitStr(f"{(self._as_decimal_inches() + Decimal(str(other))).quantize(_Q_IN)} in", dpi=self._dpi)
+        return NotImplemented
+
+    def __radd__(self, other): return self.__add__(other)
+
+    def __sub__(self, other):
+        if isinstance(other, UnitStr):
+            return UnitStr(f"{(self._as_decimal_inches() - other._as_decimal_inches()).quantize(_Q_IN)} in", dpi=self._dpi)
+        if isinstance(other, (int, float, Decimal)):
+            return UnitStr(f"{(self._as_decimal_inches() - Decimal(str(other))).quantize(_Q_IN)} in", dpi=self._dpi)
+        return NotImplemented
+
+    def __rsub__(self, other):
+        if isinstance(other, (int, float, Decimal)):
+            return UnitStr(f"{(Decimal(str(other)) - self._as_decimal_inches()).quantize(_Q_IN)} in", dpi=self._dpi)
+        return NotImplemented
+
+    def __mul__(self, other):
+        if isinstance(other, (int, float, Decimal)):
+            return UnitStr(f"{(self._as_decimal_inches() * Decimal(str(other))).quantize(_Q_IN)} in", dpi=self._dpi)
+        if isinstance(other, UnitStr):
+            return (self._as_decimal_inches() * other._as_decimal_inches())  # sq in (Decimal)
+        return NotImplemented
+
+    def __rmul__(self, other):
+        if isinstance(other, (int, float, Decimal)):
+            return UnitStr(f"{(Decimal(str(other)) * self._as_decimal_inches()).quantize(_Q_IN)} in", dpi=self._dpi)
+        return NotImplemented
+
+    # --------- comparisons with tolerance
+    def _cmp_key(self) -> Decimal:
+        return self._as_decimal_inches().quantize(_Q_IN)
+
+    def __eq__(self, other) -> bool:
+        if isinstance(other, UnitStr):
+            return (self._cmp_key() - other._cmp_key()).copy_abs() <= _Q_IN
+        if isinstance(other, (int, float, Decimal)):
+            return (self._cmp_key() - Decimal(str(other))).copy_abs() <= _Q_IN
+        return NotImplemented
+
+    def __lt__(self, other) -> bool:
+        if isinstance(other, UnitStr):
+            return self._cmp_key() < other._cmp_key() - _Q_IN
+        if isinstance(other, (int, float, Decimal)):
+            return self._cmp_key() < Decimal(str(other)) - _Q_IN
+        return NotImplemented
+
+    # --------- debug
     def __str__(self) -> str:
         return self.fmt(unit="in")
 
     def __repr__(self) -> str:
         return f"UnitStr('{self._raw}', dpi={self._dpi}) -> {self.value.normalize()}in"
-
-    @staticmethod
-    def _px_to_physical(px: Decimal, phys_unit: str, dpi: int) -> Decimal:
-        if dpi <= 0:
-            raise ValueError("DPI must be > 0 when converting from px")
-        inches = px / Decimal(dpi)
-        if phys_unit == "in":
-            return inches
-        return (inches * INCHES_TO_UNITS[phys_unit]).quantize(Decimal("1E-6"), rounding=ROUND_HALF_UP)
-
-    @staticmethod
-    def _convert_between_phys(val: Decimal, from_u: str, to_u: str) -> Decimal:
-        if from_u == to_u:
-            return val
-        inches = val * UNITS_TO_INCHES[from_u]
-        if to_u == "in":
-            return inches
-        return (inches * INCHES_TO_UNITS[to_u]).quantize(Decimal("1E-6"), rounding=ROUND_HALF_UP)
-
-    # --- arithmetic -------------------------------------------------
-    def _as_decimal_inches(self) -> Decimal:
-        """Internal helper: value as Decimal inches."""
-        return self._value  # already Decimal inches
-
-    def __add__(self, other):
-        """
-        Add lengths.
-
-        UnitStr + UnitStr -> UnitStr (inches)
-        UnitStr + (int|float|Decimal) -> UnitStr  [number interpreted as inches]
-        """
-        if isinstance(other, UnitStr):
-            total_in = self._as_decimal_inches() + other._as_decimal_inches()
-            return UnitStr(f"{total_in} in", dpi=self._dpi)
-        elif isinstance(other, (int, float, Decimal)):
-            total_in = self._as_decimal_inches() + Decimal(str(other))
-            return UnitStr(f"{total_in} in", dpi=self._dpi)
-        return NotImplemented
-
-    def __radd__(self, other):
-        # support (number + UnitStr)
-        if isinstance(other, (int, float, Decimal)):
-            total_in = Decimal(str(other)) + self._as_decimal_inches()
-            return UnitStr(f"{total_in} in", dpi=self._dpi)
-        return NotImplemented
-
-    def __mul__(self, other):
-        """
-        Multiply lengths or scale.
-
-        UnitStr * (int|float|Decimal) -> UnitStr  [scales length]
-        UnitStr * UnitStr -> Decimal               [area in square inches]
-        """
-        if isinstance(other, (int, float, Decimal)):
-            scaled_in = (self._as_decimal_inches() * Decimal(str(other)))
-            return UnitStr(f"{scaled_in} in", dpi=self._dpi)
-        if isinstance(other, UnitStr):
-            # return area (square inches) as Decimal
-            return (self._as_decimal_inches() * other._as_decimal_inches())
-        return NotImplemented
-
-    def __rmul__(self, other):
-        # support (number * UnitStr)
-        if isinstance(other, (float, Decimal)):
-            inch_val = Decimal(str(other)) * self._as_decimal_inches()
-        if isinstance(other, int):
-            inch_val = other * self.value
-        return UnitStr(f"{inch_val} in", dpi=self._dpi)
-        return NotImplemented
-
-    def __sub__(self, other):
-        """
-        Subtract lengths.
-
-        UnitStr - UnitStr -> UnitStr (inches)
-        UnitStr - (int|float|Decimal) -> UnitStr  [number interpreted as inches]
-        """
-        if isinstance(other, UnitStr):
-            diff_in = self._as_decimal_inches() - other._as_decimal_inches()
-            return UnitStr(f"{diff_in} in", dpi=self._dpi)
-        elif isinstance(other, (int, float, Decimal)):
-            diff_in = self._as_decimal_inches() - Decimal(str(other))
-            return UnitStr(f"{diff_in} in", dpi=self._dpi)
-        return NotImplemented
-
-    def __rsub__(self, other):
-        if isinstance(other, (int, float, Decimal)):
-            diff_in = Decimal(str(other)) - self._as_decimal_inches()
-            return UnitStr(f"{diff_in} in", dpi=self._dpi)
-        return NotImplemented
-
-
-def unitstr_from_raw(raw, dpi):
-    UNIT_RE = re.compile(r"^\s*(-?[0-9]+(?:\.[0-9]+)?)\s*([a-zA-Z]+)?\s*$")
-    value: str = ""
-    unit: str = ""
-    if isinstance(raw, str):
-        m = UNIT_RE.fullmatch(raw.strip())
-        if not m:
-            raise ValueError(f"Invalid dimension string: {raw!r}")
-        value, unit = m.groups()
-        unit = unit if unit else "px"
-    elif isinstance(raw, (float, int, Decimal)):
-        value = raw
-        unit = "px"
-    elif isinstance(raw, UnitStr):
-        value = raw.value
-        unit = raw.unit
-        return UnitStr(value, unit=unit, dpi=dpi)
-    else:
-        raise TypeError(f"raw must be str, int, or float, Decimal, UnitStr not {type(raw)}")
-
-    return UnitStr(value, unit=unit, dpi=dpi)

@@ -3,7 +3,7 @@ from typing import List, Dict, Tuple
 from PySide6.QtCore import QRectF, QPointF
 from PySide6.QtGui import QPageSize
 
-from prototypyside.utils.units.unit_str import UnitStr
+from prototypyside.services.proto_class import ProtoClass
 
 UNITS_TO_INCHES = {
     "in": 1.0,
@@ -204,7 +204,7 @@ def convert_px_dpi(px_value, old_dpi, new_dpi):
 
 def pos_to_unit_str(scene_pos: QPointF, unit: str = None, dpi: int = None):
     """
-    Convert a scene position (px) to (x, y) UnitStrs in the desired unit and dpi.
+    Convert a scene position (px) to (x, y) ProtoClass.USs in the desired unit and dpi.
     If unit or dpi is not provided, uses self.tab.settings.
     """
     unit = unit
@@ -230,8 +230,8 @@ def pos_to_unit_str(scene_pos: QPointF, unit: str = None, dpi: int = None):
         logical_y = y_px / dpi
 
     return (
-        UnitStr(logical_x, unit=unit, dpi=dpi),
-        UnitStr(logical_y, unit=unit, dpi=dpi)
+        ProtoClass.US.new(logical_x, unit=unit, dpi=dpi),
+        ProtoClass.US.new(logical_y, unit=unit, dpi=dpi)
     )
 
 def px_to_physical(px_value, target_unit, dpi):

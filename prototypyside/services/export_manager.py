@@ -11,9 +11,9 @@ from prototypyside.models.layout_slot import LayoutSlot
 from prototypyside.models.component_template import ComponentTemplate
 from prototypyside.models.text_element import TextElement
 from prototypyside.models.vector_element import VectorElement
-from prototypyside.utils.units.unit_str import UnitStr, unitstr_from_raw
+from prototypyside.utils.units.unit_str import UnitStr #, unitstr_from_raw
 from prototypyside.utils.units.unit_str_geometry import UnitStrGeometry
-from prototypyside.utils.proto_helpers import resolve_pid
+# from prototypyside.services.pagination.page_manager import PageManager
 from PySide6.QtCore import Qt, QSizeF, QRectF, QMarginsF, QPointF
 
 
@@ -26,31 +26,36 @@ class ExportManager:
         self.settings.print_dpi = 300
         self.registry = registry
         self.merge_manager = merge_manager
-
+      
     def paginate(self, layout, copies=1):
         registry = self.registry
         print(f"Export registry is set to {registry}")
         pages = []
         tpid = layout.content
-        template = registry.global_get(tpid)
+        slot_content = [slot.content for slot in layout.items]
+        slots_n = len(layout.items)
 
+        template = registry.global_get(tpid)
+        csv_paths = list(template.csv_path) if template and template.csv_path else []
         layout.updateGrid()
 
-        slots_n = len(layout.slots)
+
         page_count = copies
         rows = []
-
-        if template.csv_path:
-            csv_data = self.merge_manager.load_csv(template.csv_path, template)
-            rows = csv_data.rows
-            print(f'There are {csv_data.count} rows: {rows}')
+        for each in slot_content:
+            path = each.csv_path
+            if path:
+                csv_data = self.merge_manager.load_csv(template.csv_path, template)
+                rows = csv_data.rows
+                print(f'There are {csv_data.count} rows: {rows}')
+            rows = 0
             page_count = ceil(max(len(rows), 1) / slots_n) * copies
 
         for _ in range(page_count):
             page = registry.clone(layout)
             pages.append(page)
 
-        all_slots = [slot for page in pages for slot in page.slots]
+        all_slots = [slot for page in pages for slot in page.items]
 
         if rows:
             validation = csv_data.validate_headers(template)
@@ -68,7 +73,7 @@ class ExportManager:
                 if not comp_inst:
                     continue
                 print(f"{comp_inst.pid} elements: {[el.name for el in comp_inst.items]}")
-
+                comp_inst.set_print_mode = True
                 # export_manager.py
                 for el in comp_inst.items:
                     name = getattr(el, "name", "") and name.startswith("@")
@@ -178,8 +183,8 @@ class ExportManager:
                     if qc is not None:
                         setattr(comp_inst, attr, qc)
 
-                elif attr == "border_width":
-                    setattr(comp_inst, "border_width", unitstr_from_raw(attr, dpi=dpi))
+                # elif attr == "border_width":
+                #     setattr(comp_inst, "border_width", unitstr_from_raw(attr, dpi=dpi))
 
             # --- (B) bind CSV-driven element content ------------------------------
             for el in getattr(comp_inst, "items", []):
@@ -192,7 +197,7 @@ class ExportManager:
             slot_geometry = comp_inst.geometry if not comp_inst.include_bleed else comp_inst.bleed_rect
 
             slot = LayoutSlot(
-                pid=resolve_pid('ls'),
+                pid=('ls'),
                 geometry=slot_geometry,
                 registry=self.registry
             )
@@ -200,6 +205,8 @@ class ExportManager:
             scene = QGraphicsScene()
             scene.addItem(slot)
             slot.content = comp_inst
+            comp_inst.set_print_mode = True        # turn off element outlines
+            slot.set_print_mode = True             # belt-and-suspenders + invalidate cache
             slot.dpi = dpi
 
             image = slot.image
@@ -233,7 +240,7 @@ class ExportManager:
     #                 el.content = val
     #         # We're not going to register the slot.
     #         slot = LayoutSlot(
-    #                 pid=resolve_pid('ls'),
+    #                 pid=('ls'),
     #                 geometry=template.geometry, 
     #                 registry=self.registry)
 
@@ -317,7 +324,7 @@ class ExportManager:
                 writer.newPage()
 
             page.dpi = self.settings.print_dpi
-            for slot in page.slots:
+            for slot in page.items:
                 slot.render_text = False
                 slot.render_vector = False
 
@@ -333,7 +340,7 @@ class ExportManager:
             target_rect = QRectF(0, 0, page_size_pt.width(), page_size_pt.height())
             painter.drawImage(target_rect, img)
 
-            for slot in page.slots:
+            for slot in page.items:
                 if not slot.content:
                     continue
                 slot_pos_px = slot.geometry.to("px", dpi=self.settings.print_dpi).pos
@@ -350,7 +357,7 @@ class ExportManager:
                     if isinstance(item, (TextElement, VectorElement)):
                         painter.save()
                         painter.setTransform(item.sceneTransform(), True)  # compose with current page/slot transform
-                        painter.setClipRect(item.boundingRect())
+                        painter.setClipRect(template.boundingRect())
                         item.paint(painter, option, widget=None)
                         painter.restore()
                 painter.restore()

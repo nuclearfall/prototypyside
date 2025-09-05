@@ -7,7 +7,7 @@ from prototypyside.widgets.unit_str_field import UnitStrField
 from prototypyside.config import PAGE_SIZES
 from prototypyside.utils.unit_converter import to_px
 from prototypyside.config import DISPLAY_MODE_FLAGS
-from prototypyside.services.pagination.page_manager import PageManager, PRINT_POLICIES
+from prototypyside.services.pagination.page_manager import PRINT_POLICIES
 
 
 class LayoutToolbar(QWidget):
@@ -25,16 +25,15 @@ class LayoutToolbar(QWidget):
     margin_changed = Signal(str, int)
     spacing_changed = Signal(str, int)
     autofill_changed = Signal(bool)
-    display_flag_changed = Signal(object)
+    display_mode_changed = Signal(object)
     pagination_policy_changed = Signal(object)
-    number_of_copies = Signal(int)
     orientation_property_change = Signal(str, bool, bool)
 
     def __init__(self, settings, parent=None):
         super().__init__(parent)
         self.settings = settings
         layout = QHBoxLayout(self)
-        layout.setContentsMargins(6, 6, 6, 6)
+        layout.setContentsMargins(0, 0, 0, 0)
         layout.setSpacing(10)
 
         # --- Page Size ---
@@ -105,9 +104,9 @@ class LayoutToolbar(QWidget):
         self.page_size_changed.emit(key)
 
     @Slot(object)
-    def _on_display_flag_changed(self, flag_key):
-        flag = DISPLAY_MODE_FLAGS.get(display_flag).get("aspect")
-        self.display_flag_changed.emit(flag)
+    def _on_display_mode_changed(self, flag_key):
+        flag = DISPLAY_MODE_FLAGS.get(display_mode).get("aspect")
+        self.display_mode_changed.emit(flag)
 
     def apply_template(self, template):
         """

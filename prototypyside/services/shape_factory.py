@@ -11,7 +11,7 @@ class ShapeFactory:
     Factory for generating QPainterPath shapes from a bounding QRectF.
     """
     @staticmethod
-    def rect(rect: QRectF) -> QPainterPath:
+    def rect(rect: QRectF, extra=None) -> QPainterPath:
         path = QPainterPath()
         path.addRect(rect)
         return path
@@ -19,11 +19,11 @@ class ShapeFactory:
     @staticmethod
     def rounded_rect(rect: QRectF, radius: float) -> QPainterPath:
         path = QPainterPath()
-        path.addRoundedRect(rect, radius, radius)
+        path.addRoundedRect(rect, radius, radius)  # x & y
         return path
 
     @staticmethod
-    def circle(rect: QRectF) -> QPainterPath:
+    def circle(rect: QRectF, extra=None) -> QPainterPath:
         path = QPainterPath()
         center = rect.center()
         radius = min(rect.width(), rect.height()) / 2.0
@@ -46,7 +46,6 @@ class ShapeFactory:
                 path.lineTo(x, y)
         path.closeSubpath()
         return path
-
-    @staticmethod
-    def hexagon(rect: QRectF) -> QPainterPath:
-        return TemplateShapeFactory.polygon(rect, 6)
+            
+    def hexagon(rect: QRectF, extra=None) -> QPainterPath:
+        return ShapeFactory.polygon(rect, 6)

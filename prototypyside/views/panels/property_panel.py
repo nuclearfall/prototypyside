@@ -11,14 +11,12 @@ from typing import Optional, Any
 from prototypyside.widgets.unit_str_field import UnitStrField
 from prototypyside.widgets.unit_str_geometry_field import UnitStrGeometryField
 from prototypyside.utils.units.unit_str_geometry import UnitStrGeometry
-from prototypyside.models.component_element import ComponentElement
+from prototypyside.models.text_element import TextElement
 from prototypyside.models.image_element import ImageElement
 from prototypyside.models.vector_element import VectorElement
-from prototypyside.models.text_element import TextElement
-# from prototypyside.views.toolbars.font_toolbar import FontToolbar
 from prototypyside.widgets.color_picker import ColorPickerWidget
 from prototypyside.widgets.rotation_field import RotationField
-
+from prototypyside.views.toolbars.font_toolbar import FontToolbar
 
 
 class FocusLineEdit(QLineEdit):
@@ -124,22 +122,12 @@ class PropertyPanel(QWidget):
         self.color_picker = ColorPickerWidget()
         self.bg_color_picker = ColorPickerWidget()
         self.border_color_picker = ColorPickerWidget()
-        self.border_width_field = UnitStrField(property_name="border_width", display_unit=display_unit)
-        
-        # Alignment ComboBox
-        self.alignment_map = {
-            "Top Left": Qt.AlignTop | Qt.AlignLeft, "Top Center": Qt.AlignTop | Qt.AlignHCenter,
-            "Top Right": Qt.AlignTop | Qt.AlignRight, "Center Left": Qt.AlignVCenter | Qt.AlignLeft,
-            "Center": Qt.AlignCenter, "Center Right": Qt.AlignVCenter | Qt.AlignRight,
-            "Bottom Left": Qt.AlignBottom | Qt.AlignLeft, "Bottom Center": Qt.AlignBottom | Qt.AlignHCenter,
-            "Bottom Right": Qt.AlignBottom | Qt.AlignRight,
-        }
-        self.alignment_combo = QComboBox()
-        self.alignment_combo.addItems(self.alignment_map.keys())
-        self.alignment_rev_map = {v: k for k, v in self.alignment_map.items()}
+        self.border_width_field = UnitStrField(property_name="border_width", display_unit=display_unit, dpi=self.dpi)
+        self.corner_radius_field = UnitStrField(property_name="corner_radius", display_unit=display_unit, dpi=self.dpi)     
+        self.font_toolbar = FontToolbar()
 
         # Conditional widgets
-        #self.font_toolbar = FontToolbar()
+
         self.keep_aspect_checkbox = QCheckBox("Keep Aspect Ratio")
 
         # Add widgets to layout
@@ -151,8 +139,8 @@ class PropertyPanel(QWidget):
         self.form_layout.addRow("Background Color:", self.bg_color_picker)
         self.form_layout.addRow("Border Color:", self.border_color_picker)
         self.form_layout.addRow("Border Width:", self.border_width_field)
-        self.form_layout.addRow("Alignment:", self.alignment_combo)
-        #self.form_layout.addRow(self.font_toolbar)
+        self.form_layout.addRow("Corner Radius", self.corner_radius_field)
+        self.form_layout.addRow(self.font_toolbar)
         self.form_layout.addRow(self.keep_aspect_checkbox)
 
         # Connect signals
@@ -172,10 +160,13 @@ class PropertyPanel(QWidget):
         self.bg_color_picker.color_changed.connect(lambda c: self._handle_property_change("bg_color", c))
         self.border_color_picker.color_changed.connect(lambda c: self._handle_property_change("border_color", c))
         self.border_width_field.valueChanged.connect(self.property_changed.emit)
-        self.alignment_combo.currentIndexChanged.connect(self._on_alignment_changed)
+        self.corner_radius_field.valueChanged.connect(self.property_changed.emit)
         self.keep_aspect_checkbox.toggled.connect(lambda t: self._handle_property_change("keep_aspect", t))
+        self.font_toolbar.fontChanged.connect(self.property_changed.emit)
+        self.font_toolbar.hAlignChanged.connect(self.property_changed.emit)
+        self.font_toolbar.vAlignChanged.connect(self.property_changed.emit)
 
-    def set_target(self, item: Optional[ComponentElement]):
+    def set_target(self, item: Optional[object]):
         self.target_item = item
         if not item:
             self.clear_target()
@@ -192,16 +183,14 @@ class PropertyPanel(QWidget):
         self.bg_color_picker.set_color(item.bg_color)
         self.border_color_picker.set_color(item.border_color)
         self.border_width_field.setTarget(item, "border_width", display_unit=self._display_unit)
-        
-        alignment_text = self.alignment_rev_map.get(item.alignment, "Center")
-        self.alignment_combo.setCurrentText(alignment_text)
+        self.corner_radius_field.setTarget(item, "corner_radius", display_unit=self._display_unit)
 
         current_rot = getattr(item, "rotation", 0.0) or 0.0
         self.rotation_field.setAngle(float(current_rot), emit_signal=False)
         # Handle conditional widgets
-        # self.font_toolbar.setVisible(hasattr(item, 'font'))
-        # if hasattr(item, 'font'):
-        #     self.font_toolbar.setTarget(item)
+        self.font_toolbar.setVisible(hasattr(item, 'font'))
+        if hasattr(item, 'font'):
+            self.font_toolbar.setTarget(item)
 
         self.keep_aspect_checkbox.setVisible(hasattr(item, 'keep_aspect'))
         if hasattr(item, 'keep_aspect'):
@@ -264,14 +253,10 @@ class PropertyPanel(QWidget):
         self.border_color_picker.set_color(el.border_color)
         self.border_width_field.setTarget(el, "border_width", display_unit=self._display_unit)
 
-        # alignment
-        text = self.alignment_rev_map.get(el.alignment, "Center")
-        self.alignment_combo.setCurrentText(text)
-
         # font toolbar
-        # self.font_toolbar.setVisible(hasattr(el, "font"))
-        # if hasattr(el, "font"):
-        #     self.font_toolbar.setTarget(el)
+        self.font_toolbar.setVisible(hasattr(el, "font"))
+        if hasattr(el, "font"):
+            self.font_toolbar.setTarget(el)
 
         # aspect checkbox
         self.keep_aspect_checkbox.setVisible(hasattr(el, "keep_aspect"))

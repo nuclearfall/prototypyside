@@ -1,10 +1,167 @@
 # prototypyside/utils/qt_helpers.py
+from __future__ import annotations
+from collections import deque
+import importlib
+
+from typing import List, Tuple, Iterable, Type, Union, Dict, Any, Optional
 
 from PySide6.QtCore import Qt, QRectF
 from PySide6.QtGui import QColor, QFont, QPainter
-from typing import List, Dict, Any
 from PySide6.QtGui import QPainter
+from PySide6.QtWidgets import QWidget
 
+from prototypyside.services.proto_class import ProtoClass
+
+def _resolve_types(
+    specs: Optional[Iterable[object]],
+    defaults: Iterable[str],
+) -> Tuple[Tuple[type, ...], Tuple[str, ...]]:
+    """
+    Normalize an iterable of specs (types or strings) into:
+      - a tuple of resolved types
+      - a tuple of class names (for name-based fallback matching)
+    """
+    types: List[type] = []
+    names: List[str] = []
+
+    # helper to attempt import from dotted path
+    def _import_dotted(path: str) -> Optional[type]:
+        try:
+            if "." not in path:
+                return None
+            mod_path, _, cls_name = path.rpartition(".")
+            mod = importlib.import_module(mod_path)
+            cls = getattr(mod, cls_name, None)
+            return cls if isinstance(cls, type) else None
+        except Exception:
+            return None
+
+    specs = list(specs) if specs is not None else []
+    # If nothing provided, try all defaults
+    if not specs:
+        specs = list(defaults)
+
+    # known modules to probe for short names
+    known_modules = (
+        "prototypyside.widgets.unit_str_field",
+        "prototypyside.widgets.unit_strings_field",
+        "prototypyside.widgets.unit_str_geometry_field",
+    )
+
+    for spec in specs:
+        if isinstance(spec, type):
+            types.append(spec)
+            names.append(spec.__name__)
+            continue
+        if isinstance(spec, str):
+            # First try dotted import
+            t = _import_dotted(spec)
+            if t is None:
+                # Try known modules for short names
+                for mod_name in known_modules:
+                    try:
+                        mod = importlib.import_module(mod_name)
+                        maybe = getattr(mod, spec, None)
+                        if isinstance(maybe, type):
+                            t = maybe
+                            break
+                    except Exception:
+                        pass
+            if isinstance(t, type):
+                types.append(t)
+                names.append(t.__name__)
+            else:
+                # keep short name for fallback name-based match
+                names.append(spec)
+    # dedupe while preserving order
+    seen = set()
+    types = [t for t in types if not (t in seen or seen.add(t))]
+    seen.clear()
+    names = [n for n in names if not (n in seen or seen.add(n))]
+    return tuple(types), tuple(names)
+
+def find_unit_str_like_fields(
+    root: QWidget,
+    max_depth: int = 2,
+    want_types: Optional[Tuple[Type[QWidget], ...]] = None,
+    stop_at: Optional[Tuple[Type[QWidget], ...]] = None,
+) -> List[QWidget]:
+    """
+    Breadth-first search for UnitStr-like widgets below `root` up to `max_depth`.
+
+    Default behavior:
+      - Collects UnitStrField, UnitStringsField, UnitStrGeometryField.
+      - Includes container widgets (UnitStringsField / UnitStrGeometryField) in results,
+        but does NOT descend into them.
+    """
+    default_want = (
+        "prototypyside.widgets.unit_str_field.UnitStrField",
+        "prototypyside.widgets.unit_strings_field.UnitStringsField",
+        "prototypyside.widgets.unit_str_geometry_field.UnitStrGeometryField",
+    )
+    default_stop = (
+        "prototypyside.widgets.unit_strings_field.UnitStringsField",
+        "prototypyside.widgets.unit_str_geometry_field.UnitStrGeometryField",
+    )
+
+    want_types_resolved, want_names = _resolve_types(want_types, default_want)
+    stop_types_resolved, stop_names = _resolve_types(stop_at, default_stop)
+
+    results: List[QWidget] = []
+    seen_ids = set()
+    q = deque([(root, 0)])
+
+    while q:
+        widget, depth = q.popleft()
+
+        # Collect if type matches or name matches (fallback)
+        wtype = type(widget)
+        wname = wtype.__name__
+        if (want_types_resolved and isinstance(widget, want_types_resolved)) or (wname in want_names):
+            wid = id(widget)
+            if wid not in seen_ids:
+                seen_ids.add(wid)
+                results.append(widget)
+
+        # Stop conditions
+        if depth >= max_depth:
+            continue
+        if (stop_types_resolved and isinstance(widget, stop_types_resolved)) or (wname in stop_names):
+            continue  # do not descend into containers by default
+
+        # Recurse into direct QWidget children
+        for child in widget.findChildren(QWidget, options=Qt.FindDirectChildrenOnly):
+            q.append((child, depth + 1))
+
+    return results
+
+
+def debug_print_tree(root: QWidget, max_depth=4):
+    from collections import deque
+    q = deque([(root, 0)])
+    while q:
+        w, d = q.popleft()
+        print("  " * d + f"{d}: {type(w).__name__} | objectName={w.objectName()!r}")
+        if d >= max_depth:
+            continue
+        for c in w.findChildren(QWidget, options=Qt.FindDirectChildrenOnly):
+            q.append((c, d + 1))
+
+def make_point_font(f: QFont, dpi: float, default_pt: float = 12.0) -> QFont:
+    """Return a *point-sized* copy of f. If f was pixel-locked, convert px->pt using passed dpi."""
+    g = QFont(f)
+    ps = g.pointSizeF()
+    if ps is None or ps <= 0:
+        px = g.pixelSize()
+        if px and px > 0 and dpi and dpi > 0:
+            ps = float(px) * 72.0 / float(dpi)
+        else:
+            ps = float(default_pt)
+    # ensure point-sized & NOT pixel-locked
+    g.setPixelSize(0)
+    g.setPointSizeF(ps)
+    return g
+    
 def resolve_painted_font(base_font: QFont, text_dpi: float) -> QFont:
     """
     Returns a copy of base_font scaled to pixels for the target text_dpi.

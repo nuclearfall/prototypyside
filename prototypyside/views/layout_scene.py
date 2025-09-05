@@ -13,7 +13,7 @@ from prototypyside.config import MEASURE_INCREMENT, LIGHTEST_GRAY, DARKEST_GRAY
 
 if TYPE_CHECKING:
     from prototypyside.views.overlays.incremental_grid import IncrementalGrid
-    from prototypyside.models.component_template import ComponentTemplate
+    from prototypyside.models.layout_template import LayoutTemplate
 
 
 class LayoutScene(QGraphicsScene):
@@ -23,24 +23,22 @@ class LayoutScene(QGraphicsScene):
     - Adjusts sceneRect when template changes
     """
     component_dropped = Signal(object, QPointF)
-    selectionChanged = Signal(str)
 
     def __init__(
         self,
         settings,
         *,
         grid: "IncrementalGrid",
-        template: "ComponentTemplate",
+        template: "LayoutTemplate",
         parent=None,
     ):
         super().__init__(parent)
         self.settings     = settings
         self._dpi = self.settings.dpi
         self.template  = template  
-        self.inc_grid = grid       
-        self._preview_mode = False
-        self._pages = []
+        self.inc_grid = grid
         self.sync_scene_rect()
+
     @property     
     def dpi(self):
         return self._dpi
@@ -57,6 +55,7 @@ class LayoutScene(QGraphicsScene):
         self.setSceneRect(r)
         self.inc_grid.prepareGeometryChange()
         self.inc_grid.update()
+        
     @Slot()
     def _on_template_rect_changed(self):
         """Keep scene and grid in sync when the template is resized."""
@@ -64,42 +63,18 @@ class LayoutScene(QGraphicsScene):
         self.inc_grid.prepareGeometryChange()
         self.inc_grid.update()
 
-
     # Public helper for FSM / tools
     def snap_to_grid(self, pos: QPointF, level: int = 3) -> QPointF:
         return self.inc_grid.snap_to_grid(pos, level)
 
-    def select_exclusive(self, item: QGraphicsItem):
-        """Deselect all items except `item`, and select `item`."""
-        for other in self.selectedItems():
-            if other is not item:
-                other.setSelected(False)
-        if item is not None and not item.isSelected():
+    def select_exclusive(self, item: QGraphicsItem | None):
+        blocker = QSignalBlocker(self)   # suppress multiple built-in emissions
+        self.clearSelection()
+        if item is not None:
             item.setSelected(True)
-        self.selectionChanged.emit()
+        del blocker
+        self.item_selection_changed.emit()  # your one-shot signal
 
-    def mousePressEvent(self, event: QGraphicsSceneMouseEvent):
-        item = self.itemAt(event.scenePos(), QTransform())
-        if event.button() == Qt.LeftButton:
-            if self._preview_mode:
-                # Exit preview
-                self.clear()
-                for i, layout in enumerate(self._pages):
-                    layout.setPos(QPointF(0, i * (layout.boundingRect().height() + 50)))
-                    self.addItem(layout)
-                self._preview_mode = False
-                self.tab.view.fitInView(self.sceneRect(), Qt.KeepAspectRatio)
-            else:
-                if item in self._pages:
-                    # Enter preview
-                    self.clear()
-                    self.addItem(item)
-                    item.setPos(QPointF(0, 0))
-                    self._preview_mode = True
-                    self.setSceneRect(item.boundingRect())
-                    self.tab.view.fitInView(self.sceneRect(), Qt.KeepAspectRatio)
-        else:
-            super().mousePressEvent(event)
     def dragEnterEvent(self, event: QGraphicsSceneDragDropEvent):
         if event.mimeData().hasFormat("application/x-component-pid"):
             event.acceptProposedAction()
@@ -120,17 +95,3 @@ class LayoutScene(QGraphicsScene):
             event.acceptProposedAction()
         else:
             super().dropEvent(event)
-
-    def populate_with_clones(self, count: int, base_template, registry):
-        self.clear()
-        spacing = 50  # vertical gap between pages, in scene units
-        y_offset = 0
-        self._pages = []
-        for i in range(count):
-            layout = registry.clone(base_template)
-            layout.setPos(QPointF(0, y_offset))
-            self.addItem(layout)
-            self._pages.append(layout)
-            y_offset += layout.boundingRect().height() + spacing
-        self.setSceneRect(0, 0, layout.boundingRect().width(), y_offset)
-

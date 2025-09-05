@@ -5,7 +5,7 @@ from PySide6.QtCore import Qt, QMimeData, QEvent, QPoint, Signal
 from PySide6.QtGui import QDrag, QMouseEvent
 from functools import partial
 
-from prototypyside.utils.proto_helpers import get_prefix
+ 
 
 
 class LayoutPalette(QWidget):
@@ -16,10 +16,12 @@ class LayoutPalette(QWidget):
     palette_deselected = Signal()
     select_template = Signal(str)
     remove_template = Signal(str)
+    update_components = Signal(str)
 
-    def __init__(self, root_registry, parent=None):
+    def __init__(self, root_registry, layout, parent=None):
         super().__init__(parent)
         self.registry = root_registry
+        self.layout_template = layout
         layout = QVBoxLayout(self)
         layout.setContentsMargins(4, 4, 4, 4)
         self.label = QLabel("Component Templates", self)
@@ -29,14 +31,17 @@ class LayoutPalette(QWidget):
         self.setMinimumWidth(100) 
         layout.addWidget(self.label)
         layout.addWidget(self.list_widget)
-        button_row = QHBoxLayout()
+        button_col = QVBoxLayout()
         self.select_btn = QPushButton("Select", self)
         self.remove_btn = QPushButton("Remove", self)
-        button_row.addWidget(self.select_btn)
-        button_row.addWidget(self.remove_btn)
+        self.update_btn = QPushButton("Update", self)
+        button_col.addWidget(self.select_btn)
+        button_col.addWidget(self.remove_btn)
+        button_col.addWidget(self.update_btn)
         self.select_btn.clicked.connect(self._on_select_clicked)
         self.remove_btn.clicked.connect(self._on_remove_clicked)
-        layout.addLayout(button_row)
+        self.update_btn.clicked.connect(self._on_update_clicked)
+        layout.addLayout(button_col)
         layout.addStretch(1)
 
         self.list_widget.itemClicked.connect(self._on_list_item_clicked)
@@ -83,7 +88,7 @@ class LayoutPalette(QWidget):
                 el.item_changed.connect(partial(self._on_template_update, obj.pid))
 
     def _on_component_registered(self, pid):
-        if get_prefix(pid) == "ct":
+        if (pid) == "ct":
             for i in range(self.list_widget.count()):
                 if self.list_widget.item(i).data(Qt.UserRole) == pid:
                     return
@@ -92,7 +97,7 @@ class LayoutPalette(QWidget):
             self._add_component_item(obj)
 
     def _on_component_deregistered(self, pid):
-        if get_prefix(pid) == "ct":
+        if (pid) == "ct":
             for i in range(self.list_widget.count()):
                 item = self.list_widget.item(i)
                 if item.data(Qt.UserRole) == pid:
@@ -129,6 +134,19 @@ class LayoutPalette(QWidget):
         pid = item.data(Qt.UserRole)
         self.select_btn.setEnabled(True)
         self.remove_template.emit(pid)
+
+    def _on_update_clicked(self):
+        """Refresh all placed clones of the selected ComponentTemplate in the layout."""
+        item = self.list_widget.currentItem()
+        if not item:
+            return
+        pid = item.data(Qt.UserRole)
+
+        # Replace all instances of this template across the layout’s slots
+        self.layout_template.replace_template_instances(pid)
+        # (Optional) Refresh the palette row text in case the template name changed
+        self._on_template_update(pid)
+        #print(f"[LayoutPalette] Updated {count} slot(s) from template {pid}")
 
     def remove_template_by_pid(self, pid: str):
         """Remove the QListWidget item corresponding to the given component template PID."""

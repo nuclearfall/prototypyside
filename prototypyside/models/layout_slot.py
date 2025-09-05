@@ -2,11 +2,17 @@ from dataclasses import dataclass, field
 from typing import List, Optional, Dict, Tuple, Any, TYPE_CHECKING
 from enum import Enum, auto
 import json
-from PySide6.QtWidgets import QGraphicsObject, QGraphicsItem, QStyleOptionGraphicsItem
+from PySide6.QtWidgets import QGraphicsObject, QGraphicsItem, QStyleOptionGraphicsItem, QGraphicsSceneMouseEvent
 from PySide6.QtCore import Qt, QRectF, QPointF, QSizeF, QMarginsF, Signal
 from PySide6.QtGui import QPainter, QPixmap, QColor, QImage, QPen, QBrush,  QPageLayout, QPageSize, QTransform
+
+
+from prototypyside.models.component_template import RenderMode, TabMode, RenderRoute
+
+from prototypyside.services.proto_class import ProtoClass
 from prototypyside.models.text_element import TextElement
 from prototypyside.models.component_template import ComponentTemplate
+from prototypyside.models.component import Component
 from prototypyside.models.image_element import ImageElement
 from prototypyside.models.vector_element import VectorElement
 from prototypyside.utils.unit_converter import to_px, page_in_px, page_in_units, compute_scale_factor
@@ -14,7 +20,7 @@ from prototypyside.utils.units.unit_str import UnitStr
 from prototypyside.utils.units.unit_str_geometry import UnitStrGeometry
 from prototypyside.utils.units.unit_str_helpers import geometry_with_px_rect, geometry_with_px_pos
 from prototypyside.config import PAGE_SIZES, DISPLAY_MODE_FLAGS, PAGE_UNITS
-from prototypyside.utils.proto_helpers import get_prefix, resolve_pid
+from prototypyside.utils.render_context import RenderContext, RenderMode, RenderRoute, TabMode
 if TYPE_CHECKING:
     from prototypyside.services.proto_registry import ProtoRegistry
 
@@ -30,30 +36,107 @@ def _rotate_around(painter, center: QPointF, angle_deg: float):
 
 class LayoutSlot(QGraphicsObject):
     item_changed = Signal()
-    def __init__(self, pid, geometry, registry, row=0, column=0, parent=None):
+    def __init__(self, proto, pid, registry, geometry, row=0, column=0, name=None, parent=None):
         super().__init__(parent)
-        self._registry = registry
+        self.proto = proto
         self._pid = pid
-        self._tpid = None # This will hold a reference to the template which will be instanced to fill it.
-        self._hovered = False
+        self._registry = registry
         self._geometry = geometry
         self._row = row
         self._column = column
+        self._name = registry.validate_name(proto, name)
+
+        self._unit = registry.settings.unit
+        self._dpi = registry.settings.dpi
+        self._ldpi = registry.settings.ldpi
+
         self._content = None
-        self._unit = "px"
-        self._dpi = 300
-        self._display_flag = DISPLAY_MODE_FLAGS.get("stretch").get("aspect")
+
+        # setup flags
+        self._display_mode = DISPLAY_MODE_FLAGS.get("stretch").get("aspect")
         self._cache_image = None
-        self._geometry = geometry
         self._render_text = True
         self._render_vector = True
-        self.setAcceptHoverEvents(True)
+        self._hovered = False
+        self._set_print_mode = False
+        self._rotation = 0
 
-    # --- Geometric Property Getter/Setters ---#
+        self.setAcceptHoverEvents(True)
+        self.setAcceptedMouseButtons(Qt.LeftButton)
+        self.setFlag(QGraphicsObject.ItemIsSelectable, False)
+        self.setFlag(QGraphicsObject.ItemIsMovable, False)
+
+    def boundingRect(self) -> QRectF:
+        # LOCAL rect only (no x,y)
+        return self._geometry.to("px", dpi=self.dpi).rect
+
+    def setRect(self, new_rect: QRectF):
+        if self._geometry.to(self.unit, dpi=self.dpi).rect == new_rect:
+            return
+        self.prepareGeometryChange()
+        geometry_with_px_rect(self._geometry, new_rect, dpi=self.dpi)
+
+    def itemChange(self, change: QGraphicsItem.GraphicsItemChange, value):
+        # This is called when the scene moves the item.
+        if change == QGraphicsItem.ItemPositionChange and value != self.pos():
+            # Block signals to prevent a recursive loop if a connected item
+            # also tries to set the position.
+            signals_blocked = self.signalsBlocked()
+            self.blockSignals(True)
+            geometry_with_px_pos(self._geometry, value, dpi=self.dpi)
+            print(f"[ITEMCHANGE] Called with change={change}, value={value}")
+            print(f"[ITEMCHANGE] Geometry.pos updated to: {self._geometry.to(self.unit, dpi=self.dpi).pos}")
+            self.blockSignals(signals_blocked)
+
+        # If other signals are emitted or updates called for, it breaks the undo stack.
+        return super().itemChange(change, value)
+
+    # --- property Getter/Setters ---#
+
     @property
     def registry(self):
         return self._registry
-    
+
+    @property
+    def geometry(self):
+        return self._geometry
+
+    @geometry.setter
+    def geometry(self, new_geom: UnitStrGeometry):
+        if self._geometry == new_geom:
+            return
+        self.prepareGeometryChange()
+        self._geometry = new_geom
+        super().setPos(self._geometry.to(self.unit, dpi=self.dpi).pos)
+        self.update()
+
+    @property
+    def row(self): return self._row
+
+    @row.setter
+    def row(self, new):
+        if new != self._row:
+            self._row = new
+            self.item_changed.emit()
+
+    @property
+    def column(self): return self._column
+
+    @column.setter
+    def column(self, new):
+        if new != self._column:
+            self._column = new
+            self.item_changed.emit()
+
+    @property
+    def name(self):
+        return self._name
+
+    @name.setter
+    def name(self, value):
+        if value != self._name:
+            self._name = value
+
     @property
     def dpi(self) -> int:
         return self._dpi
@@ -68,6 +151,7 @@ class LayoutSlot(QGraphicsObject):
                     item.dpi = new
                 self.invalidate_cache()
                 self.update()
+
     @property
     def render_text(self):
         return self._render_text
@@ -98,50 +182,16 @@ class LayoutSlot(QGraphicsObject):
     def unit(self, new: str):
         if self._unit != new:
             self._unit = new
-            for item in self.content:
-                item.unit = new
+            if ProtoClass.isproto(self.content, ProtoClass.CC):
+                for item in self._content.items:
+                    item.unit = new
 
-    @property
-    def geometry(self):
-        return self._geometry
+    def clear_content(self):
+        if self._content:
+            self.registry.deregister(self._content.pid)
+        self.content = None
 
-    @geometry.setter
-    def geometry(self, new_geom: UnitStrGeometry):
-        if self._geometry == new_geom:
-            return
-        self.prepareGeometryChange()
-        self._geometry = new_geom
-        super().setPos(self._geometry.to(self.unit, dpi=self.dpi).pos)
-        self.update()
-
-    def boundingRect(self) -> QRectF:
-        return self._geometry.to(self.unit, dpi=self.dpi).rect
-
-    # This method is for when ONLY the rectangle (size) changes,
-    # not the position.
-    def setRect(self, new_rect: QRectF):
-        if self._geometry.to(self.unit, dpi=self.dpi).rect == new_rect:
-            return
-        self.prepareGeometryChange()
-        geometry_with_px_rect(self._geometry, new_rect, dpi=self.dpi)
-        # self.update()
-
-    def itemChange(self, change: QGraphicsItem.GraphicsItemChange, value):
-        # This is called when the scene moves the item.
-        if change == QGraphicsItem.ItemPositionChange and value != self.pos():
-            # Block signals to prevent a recursive loop if a connected item
-            # also tries to set the position.
-            signals_blocked = self.signalsBlocked()
-            self.blockSignals(True)
-            geometry_with_px_pos(self._geometry, value, dpi=self.dpi)
-            print(f"[ITEMCHANGE] Called with change={change}, value={value}")
-            print(f"[ITEMCHANGE] Geometry.pos updated to: {self._geometry.to(self.unit, dpi=self.dpi).pos}")
-            self.blockSignals(signals_blocked)
-
-        # It's crucial to call the base class implementation. This will update geometry.
-        # If other signals are emitted or updates called for, it breaks the undo stack.
-        return super().itemChange(change, value)
-
+        
     # --- Addiontal Property Getter/Setters ---#
     @property
     def pid(self) -> str:
@@ -152,39 +202,18 @@ class LayoutSlot(QGraphicsObject):
         self._pid = value
 
     @property
-    def tpid(self) -> str: return self._tpid
-
-    def tpid(self, value):
-        if self._tpid != value:
-            self._tpid = value
-            self.template_changed.emit()
-
-    @property
-    def row(self): return self._row
-
-    @row.setter
-    def row(self, new):
-        if new != self._row:
-            self._row = new
-            self.item_changed.emit()
-
-    @property
-    def column(self): return self._column
-
-    @column.setter
-    def column(self, new):
-        if new != self._column:
-            self._column = new
-            self.item_changed.emit()
-
-    @property
     def content(self):
         return self._content
 
     @content.setter
     def content(self, obj):
         self._content = obj
-        geometry = self.geometry if isinstance(self._content, ComponentTemplate) else None
+        for item in obj.items:
+            item._display_outline = False
+        if ProtoClass.isproto(self.content, ProtoClass.CC):
+            self._content.slot = self.pid
+            # self.tpid = obj.pid if hasattr(obj, "pid") else None
+            self._content.geometry = self.geometry
         self.invalidate_cache()
         self.update()
 
@@ -195,9 +224,14 @@ class LayoutSlot(QGraphicsObject):
         return self._cache_image
         
     @property 
-    def display_flag(self):
-        return self._display_flag
+    def display_mode(self):
+        return self._display_mode
 
+    @display_mode.setter
+    def display_mode(self, qflag):
+        if qflag != self._display_mode:
+            self._display_mode = qflag
+            
     def receive_packet(self, packet):
         action = packet.get("action")
         if action == "clone_and_insert":
@@ -219,127 +253,25 @@ class LayoutSlot(QGraphicsObject):
             else:
                 self.content = None
 
-    @display_flag.setter
-    def display_flag(self, qflag):
-        if qflag != self._display_flag:
-            self._display_flag = qflag
+    @property
+    def set_print_mode(self):
+        return self._set_print_mode
 
-    def hoverEnterEvent(self, event):
-        self._hovered = True
-        self.update()
-
-    def hoverLeaveEvent(self, event):
-        self._hovered = False
-        self.update()
-
-    def paint(self, painter, option, widget=None):
-        """
-        Paints the layout slot including its hover state and rendered raster 
-        content (if any). The rendered content is drawn using unit-scaled QImage. 
-        For export, all text and vectors are drawn as vectors on top of
-        rasterized content
-
-        Parameters:
-            painter: QPainter used by the scene or exporter
-            option: QStyleOptionGraphicsItem from the scene
-            widget: Optional widget context (unused)
-        """
-        rect = self.geometry.to(self.unit, dpi=self.dpi).rect
-
-        # --- Base fill and border ---
-        fill = QBrush(QColor(230, 230, 230, 80))
-        border = QPen(QColor(80, 80, 80), 1)
-        painter.setPen(border)
-        painter.setBrush(fill)
-        painter.drawRect(rect)
-
-        # --- Hover overlay ---
-        if self._hovered:
-            painter.setBrush(QBrush(QColor(70, 120, 240, 120)))
-            painter.setPen(Qt.NoPen)
-            painter.drawRect(rect)
-
-        # --- Placeholder if no content ---
-        if self._content is None:
-            pen = QPen(QColor(100, 100, 100, 120), 1, Qt.DashLine)
-            painter.setPen(pen)
-            painter.setBrush(Qt.NoBrush)
-            painter.drawRect(rect)
-            return
-
-        # --- Content rendering ---
-        if self._cache_image is None:
-            self._cache_image = self._render_to_image()
-
-        painter.drawImage(rect, self._cache_image)
-
-    def _render_to_image(self):
-        """
-        Renders the content (ComponentTemplate) of this slot to an offscreen image.
-        This image is DPI-aware and scaled based on the logical unit.
-        """
-        rect = self.geometry.to(self.unit, dpi=self.dpi).rect
-        # The value has to be greater than 0 but can't be 1 if we're dealing with physical units
-        w, h = max(.01, int(rect.width())), max(.01, int(rect.height()))
-
-        option = QStyleOptionGraphicsItem()
-        image = QImage(w, h, QImage.Format_ARGB32_Premultiplied)
-        image.fill(Qt.transparent)
-
-        img_painter = QPainter(image)
-        img_painter.setRenderHints(QPainter.Antialiasing | QPainter.SmoothPixmapTransform)
-
-        # Align drawing to image origin
-        img_painter.translate(-rect.topLeft())
-        
-        # Fix: Translate painter by bleed amount if component has include_bleed enabled
-        bleed_offset = QPointF(0, 0)
-        if (self._content and 
-            isinstance(self._content, ComponentTemplate) and 
-            self._content.include_bleed):
-            bleed_px = self._content.bleed.to("px", dpi=self.dpi)
-            bleed_offset = QPointF(bleed_px, bleed_px)
-            img_painter.translate(bleed_offset)
-
-        # Render template background + border
-        if self._content:
-            self._content.paint(img_painter, option)
-
-        # Render elements in z-order
-        if self._content:
-            for item in sorted(self._content.items, key=lambda e: e.zValue()):
-                if (not self.render_text and isinstance(item, TextElement)) or \
-                   (not self.render_vector and isinstance(item, VectorElement)):
-                    # Skip drawing; will be rendered as vector later
-                    continue
-                img_painter.save()
-                # Fix: Adjust element position by bleed offset
-                adjusted_pos = item.pos() + bleed_offset
-                img_painter.translate(adjusted_pos)
-
-                item_bounds = item.boundingRect()
-                img_painter.setClipRect(QRectF(0, 0, item_bounds.width(), item_bounds.height()))
-
-                # >>> add rotation about the element’s local center <<<
-                rotation = getattr(item, "rotation", 0) or 0
-                if rotation:
-                    # rotate around the center of the element’s local rect
-                    cx = item_bounds.width() * 0.5
-                    cy = item_bounds.height() * 0.5
-                    img_painter.translate(cx, cy)
-                    img_painter.rotate(rotation)
-                    img_painter.translate(-cx, -cy)
-
-                item.paint(img_painter, option, widget=None)
-                img_painter.restore()
-
-        return image
-
-
+    @set_print_mode.setter
+    def set_print_mode(self, val):
+        self._set_print_mode = val
+        if self.content:
+            for item in self.content.items:
+                item.display_border = False
+        self.invalidate_cache()
 
     def invalidate_cache(self):
         self._cache_image = None
         self.update()
+
+    def clone(self):
+        registry = self.registry
+        return registry.clone(self)
 
     def to_dict(self):
         content_data = None
@@ -355,6 +287,7 @@ class LayoutSlot(QGraphicsObject):
             "geometry": self._geometry.to_dict(),
             "row": self._row,
             "column": self._column,
+            "name": self._name,
             "content": content_data
         }
 
@@ -363,41 +296,105 @@ class LayoutSlot(QGraphicsObject):
         cls,
         data: Dict[str, Any],
         registry: "ProtoRegistry",
-        is_clone: bool = False,
     ) -> "LayoutSlot":
         """
-        Hydrate or clone a LayoutSlot. Regenerates pid on clone,
-        restores geometry, flags, and re‐registers in the registry.
+        Hydrate or clone a LayoutSlot.
+
+        Rules:
+          - PID: normalize serialized PID; on clone, mint a fresh 'ls_<uuid>'.
+          - Geometry: restore from dict and set position.
+          - Content: if present (ComponentTemplate payload), rehydrate via factory;
+                     on clone, clone the content (fresh pids) and record provenance.
+          - Registration: register the slot once fully constructed (or earlier if your
+                          naming needs it—but avoid double-register).
         """
-        # PID logic
-        pid = resolve_pid("ls") if is_clone else data.get("pid")
 
-        # Geometry
-        geom = UnitStrGeometry.from_dict(data.get("geometry"))
+        # --- PID ---
+        serial_pid = data.get("pid")
+        if not serial_pid:
+            # fall back to minting with LS prefix
+            serial_pid = f"{ProtoClass.LS.prefix}_{uuid.uuid4()}"
 
-        # Instantiate with registry set explicitly
+        # --- Geometry ---
+        geom = UnitStrGeometry.from_dict(data["geometry"])
+
         inst = cls(
-            pid=pid,
+            proto=ProtoClass.LS,
+            pid=serial_pid,
             geometry=geom,
             registry=registry,
-            row=data.get("row", 0),
-            column=data.get("column", 0),
+            row=int(data.get("row", 0)),
+            column=int(data.get("column", 0)),
             parent=None,
         )
-        
-        # Assign registry immediately after instantiation
-        inst._registry = registry
 
-        # Rehydrate content explicitly after setting registry
-        content_data = data.get("content", None)
-        if content_data:
-            content_template = ComponentTemplate.from_dict(content_data, registry=registry, is_clone=is_clone)
-            inst.content = content_template
+        # --- Flags / misc ---
+        inst._display_mode = data.get("display_mode", inst._display_mode)
+        # inst._render_text   = bool(data.get("render_text",   inst._render_text))
+        # inst._render_vector = bool(data.get("render_vector", inst._render_vector))
 
-        # Restore display flags if needed
-        inst._display_flag = data.get("display_flag", inst._display_flag)
-
-        # Register the fully initialized instance at the end
-        registry.register(inst)
+        # --- Content (ComponentTemplate) ---
+        # handled by the registry now)
 
         return inst
+   
+    def paint(self, painter: QPainter, option, widget=None):
+        if not self._content:
+            return
+        
+        # Create appropriate context based on current mode
+        context = RenderContext(
+            mode=RenderMode.GUI,
+            tab_mode=TabMode.LAYOUT,
+            route=RenderRoute.RASTER,  # Always raster for LayoutTab GUI
+            dpi=self.dpi
+        )
+        
+        # Render content as raster image for LayoutTab GUI
+        if context.is_layout_tab:
+            img = self._content.to_raster_image(context)
+            painter.drawImage(QPointF(0, 0), img)
+        else:
+            # Direct rendering for ComponentTab
+            self._content.render(painter, context)
+    
+    def export_to_qimage(self, export_dpi: int) -> QImage:
+        """
+        Raster export method
+        """
+        assert self._content
+        context = RenderContext(
+            mode=RenderMode.EXPORT,
+            tab_mode=TabMode.LAYOUT,
+            route=RenderRoute.RASTER,
+            dpi=export_dpi
+        )
+        return self._content.to_raster_image(context)
+    
+    def export_to_painter(self, painter: QPainter, vector_priority: bool = False):
+        """
+        Vector/Composite export method
+        """
+        assert self._content
+        context = RenderContext(
+            mode=RenderMode.EXPORT,
+            tab_mode=TabMode.LAYOUT,
+            route=RenderRoute.VECTOR_PRIORITY if vector_priority else RenderRoute.COMPOSITE,
+            dpi=self._registry.settings.print_dpi,
+            vector_priority=vector_priority
+        )
+        rect_px = self.geometry.to("px", dpi=self.dpi).rect
+        painter.save()
+        painter.translate(rect_px.topLeft())
+        self._content.render(painter, context)
+        painter.restore()
+
+    def hoverEnterEvent(self, event):
+        self._hovered = True
+        print("Hover was toggled on")
+        self.update()
+
+    def hoverLeaveEvent(self, event):
+        self._hovered = False
+        print("Hover was toggled off")
+        self.update()

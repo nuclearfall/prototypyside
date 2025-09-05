@@ -37,10 +37,10 @@ class ImportPanel(QWidget):
         layout.addStretch(1)
 
         # Refresh when the manager loads/clears/updates CSV
-        self.merge_manager.csv_loaded.connect(self._on_merge_event)
-        self.merge_manager.csv_updated.connect(self._on_merge_event)
+        # self.merge_manager.csv_loaded.connect(self._on_merge_event)
+        # self.merge_manager.csv_updated.connect(self._on_merge_event)
         # FIX: Connect to the now-existing csv_cleared signal
-        self.merge_manager.csv_cleared.connect(self._on_merge_event)
+        # self.merge_manager.csv_cleared.connect(self._on_merge_event)
 
     # --- Public API ----------------------------------------------------------
 
@@ -62,13 +62,13 @@ class ImportPanel(QWidget):
         self.fields_list.clear()
         
         # Use the new, correct method to get data
-        data = self.merge_manager.get_csv_data_for_template(real)
+        data = self.merge_manager.from_component(template)
         
         if data:
             self.csv_list.addItem(Path(getattr(data, "path", "")).name)
             
             # The validation logic is now centralized in CSVData
-            validation = data.validate_headers(real)
+            validation = compare_template_bindings(real)
             
             # Sort the items for a consistent display order
             sorted_items = sorted(validation.items())
@@ -78,7 +78,7 @@ class ImportPanel(QWidget):
         else:
             self.csv_list.addItem("No CSV loaded")
             # Show missing elements from the template even if no CSV is loaded
-            print(template.items)
+            # print(template.items)
             if template.items != []:
                 at_elements = [el.name for el in template.items if el.name.startswith("@")]
                 for el_name in sorted(at_elements):
@@ -89,9 +89,9 @@ class ImportPanel(QWidget):
     def _add_field_row(self, label: str, status: str) -> None:
         # Add icons as requested
         icon_map = {
-            "ok": "✔️",
-            "warn": "⚠️",
-            "missing": "❌"
+            "BOTH": "✔️",
+            "TEMPLATE": "⚠️",
+            "CSV": "❌"
         }
         icon = icon_map.get(status, "")
         
@@ -161,7 +161,7 @@ class ImportPanel(QWidget):
         """Triggered when elements are added/removed/renamed on the template."""
         if self._current_template:
             # Reconnect to any new items and refresh the list
-            self._disconnect_template_signals()
+            # self._disconnect_template_signals()
             self._connect_template_signals()
             self.update_for_template(self._current_template)
 

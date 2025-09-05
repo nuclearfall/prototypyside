@@ -8,8 +8,7 @@ from PySide6.QtGui import QColor, QFont, QTextOption, QKeyEvent
 from typing import Optional, Any, TYPE_CHECKING
 
 # Assuming these modules are in the same directory or accessible via python path
-from prototypyside.widgets.unit_str_field import UnitStrField
-from prototypyside.utils.units.unit_str_geometry import UnitStrGeometry
+from prototypyside.services.proto_class import ProtoClass
 
 from prototypyside.widgets.color_picker import ColorPickerWidget
 if TYPE_CHECKING:
@@ -86,7 +85,7 @@ class ComponentPropertyPanel(QWidget):
     # Emits (target_object, property_name, old_value, new_value)
     property_changed = Signal(object, str, object, object)
 
-    def __init__(self, display_unit:str, comp:"ComponentTemplate", parent: Optional[QWidget] = None):
+    def __init__(self, display_unit:str, comp:ProtoClass.CT, parent: Optional[QWidget] = None):
         super().__init__(parent)
         self.target_comp = comp
         self._display_unit = display_unit
@@ -111,10 +110,10 @@ class ComponentPropertyPanel(QWidget):
         self.bg_image_button = QPushButton("Select Image...") # For image path
         self.bg_image_button.setMaximumHeight(32)
 
-        self.width_field = UnitStrField()
+        self.width_field = ProtoClass.USField()
         self.bg_color_picker = ColorPickerWidget()
         self.border_color_picker = ColorPickerWidget()
-        self.border_width_field = UnitStrField(property_name="border_width", display_unit=display_unit)
+        self.border_width_field = ProtoClass.USField(property_name="border_width", display_unit=display_unit)
         
         # Conditional widgets
         self.keep_aspect_checkbox = QCheckBox("Keep Aspect Ratio")
@@ -152,7 +151,7 @@ class ComponentPropertyPanel(QWidget):
         self.font_toolbar.font_changed.connect(self.property_changed.emit)
         self.keep_aspect_checkbox.toggled.connect(lambda t: self._handle_property_change("keep_aspect", t))
 
-    def set_target(self, comp: Optional[ComponentElement]):
+    def set_target(self, comp: Optional[ProtoClass.CE]):
         self.target_comp = comp
         if not comp:
             self.clear_target()
@@ -183,7 +182,7 @@ class ComponentPropertyPanel(QWidget):
         """
         Called when the user (or the containing Tab) wants
         to switch display units (e.g. "px" → "in" → "cm").
-        This will re-target the two UnitStrFields so they
+        This will re-target the two ProtoClass.USFields so they
         re-fetch their model values and reformat in the new unit.
         """
         self._display_unit = display_unit

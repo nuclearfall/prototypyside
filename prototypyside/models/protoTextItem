@@ -1,0 +1,354 @@
+from __future__ import annotations
+
+from dataclasses import dataclass
+from typing import Optional, Tuple, Dict, Any
+
+from PySide6.QtCore import QObject, QRectF, QPointF, Qt
+from PySide6.QtGui import QPainter, QFont, QTextOption, QTextLayout
+from PySide6.QtWidgets import QGraphicsObject
+
+# -----------------------------------------------------------------------------
+# NOTE ABOUT DEPENDENCIES
+# -----------------------------------------------------------------------------
+# This module is designed to plug into your existing UnitStr / UnitStrFont /
+# UnitStrGeometry system without imposing strict import paths. To avoid tight
+# coupling, we refer to these classes by duck-typed interfaces and perform
+# conversions by calling `.to("px", dpi=<dpi>)` on UnitStr-like objects.
+#
+# Expected minimal interfaces:
+#   - UnitStr:     has .to(unit: str, dpi: float) -> float
+#   - UnitStrFont: has attributes: family (str), size (UnitStr),
+#                  weight (int | QFont.Weight), italic (bool), underline (bool),
+#                  strikeout (bool), kerning (bool),
+#                  tracking (Optional[UnitStr])  # letter spacing
+#                  line_height (Optional[UnitStr]) or leading (Optional[UnitStr])
+#   - UnitStrGeometry: has .to("px", dpi=...).rect -> QRectF (or tuple)
+#
+# If your names differ (e.g., `leading` vs `line_height`), this module probes
+# both via getattr with sensible fallbacks.
+# -----------------------------------------------------------------------------
+
+
+# ---------------------------------- Helpers ----------------------------------
+
+def _u2px(val: Any, dpi: float, default: float = 0.0) -> float:
+    """Convert UnitStr-like to px; if val is None or not UnitStr, use default.
+    Accepts raw numbers (interpreted as px)."""
+    if val is None:
+        return default
+    try:
+        # UnitStr or compatible
+        return float(val.to("px", dpi=dpi))
+    except Exception:
+        try:
+            # numeric in px
+            return float(val)
+        except Exception:
+            return default
+
+
+def _qfont_from_usf(usf: Any, dpi: float, ldpi: float) -> QFont:
+    """Build a QFont from a UnitStrFont-like object.
+    Size: prefer exact pixel size computed from UnitStr; this avoids Qt's
+    point-size rounding across DPIs and matches print intent.
+    Tracking: set via absolute pixel spacing when available.
+    """
+    family = getattr(usf, "family", "Helvetica")
+    italic = bool(getattr(usf, "italic", False))
+    weight = getattr(usf, "weight", QFont.Normal)
+    underline = bool(getattr(usf, "underline", False))
+    strikeout = bool(getattr(usf, "strikeout", False))
+    kerning = bool(getattr(usf, "kerning", True))
+
+    # Font size in device px (rendering DPI)
+    px_size = _u2px(getattr(usf, "size", None), dpi, default=12.0)
+
+    qf = QFont(family)
+    qf.setItalic(italic)
+    try:
+        qf.setWeight(QFont.Weight(weight))
+    except Exception:
+        qf.setWeight(int(weight))
+
+    # Force exact pixel size; avoids platform-dependent point rounding
+    qf.setPixelSize(int(round(px_size)))
+
+    # Letter-spacing / tracking
+    tracking_us = getattr(usf, "tracking", None)
+    tracking_px = _u2px(tracking_us, dpi, default=0.0)
+    if tracking_px:
+        qf.setLetterSpacing(QFont.SpacingType.AbsoluteSpacing, tracking_px)
+
+    qf.setUnderline(underline)
+    qf.setStrikeOut(strikeout)
+    qf.setKerning(kerning)
+
+    return qf
+
+
+def _line_advance_px(usf: Any, base_px: float, dpi: float) -> float:
+    """Compute line advance (line height) in px.
+    - If `line_height` exists, use it absolutely.
+    - Else if `leading` exists, use base + leading.
+    - Else fall back to ~1.2 * base_px (typographic heuristic).
+    """
+    if hasattr(usf, "line_height") and getattr(usf, "line_height") is not None:
+        return max(_u2px(getattr(usf, "line_height"), dpi, default=base_px), 1.0)
+    if hasattr(usf, "leading") and getattr(usf, "leading") is not None:
+        lead = _u2px(getattr(usf, "leading"), dpi, default=0.0)
+        return max(base_px + lead, 1.0)
+    # Heuristic fallback similar to Proto's auto leading (~120%)
+    return max(base_px * 1.2, 1.0)
+
+
+# ------------------------------ Render Result --------------------------------
+
+@dataclass
+class TextRenderResult:
+    used_rect: QRectF
+    text_rect: QRectF
+    lines_drawn: int
+    overset: bool  # True if not all glyph runs fit in the frame
+
+
+# --------------------------- Proto-style Renderer --------------------------
+
+class ProtoTextRenderer(QObject):
+    """
+    A lightweight, UnitStr-aware text renderer that emulates key aspects of
+    Proto frame text layout using QTextLayout. This is **not** a graphics
+    item; it's a renderer you can hold on your element and call `render()` from
+    your element's `paint()`.
+
+    Typical usage inside your TextElement.paint():
+
+        rect_px = self.geometry.to("px", dpi=self.dpi).rect
+        if not hasattr(self, "_text_renderer"):
+            self._text_renderer = ProtoTextRenderer(
+                dpi=self.dpi, ldpi=self.ldpi, font=self.font,
+                h_align=self.h_align, v_align=self.v_align,
+                wrap_mode=QTextOption.WrapAtWordBoundaryOrAnywhere,
+            )
+        self._text_renderer.text = self.text
+        self._text_renderer.font = self.font
+        self._text_renderer.h_align = self.h_align
+        self._text_renderer.v_align = self.v_align
+        result = self._text_renderer.render(painter, rect_px)
+
+    """
+
+    def __init__(
+        self,
+        *,
+        dpi: float,
+        ldpi: float,
+        font: Any,
+        h_align: Qt.AlignmentFlag = Qt.AlignLeft,
+        v_align: Qt.AlignmentFlag = Qt.AlignTop,
+        wrap_mode: QTextOption.WrapMode = QTextOption.WrapAtWordBoundaryOrAnywhere,
+        clip_overflow: bool = True,
+        max_lines: Optional[int] = None,
+    ) -> None:
+        super().__init__()
+        self.dpi = float(dpi)
+        self.ldpi = float(ldpi)
+        self._font = font
+        self.text: str = ""
+        self.h_align = h_align
+        self.v_align = v_align
+        self.wrap_mode = wrap_mode
+        self.clip_overflow = clip_overflow
+        self.max_lines = max_lines
+
+    # ----------------------------- Public props -----------------------------
+    @property
+    def font(self) -> Any:
+        return self._font
+
+    @font.setter
+    def font(self, value: Any) -> None:
+        self._font = value
+
+    # ----------------------------- Core rendering ---------------------------
+    def render(self, painter: QPainter, frame_rect_px: QRectF) -> TextRenderResult:
+        """Layout and draw `self.text` into `frame_rect_px` using painter.
+        Returns `TextRenderResult` with metrics and overset flag.
+        """
+        # Build QFont from UnitStrFont
+        qfont = _qfont_from_usf(self._font, dpi=self.dpi, ldpi=self.ldpi)
+        base_px = qfont.pixelSize() or int(round(_u2px(getattr(self._font, "size", None), self.dpi, 12.0)))
+        line_advance = _line_advance_px(self._font, base_px, dpi=self.dpi)
+
+        # QTextLayout setup
+        layout = QTextLayout(self.text, qfont)
+        opt = QTextOption()
+        opt.setWrapMode(self.wrap_mode)
+        # Horizontal alignment is handled manually (x offsets) for per-line placement
+        opt.setAlignment(Qt.AlignLeft)  # actual draw x is adjusted below
+        layout.setTextOption(opt)
+        layout.beginLayout()
+
+        lines = []
+        y = 0.0
+        available_w = max(frame_rect_px.width(), 0.0)
+        available_h = max(frame_rect_px.height(), 0.0)
+        overset = False
+
+        # Pre-calc max line count by height if not provided
+        max_lines_by_height = int(available_h // line_advance) if line_advance > 0 else 0
+        hard_cap = self.max_lines if self.max_lines is not None else max_lines_by_height or 10_000
+
+        while True:
+            if len(lines) >= hard_cap:
+                # We reached line limit before consuming all text
+                overset = True
+                break
+
+            line = layout.createLine()
+            if not line.isValid():
+                break
+
+            line.setLineWidth(available_w)
+            line.setPosition(QPointF(0.0, y))
+            lines.append(line)
+            y += line_advance
+
+            if y > available_h + 0.001:
+                # This line would start below frame; don't draw it
+                lines.pop()
+                overset = True
+                break
+
+        layout.endLayout()
+
+        # Compute vertical offset for v-align
+        total_h = len(lines) * line_advance
+        if self.v_align == Qt.AlignVCenter:
+            y_offset = (available_h - total_h) * 0.5
+        elif self.v_align == Qt.AlignBottom:
+            y_offset = max(available_h - total_h, 0.0)
+        else:
+            y_offset = 0.0
+
+        # Optionally clip to frame
+        painter.save()
+        if self.clip_overflow:
+            painter.setClipRect(frame_rect_px)
+
+        # Draw lines
+        x0 = frame_rect_px.x()
+        y0 = frame_rect_px.y() + y_offset
+        text_left = x0
+        text_top = y0
+        max_right = x0
+
+        for ln in lines:
+            ln_y = y0 + ln.y()
+            # Horizontal alignment per line width
+            if self.h_align == Qt.AlignHCenter:
+                x = x0 + (available_w - ln.naturalTextWidth()) * 0.5
+            elif self.h_align == Qt.AlignRight:
+                x = x0 + (available_w - ln.naturalTextWidth())
+            else:
+                x = x0
+
+            ln.draw(painter, QPointF(x, ln_y))
+            max_right = max(max_right, x + ln.naturalTextWidth())
+
+        painter.restore()
+
+        used = QRectF(text_left, text_top, max(0.0, max_right - text_left), max(0.0, len(lines) * line_advance))
+        return TextRenderResult(
+            used_rect=used,
+            text_rect=QRectF(frame_rect_px),
+            lines_drawn=len(lines),
+            overset=overset,
+        )
+
+
+# ---------------------------- Graphics Item Option ----------------------------
+
+class ProtoTextItem(QGraphicsObject):
+    """
+    A QGraphicsObject that wraps ProtoTextRenderer, so you can add it to
+    a scene when a standalone item is preferred. For TextElement integration,
+    you likely want to embed and call ProtoTextRenderer directly, but this
+    class is provided for completeness.
+    """
+
+    def __init__(
+        self,
+        text: str,
+        geometry_px: QRectF,
+        *,
+        dpi: float,
+        ldpi: float,
+        font: Any,
+        h_align: Qt.AlignmentFlag = Qt.AlignLeft,
+        v_align: Qt.AlignmentFlag = Qt.AlignTop,
+        parent: Optional[QGraphicsObject] = None,
+    ) -> None:
+        super().__init__(parent)
+        self._frame = QRectF(geometry_px)
+        self.renderer = ProtoTextRenderer(
+            dpi=dpi, ldpi=ldpi, font=font,
+            h_align=h_align, v_align=v_align,
+            wrap_mode=QTextOption.WrapAtWordBoundaryOrAnywhere,
+        )
+        self.renderer.text = text
+
+    # ---------------- QGraphicsObject overrides ----------------
+    def boundingRect(self) -> QRectF:  # type: ignore[override]
+        return QRectF(self._frame)
+
+    def paint(self, painter: QPainter, option, widget=None) -> None:  # type: ignore[override]
+        self.renderer.render(painter, self._frame)
+
+    # ---------------- Convenience API ----------------
+    @property
+    def text(self) -> str:
+        return self.renderer.text
+
+    @text.setter
+    def text(self, value: str) -> None:
+        self.prepareGeometryChange()
+        self.renderer.text = value
+        self.update()
+
+    def setFrame(self, rect: QRectF) -> None:
+        self.prepareGeometryChange()
+        self._frame = QRectF(rect)
+        self.update()
+
+    def setFont(self, usf: Any) -> None:
+        self.renderer.font = usf
+        self.update()
+
+    def setAlignment(self, h: Qt.AlignmentFlag, v: Qt.AlignmentFlag) -> None:
+        self.renderer.h_align = h
+        self.renderer.v_align = v
+        self.update()
+
+
+# --------------------------- TextElement Integration --------------------------
+# Example (pseudo-code) integration inside your TextElement class:
+#
+# class TextElement(ComponentElement):
+#     def __init__(self, ...):
+#         ...
+#         self._text_renderer = ProtoTextRenderer(
+#             dpi=self.dpi, ldpi=self.ldpi, font=self.font,
+#             h_align=self.h_align, v_align=self.v_align,
+#             wrap_mode=QTextOption.WrapAtWordBoundaryOrAnywhere,
+#         )
+#
+#     def paint(self, painter: QPainter, option, widget=None):
+#         rect_px = self.geometry.to("px", dpi=self.dpi).rect
+#         # Optional: apply rounded-rect clipping, border, etc. before rendering
+#         self._text_renderer.text = self.text or ""
+#         self._text_renderer.font = self.font
+#         self._text_renderer.h_align = self.h_align
+#         self._text_renderer.v_align = self.v_align
+#         result = self._text_renderer.render(painter, rect_px)
+#         self._overset = result.overset
+#         # You can draw an overset indicator if desired.

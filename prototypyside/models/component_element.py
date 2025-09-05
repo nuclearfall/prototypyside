@@ -1,59 +1,103 @@
 from pathlib import Path
+
 from PySide6.QtCore import Qt, QRectF, QPointF, QSize, Signal, QObject
-from PySide6.QtGui import (QColor, QFont, QPen, QBrush, QTextDocument, QTextOption, QPainter, QPixmap, QPalette,
-            QAbstractTextDocumentLayout, QTransform)
-from PySide6.QtWidgets import QGraphicsItem, QGraphicsObject, QGraphicsSceneDragDropEvent, QStyleOptionGraphicsItem
-from typing import Optional, Dict, Any, Union
+from PySide6.QtGui import (QColor, QFont, QPen, QBrush, QPainter, QPixmap, QPalette,
+            QAbstractTextDocumentLayout, QTransform, QPainterPath, QPainterPathStroker)
+from PySide6.QtWidgets import QGraphicsItem, QGraphicsObject, QGraphicsSceneMouseEvent, QGraphicsSceneDragDropEvent, QStyleOptionGraphicsItem
+from typing import Optional, Dict, Any, Union, TYPE_CHECKING
 from prototypyside.views.graphics_items import ResizeHandle
+from prototypyside.views.overlays.element_outline import ElementOutline
 from prototypyside.utils.qt_helpers import qrectf_to_list, list_to_qrectf
 from prototypyside.utils.units.unit_str import UnitStr
 from prototypyside.utils.units.unit_str_geometry import UnitStrGeometry
 from prototypyside.utils.units.unit_str_helpers import geometry_with_px_rect, geometry_with_px_pos
-from prototypyside.config import HandleType, ALIGNMENT_MAP
-from prototypyside.utils.proto_helpers import get_prefix, resolve_pid
-from prototypyside.utils.graphics_item_helpers import rotate_item
-from prototypyside.config import HandleType
+from prototypyside.config import HandleType, HMAP, VMAP, HMAP_REV, VMAP_REV
+from prototypyside.utils.graphics_item_helpers import rotate_by
+from prototypyside.services.proto_class import ProtoClass
+from prototypyside.views.shape_mixin import ShapeableElementMixin
+from prototypyside.utils.render_context import RenderContext, RenderMode, TabMode, RenderRoute
 
-class ComponentElement(QGraphicsObject):
+if TYPE_CHECKING:
+    from prototypyside.services.proto_registry import ProtoRegistry
+
+class ComponentElement(ShapeableElementMixin, QGraphicsObject):
     _serializable_fields = {
-        # dict_key      : (from_fn,                 to_fn,                   default)
-        "tpid": (lambda v: v,              lambda v: v,            None),
-        #"name":         (lambda v: v,              lambda v: v,            lambda v: v),
-        "z_order":      (int,                      lambda z: z,            0),
-        "color":        (QColor.fromRgba,          lambda c: c.rgba(),     None),
-        "bg_color":     (QColor.fromRgba,          lambda c: c.rgba(),     None),
-        "border_color": (QColor.fromRgba,          lambda c: c.rgba(),     None),
-        "border_width": (UnitStr.from_dict,        lambda u: u.to_dict(),     UnitStr("1pt")),
-        "alignment":    (str,                      lambda a: a,            "Center"),
-        "content":      (lambda v: v,              lambda v: v,            ""),
+        # dict_key      : (from_fn,             to_fn,                  default)
+        # name must call registry for name validation on rehydration. It shouldn't be serialized or rehydrated here.
+        "shape_kind":   (str,                  lambda s: s,                 "rect"),
+        "shape_params": (
+            lambda d: {k: UnitStr.from_dict(v) if isinstance(v, dict) and "unit" in v else v for k, v in (d or {}).items()},
+            lambda d: {k: (v.to_dict() if isinstance(v, UnitStr) else v) for k, v in (d or {}).items()},
+            {},
+        ),
+        "z_order":      (int,                   lambda z: z,                0),
+        "color":        (QColor.fromRgba,       lambda c: c.rgba(),         None),
+        "bg_color":     (QColor.fromRgba,       lambda c: c.rgba(),         None),
+        "border_color": (QColor.fromRgba,       lambda c: c.rgba(),         None),
+        "border_width": (UnitStr.from_dict,     lambda u: u.to_dict(),      UnitStr("1pt")),
+        "corner_radius":(UnitStr.from_dict,     lambda u: u.to_dict(),      UnitStr("0.0 in")),
+        "rotation":     (int,                   lambda v: v,                0),
+        "h_align": (
+            # from_fn: accept string OR flag; normalize to flag
+            lambda s: HMAP.get(s, s) if isinstance(s, str) else Qt.Alignment(int(s)),
+            # to_fn: emit canonical string
+            lambda f: HMAP_REV.get(Qt.Alignment(int(f)), "Left"),
+            "Left",
+        ),
+        "v_align": (
+            lambda s: VMAP.get(s, s) if isinstance(s, str) else Qt.Alignment(int(s)),
+            lambda f: VMAP_REV.get(Qt.Alignment(int(f)), "Top"),
+            "Top",
+        ),
     }
+    is_vector: bool = False
+    is_raster: bool = False
     item_changed = Signal()
     nameChanged = Signal(str)  # Add this signal
     property_changed = Signal(str, str, str, object)   # (parent_pid, element_pid, property_name, value)
-    structure_changed = Signal(str)               # (element_pid)
     resize_finished = Signal(object, object, object) # item, new_geometry, old_geometry
+    ### TODO: Should fonts be sticky?
+    # new_default_font = Signal(object)
+    ###
 
-    def __init__(self, pid, registry, geometry: UnitStrGeometry, tpid = None, 
-            parent: Optional[QGraphicsObject] = None, name: str = None):
+    def __init__(self,
+        proto: ProtoClass,
+        pid: str, 
+        registry: "ProtoRegistry", 
+        geometry: UnitStrGeometry,
+        name: Optional[str] = None,   
+        parent: Optional[QGraphicsObject] = None
+    ):
         super().__init__(parent)
+
+        # assigned by param
+        self.proto = proto
         self._pid = pid
-        self._tpid = tpid
-        self.registry = registry
-        self.ldpi = registry.ldpi
-        self._geometry = geometry
-        self._dpi = 300
-        self._unit = "px"
-        self._name = name
-        self.setPos(self._geometry.px.pos)
+        self._registry = registry
+        self._settings = registry.settings
+        self._dpi = registry.settings.dpi
+        self._ldpi = 300
+        self._unit = self._settings.unit
+        self._geometry = geometry or UnitStrGeometry(width="0.75in", height="0.5in", x="10 px", y="10 px", dpi=self._dpi)
+        self._name = registry.validate_name(proto, name)
+
+        # assigned by default or via rehydration
         self._color = QColor(Qt.black)
         self._bg_color = QColor(255,255,255,0)
         self._border_color = QColor(Qt.black)
         self._border_width = UnitStr("0.0 pt", dpi=self._dpi)
-        self._alignment = "Top Left"
         self._content: Optional[str] = ""
         self._rotation = 0
-        self._pre_resize_state = {} # Add this to your __init_
-        self.display_only = True
+        self._corner_radius = UnitStr("0.0 in")
+        self._h_align = HMAP.get("Left")  # Left | Center | Right | Justify
+        self._v_align = VMAP.get("Top")   # Top  | Center | Bottom
+
+        # these aren't serialized or rehydrated
+        self._pre_resize_state = {}
+        self._display_outline = True
+
+        self._is_hovered = False
+        self._handles: Dict[HandleType, ResizeHandle] = {}
 
         self.setFlags(
             QGraphicsItem.ItemIsSelectable |
@@ -61,37 +105,131 @@ class ComponentElement(QGraphicsObject):
             QGraphicsItem.ItemSendsGeometryChanges
         )
         self.setAcceptHoverEvents(True)
-        self._handles: Dict[HandleType, ResizeHandle] = {}
-        for handle in self._handles:
-            handle.setParentItem(self)
+        self.setPos(self._geometry.px.pos)
+
+        # Attach the decoupled outline/handle overlay
+        self._outline = ElementOutline(
+            target_element=self
+        )
+
         self.create_handles()
 
-    # --- Property Getters and Setters --- #
-    @property
-    def rotation(self):
-        return self._rotation
+    # ---- UnitStrGeometry rect and position handling ---- #
 
-    @rotation.setter
-    def rotation(self, value: int):
-        if value != self._rotation:
-            self._rotation = value
-            rotate_item(self, value)
-            self.item_changed.emit()
+    def boundingRect(self) -> QRectF:
+        return self._geometry.to("px", dpi=self._dpi).rect
+
+    # This method is for when ONLY the rectangle (size) changes,
+    # not the position.
+    def setRect(self, new_rect: QRectF):
+        if self._geometry.to("px", dpi=self.dpi).rect == new_rect:
+            return
+        self.prepareGeometryChange()
+        self.geometry = geometry_with_px_rect(self._geometry, new_rect, dpi=self.dpi)
+        self._invalidate_shape_cache()
+
+    def itemChange(self, change: QGraphicsItem.GraphicsItemChange, value):
+        if change == QGraphicsItem.ItemPositionChange and value != self.pos():
+            signals_blocked = self.signalsBlocked()
+            self.blockSignals(True)
+            geometry_with_px_pos(self._geometry, value, dpi=self.dpi)
+            self.blockSignals(signals_blocked)
+        return super().itemChange(change, value)
+
+    @property
+    def display_outline(self) -> bool:
+        return self._display_outline
+
+    @display_outline.setter
+    def display_outline(self, state: bool):
+        self._display_outline = state      
+        self._outline.setEnabled(self._display_outline)
+        self._outline.setVisible(self._display_outline)
+        self.update() 
+
+    # --- Property Getters and Setters --- #
+    # Pid and registry and settings have no setters.
+    @property
+    def pid(self):
+        return self._pid
+
+    @property
+    def registry(self):
+      return self._registry
+
+    @property
+    def ldpi(self) -> int:
+      return self._ldpi
+
+    @ldpi.setter
+    def ldpi(self, new: int):
+        if self._ldpi != new:
+            self._ldpi = new
+            self._invalidate_shape_cache()
             self.update()
 
     @property
-    def alignment_flags(self):
-        return ALIGNMENT_MAP.get(self.alignment, Qt.AlignCenter)
-
-    @property
-    def dpi(self) -> int:
+    def dpi(self):
         return self._dpi
-
+    
     @dpi.setter
     def dpi(self, new: int):
         if self._dpi != new:
             self._dpi = new
+            self._invalidate_shape_cache()
             self.update()
+
+    @property
+    def unit(self):
+        return self._unit
+    
+
+    @unit.setter
+    def unit(self, new: str):
+        if self._unit != new:
+            self._unit = new
+            self._invalidate_shape_cache()
+            # unit change may not require geometry change; update visuals anyway
+            self.update()
+
+    @property
+    def geometry(self):
+        return self._geometry
+    
+
+    @geometry.setter
+    def geometry(self, new_geom: UnitStrGeometry):
+        if self._geometry == new_geom:
+            return
+        self.prepareGeometryChange()
+        self._geometry = new_geom
+        super().setPos(self._geometry.px.pos)
+        self.update_handles()
+        self._invalidate_shape_cache()
+        self.item_changed.emit()
+        self.update()
+
+    @property
+    def corner_radius(self):
+        return self._corner_radius
+    
+
+    @corner_radius.setter
+    def corner_radius(self, value):
+        if value != self._corner_radius:
+            self.prepareGeometryChange()
+            self._corner_radius = value
+            # only affects path when shape_kind is rounded_rect
+            if self.shape_kind == "rounded_rect":
+                self._invalidate_shape_cache()
+            self.item_changed.emit()
+            self.update()
+
+    # ---- precise hit-testing to the shape ---- #
+
+
+    def contains(self, point) -> bool:
+        return self.shape_path().contains(point)
 
     @property
     def unit(self) -> str:
@@ -103,75 +241,30 @@ class ComponentElement(QGraphicsObject):
             self._unit = new
 
     @property
-    def geometry(self):
-        return self._geometry
-
-    @geometry.setter
-    def geometry(self, new_geom: UnitStrGeometry):
-        if self._geometry == new_geom:
-            return
-
-        self.prepareGeometryChange()
-        self._geometry = new_geom
-        super().setPos(self._geometry.px.pos)
-        self.update_handles()
-        self.item_changed.emit() # You may want to emit this signal
-        self.update()
-
-    def boundingRect(self) -> QRectF:
-        return self._geometry.to("px", dpi=self.dpi).rect
-
-    # This method is for when ONLY the rectangle (size) changes,
-    # not the position.
-    def setRect(self, new_rect: QRectF):
-        if self._geometry.to("px", dpi=self.dpi).rect == new_rect:
-            return
-        self.prepareGeometryChange()
-        self.geometry = geometry_with_px_rect(self._geometry, new_rect, dpi=self.dpi)
-
-    def itemChange(self, change: QGraphicsItem.GraphicsItemChange, value):
-        # This is called when the scene moves the item.
-        if change == QGraphicsItem.ItemPositionChange and value != self.pos():
-            # Block signals to prevent a recursive loop if a connected item
-            # also tries to set the position.
-            signals_blocked = self.signalsBlocked()
-            self.blockSignals(True)
-            geometry_with_px_pos(self._geometry, value, dpi=self.dpi)
-            # print(f"[ITEMCHANGE] Called with change={change}, value={value}")
-            # print(f"[ITEMCHANGE] Geometry.pos updated to: {self._geometry.px.pos}")
-            self.blockSignals(signals_blocked)
-
-        # It's crucial to call the base class implementation. This will update geometry.
-        # If other signals are emitted or updates called for, it breaks the undo stack.
-        return super().itemChange(change, value)
-
-    @property
-    def pid(self):
-        return self._pid
-
-    @pid.setter 
-    def pid(self, pid_str):
-        if self._pid != pid_str:
-            self._pid = pid_str
-            self.item_changed.emit()
-            self.update()
-
-    @property
-    def tpid(self):
-        return self._tpid
-
-    @property
     def name(self):
         return self._name
 
     @name.setter 
     def name(self, value):
         if self._name != value:
-            self._name = value
+            proto = ProtoClass.from_class(self)
+            self._name = self.registry.validate_name(proto, self._name)
             self.nameChanged.emit(value)
             self.item_changed.emit()
             self.update()
-    
+
+    # ---- These are default initialized or set during rehydration ---- #
+
+    @property
+    def content(self) -> Optional[str]:
+        return self._content
+
+    @content.setter
+    def content(self, content: str):
+        self._content = content
+        self.item_changed.emit()
+        self.update()
+
     @property
     def color(self) -> QColor:
         return self._color
@@ -206,146 +299,197 @@ class ComponentElement(QGraphicsObject):
             self.update()
 
     @property
-    def border_width(self) -> "UnitStr":
+    def border_width(self) -> UnitStr:
         return self._border_width
 
     @border_width.setter
-    def border_width(self, value: "UnitStr"):
-        self._border_width = value
-        self.item_changed.emit()
-        self.update()
-        
-        if getattr(self, "_border_width", None) != value:
+    def border_width(self, value: UnitStr):
+        if self._border_width != value:
             self._border_width = value
             self.item_changed.emit()
             self.update()
 
     @property
-    def alignment(self) -> Qt.AlignmentFlag:
-        return self._alignment
+    def corner_radius(self):
+        return self._corner_radius
 
-    @alignment.setter
-    def alignment(self, value: str):
-        if self._alignment != value:
-            self._alignment = value
+    @corner_radius.setter
+    def corner_radius(self, value):
+        if value != self._corner_radius:
+            self.prepareGeometryChange()
+            self._corner_radius = value
+            self.item_changed.emit()
+            self.update()        
+
+    @property
+    def rotation(self):
+        return self._rotation
+
+    @rotation.setter
+    def rotation(self, value: int):
+        if value != self._rotation:
+            self._rotation = value
+            rotate_item(self, value)
             self.item_changed.emit()
             self.update()
 
     @property
-    def content(self) -> Optional[str]:
-        return self._content
+    def h_align(self) -> Qt.Alignment:
+        return self._h_align
 
-    @content.setter
-    def content(self, content: str):
-        self._content = content
-        self.item_changed.emit()
-        self.update()
+    @h_align.setter
+    def h_align(self, value: Qt.Alignment):
+        if self._h_align != value:
+            self._h_align = value
+            self.item_changed.emit()
+            self.update()
 
+    @property
+    def v_align(self) -> Qt.Alignment:
+        return self._v_align
+
+    @v_align.setter
+    def v_align(self, value: Qt.Alignment):
+        if self._v_align != value:
+            self._v_align = value
+            self.item_changed.emit()
+            self.update()
+
+    # --- SHAPE PATH: build from the effective rect so clipping grows when expanded ---
+    def shape_path(self) -> QPainterPath:
+        rect_local = self._geometry.to("px", dpi=self.dpi).rect
+        path = QPainterPath()
+        # TODO: if you support corner radius, draw a rounded rect here instead
+        path.addRect(rect_local)
+
+        pen = getattr(self, "_border_pen", None)
+        if pen and pen.widthF() > 0:
+            stroker = QPainterPathStroker()
+            stroker.setWidth(pen.widthF())
+            stroker.setJoinStyle(pen.joinStyle())
+            stroker.setCapStyle(pen.capStyle())
+            path = path.united(stroker.createStroke(path))
+
+        path.setFillRule(Qt.WindingFill)
+        return path
+
+   
+    def render_with_context(self, painter: QPainter, context: RenderContext):
+        """
+        Base rendering method that handles background, border, and delegates to content rendering
+        """
+        rect_px = self.geometry.to("px", dpi=self.dpi).rect
+        
+        # Paint background
+        if self._bg_color.alpha() > 0:
+            painter.fillRect(rect_px, self._bg_color)
+        
+        # Paint content (delegate to subclass)
+        self.render_content(painter, context, rect_px)
+        
+        # Paint border
+        if self.border_width.to("px", dpi=self.dpi) > 0:
+            self.paint_border(painter, rect_px)
+            
+        # Paint outline if in GUI mode
+        if self.display_outline and context.is_gui:
+            self._outline.paint(painter, None, None)
+    
+    def render_content(self, painter: QPainter, context: RenderContext, rect: QRectF):
+        """
+        Subclasses should override this to render their specific content
+        """
+        pass
+    
+    def paint_border(self, painter: QPainter, rect: QRectF):
+        """
+        Paint the element border
+        """
+        bw = self.border_width.to("px", dpi=self.dpi)
+        if bw <= 0:
+            return
+            
+        painter.save()
+        pen = QPen(self.border_color)
+        pen.setWidthF(bw)
+        painter.setPen(pen)
+        painter.setBrush(Qt.NoBrush)
+        
+        # Handle rounded corners if applicable
+        if hasattr(self, 'corner_radius') and self.corner_radius.to("px", dpi=self.dpi) > 0:
+            cr = self.corner_radius.to("px", dpi=self.dpi)
+            painter.drawRoundedRect(rect, cr, cr)
+        else:
+            painter.drawRect(rect)
+            
+        painter.restore()
+    
     def paint(self, painter: QPainter, option, widget=None):
         """
-        Draws the background, border, and handles of the element using the specified unit and DPI.
-
-        Parameters:
-            painter (QPainter): The painter used to draw the element.
-            option: QStyleOptionGraphicsItem passed by the scene.
-            widget: Optional widget; unused.
+        Default paint method uses GUI context
         """
-        rect = self.geometry.to("px", dpi=self.dpi).rect
-        # --- Background Fill ---
-        bg = self._bg_color if isinstance(self._bg_color, QColor) else QColor(self._bg_color)
+        context = RenderContext(
+            mode=RenderMode.GUI,
+            tab_mode=TabMode.COMPONENT,
+            dpi=self.dpi
+        )
+        self.render_with_context(painter, context)
 
-        painter.setBrush(QBrush(bg))
-        painter.setPen(Qt.NoPen)
-        painter.drawRect(rect)
- 
-        # --- Border ---
-        bw = float(self._border_width.to("px", dpi=self.dpi))
-        if self.display_only:
-            pen = QPen(QColor(0, 80, 200, 100))  # RGBA: darker blue, 90% opacity
-            pen.setWidthF(1.0)
-            pen.setCosmetic(True)  # always 1px on screen
-            painter.setPen(pen)
-            painter.setBrush(Qt.NoBrush)
-            painter.drawRect(rect.adjusted(0.5, 0.5, -0.5, -0.5))
-        if bw > 0:
-            border_col = self._border_color if isinstance(self._border_color, QColor) else QColor(self._border_color)
-            pen = QPen(border_col)
-            pen.setWidthF(bw)
-            painter.setPen(pen)
-            painter.setBrush(Qt.NoBrush)
-            painter.drawRect(rect)
+    def hoverEnterEvent(self, event):
+        self._is_hovered = True
+        self.update()
+        super().hoverEnterEvent(event)
 
-        # --- Resize Handles (only shown if visible) ---
-        if self.handles_visible:
-            self.draw_handles()
+    def hoverLeaveEvent(self, event):
+        self._is_hovered = False
+        self.update()
+        super().hoverLeaveEvent(event)
+
+    def clone(self):
+        registry = self.registry
+        return registry.clone(self)
 
     def to_dict(self) -> Dict[str, Any]:
-        print(f"rotation on serializing is {self.rotation}")
         data = {
             "pid":      self._pid,
             "geometry": self._geometry.to_dict(),
-            "name": self._name
+            "name":     self._name,
+            "content":  self._content
         }
 
         for key, (_, to_fn, default) in self._serializable_fields.items():
             val = getattr(self, f"_{key}", default)
             data[key] = to_fn(val) if (val is not None) else None
-        data["rotation"] = self._rotation
+
         return data
 
     @classmethod
-    def from_dict(cls, data: Dict[str, Any], registry, is_clone: bool = False) -> "ElementBase":
-        # 1) Reconstruct geometry
-        geom = UnitStrGeometry.from_dict(data["geometry"])
+    def from_dict(cls, data: Dict[str, Any], registry: "ProtoRegistry"):
 
-        # 2) Handle PID and cloning
-        pid = resolve_pid(get_prefix(data.get("pid"))) if is_clone else data.get("pid")
-
-        # 3) Template determines which subclass is `cls`
+        geom = UnitStrGeometry.from_dict(data.get("geometry"))
+        # any pid errors will be caught by the registry
+        pid  = ProtoClass.validate_pid(data.get("pid"))
         inst = cls(
+            proto = ProtoClass.from_class(cls),
             pid=pid,
             registry=registry,
             geometry=geom,
-            tpid=None,
-            name=data.get("name")
+            name=data.get("name"),
         )
-        inst._tpid = data.get("tpid", None)
-
-        # 4) Restore all other serializable fields
-        for key, (from_fn, _, default) in cls._serializable_fields.items():
+        inst.content = data.get("content")
+        for key, (from_fn, _to_fn, default) in cls._serializable_fields.items():
             raw = data.get(key, default)
             if raw is None:
                 continue
-            setattr(inst, f"_{key}", from_fn(raw))
-        inst.rotation = data.get("rotation", 0)
-        print(f"rotation rehydrated as {inst.rotation}")
-        # 5) Register and return
-        registry.register(inst)
+            try:
+                setattr(inst, f"_{key}", from_fn(raw))
+            except Exception:
+                setattr(inst, f"_{key}", default)
+
         return inst
         
-    @property
-    def handles_visible(self) -> bool:
-        return any(handle.isVisible() for handle in self._handles.values())
-
-    def create_handles(self):
-        if self._handles:
-            return
-        for h_type in HandleType:
-            handle = ResizeHandle(self, h_type)
-            self._handles[h_type] = handle
-        self.update_handles()
-
-    def draw_handles(self):
-        self.update_handles()
-        for handle in self._handles.values():
-            handle.show()
-
-    def show_handles(self):
-        for handle in self._handles.values():
-            handle.show()
-
     def store_pre_resize_state(self):
-        rect = self.boundingRect()
+        rect = self._geometry.to("px", dpi=self.dpi).rect
         scene_tx = self.sceneTransform()
         inv_tx = scene_tx
         anchors = self._edge_centers()
@@ -381,7 +525,7 @@ class ComponentElement(QGraphicsObject):
 
     def _edge_centers(self, to_scene=True):
         # Always a QRectF in *local* coords
-        rect: QRectF = self.boundingRect()
+        rect: QRectF = self.geometry.to("px", dpi=self.dpi).px.rect
 
         cx = rect.center().x()
         cy = rect.center().y()
@@ -403,6 +547,22 @@ class ComponentElement(QGraphicsObject):
             return pts
         # Map to scene (per‑point to avoid polygon conversion)
         return {k: self.mapToScene(v) for k, v in pts.items()}
+
+    @property
+    def handles_visible(self) -> bool:
+        return any(handle.isVisible() for handle in self._handles.values())
+
+    def create_handles(self):
+        if self._handles:
+            return
+        for h_type in HandleType:
+            handle = ResizeHandle(self, h_type)
+            self._handles[h_type] = handle
+        self.update_handles()
+
+    def show_handles(self):
+        for handle in self._handles.values():
+            handle.show()
 
     def _axes_for_handle(self, handle_type):
         # returns (sx, sy, affect_w, affect_h)
@@ -452,8 +612,7 @@ class ComponentElement(QGraphicsObject):
         dx = delta_local.x() if affect_w else 0.0
         dy = delta_local.y() if affect_h else 0.0
 
-        # Grow sizes in the pulled direction(s)
-        min_size = 10.0
+        min_size = 20.0 
         new_w = max(min_size, r0.width()  + sx * dx)
         new_h = max(min_size, r0.height() + sy * dy)
 
@@ -472,9 +631,6 @@ class ComponentElement(QGraphicsObject):
         # Update rect (local, origin at 0,0). Do NOT call normalized().
         final_local_rect = QRectF(0, 0, new_w, new_h)
         self._geometry = UnitStrGeometry.from_px(rect=final_local_rect, pos=self.pos(), dpi=self.dpi)
-
-        self.update_handles()
-        self.item_changed.emit()
 
     def begin_handle_resize(self, handle_item, event):
         r0 = self._geometry.to("px", self.dpi).rect  # local rect, origin at (0,0)
@@ -503,7 +659,6 @@ class ComponentElement(QGraphicsObject):
             handle.hide()
 
     def update_handles(self):
-        # Always get handle positions from current UnitStr and DPI
         w = self._geometry.px.size.width()
         h = self._geometry.px.size.height()
         positions = {
@@ -520,4 +675,34 @@ class ComponentElement(QGraphicsObject):
             handle = self._handles.get(handle_type)
             if handle:
                 handle.setPos(pos)
+                
+    def shape(self) -> QPainterPath:
+        """
+        Accurate local shape for clipping/hit tests. Includes stroke if present.
+        """
+        rect_px: QRectF = self.geometry.to("px", dpi=self.dpi).rect
+        path = QPainterPath()
+        path.addRect(QRectF(0, 0, rect_px.width(), rect_px.height()))
+        pen = getattr(self, "_border_pen", None)
+        if pen and pen.widthF() > 0:
+            stroker = QPainterPathStroker()
+            stroker.setWidth(pen.widthF())
+            stroker.setJoinStyle(pen.joinStyle())
+            stroker.setCapStyle(pen.capStyle())
+            path = path.united(stroker.createStroke(path))
+        path.setFillRule(Qt.WindingFill)
+        return path
 
+    def paint(self, painter: QPainter, option, widget=None):
+        """
+        IMPORTANT: draw in *local* coordinates at (0,0).
+        Do not translate by rect.x()/rect.y() here.
+        """
+        rect_px: QRectF = self.geometry.to("px", dpi=self.dpi).rect
+        painter.save()
+        # background fill if you use it:
+        bg = getattr(self, "_bg_color", None)
+        if bg is not None:
+            painter.fillRect(QRectF(0, 0, rect_px.width(), rect_px.height()), bg)
+        # subclasses draw content here (no global translations)
+        painter.restore()

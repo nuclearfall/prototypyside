@@ -1,11 +1,9 @@
 from PySide6.QtGui import QUndoCommand
 from PySide6.QtCore import QPointF, QRectF
 
-from prototypyside.models.component_template import ComponentTemplate
+# from prototypyside.models.component_template import ComponentTemplate
 from prototypyside.utils.unit_converter import pos_to_unit_str
-from prototypyside.utils.proto_helpers import resolve_pid, get_prefix 
-from prototypyside.utils.units.unit_str import UnitStr
-from prototypyside.utils.units.unit_str_geometry import UnitStrGeometry
+from prototypyside.services.proto_class import ProtoClass
 
 class AddSlotCommand(QUndoCommand):
     def __init__(self, registry, template):
@@ -18,37 +16,37 @@ class AddSlotCommand(QUndoCommand):
 
     def redo(self):
         if item is None:
-            self.item = self.registry.create("ls", tpid=self.template.pid, registry=self.registry, parent=self.template)
+            self.item = self.registry.create(ProtoClass.LS, parent=self.template)
         else:
             self.registry.reinsert(self.item)
 
 class AddElementCommand(QUndoCommand):
-    def __init__(self, prefix, tab, geometry, description="Add Element"):
+    def __init__(self, proto, tab, geometry=None, description="Add Element"):
         super().__init__(description)
-        self.prefix = prefix
+        self.proto = proto
         self.registry = tab.registry
         self.tab = tab
         self.geometry = geometry
+
         self.item = None
 
     def redo(self):
         if self.item is None:
-            # Convert default width/height (in inches) to the current logical unit
-            self.item = self.tab.registry.create(
-                self.prefix,
+            # Create a brand-new element. IMPORTANT: do NOT pass tpid for fresh elements.
+            self.item = self.registry.create(
+                proto=self.proto,
                 geometry=self.geometry,
-                registry=self.registry,
-                tpid = self.tab.template.pid,
-                parent=self.tab.template,
-                name=None
+                parent=self.tab.template
             )
-            # self.item.setRect(self.geometry.px.rect)
+            # Add to model and scene
             self.tab.template.add_item(self.item)
-            self.item.setParentItem(self.tab.template)
+            # self.item.setParentItem(self.tab.template)
 
         elif self.item is not None and self.tab.registry.is_orphan(self.item.pid):
+            # Reinsert an orphan on redo
             self.tab.registry.reinsert(self.item.pid)
 
+        # Ensure it is in the scene
         if self.item.scene() is None:
             self.tab.scene.addItem(self.item)
 
@@ -68,25 +66,46 @@ class AddElementCommand(QUndoCommand):
         self.tab.scene.removeItem(self.item)
         self.tab.update_layers_panel()
 
+## prototypyside/services/undo_commands.py
+
 class CloneElementCommand(QUndoCommand):
     def __init__(self, item, tab, description="Clone Element"):
         super().__init__(description)
+        print(f"We've made it to the undo Command")
         self.item = item
-        self.clone = None
         self.tab = tab
+        self.registry = tab.registry
+        self.clone = None
 
     def redo(self):
         if self.clone is None:
-            self.clone = self.tab.registry.clone(self.item)
+            # create it once
+            print("Preparing to create clone...")
+            self.clone = self.tab.template.registry.clone(self.item)
+            # NOTE: clone is already registered by registry.clone()
         else:
+            # put it back into active store if you use an orphan bucket
             self.tab.registry.reinsert(self.clone.pid)
+            
+        # Add to the data model (template's internal list)
+        self.tab.template.add_item(self.clone)
+
+        # **[SOLUTION]** Add the clone to the scene graph by parenting it.
+        # This is the crucial step that was missing from the command.
         if self.clone.scene() is None:
-            self.tab.scene.addItem(self.clone)
-        self.tab.update_layers_panel()
+            self.clone.setParentItem(self.tab.template)
+        
+        self.clone.show()
+        self.tab.update_layers_panel() # Move panel update here
 
     def undo(self):
-        self.tab.registry.deregister(self.clone.pid)
-        self.tab.scene.removeItem(self.clone)
+        # Your existing undo logic is mostly correct.
+        # It correctly removes the item from the template model and the scene.
+        self.tab.template.remove_item(self.clone)
+
+        if self.clone.scene():
+            self.tab.scene.removeItem(self.clone)
+
         self.tab.update_layers_panel()
 
 class RemoveElementCommand(QUndoCommand):
@@ -154,9 +173,8 @@ class ChangePropertyCommand(QUndoCommand):
             setattr(self.item, self.prop, self.old_value)
 
     def redo(self):
-        print(f"[UNDO] Target ID: {id(self.item)}, Prop: {self.prop}, New: {self.new_value}")
+        # print(f"[UNDO_COMMAND] Something is attempting to change {self.prop} from {self.old_value} to {self.new_value}")
         setattr(self.item, self.prop, self.new_value)
-
 
 class ResizeTemplateCommand(QUndoCommand):
     def __init__(self, template, new_geometry, old_geometry, description="Resize Template"):
@@ -172,75 +190,79 @@ class ResizeTemplateCommand(QUndoCommand):
         self.template.geometry = self.old_geometry
 
 class CloneComponentTemplateToSlotCommand(QUndoCommand):
-    def __init__(self, registry, template, item, description="Add Template to Slot"):
+    """
+    Place a clone of a ComponentTemplate into a specific LayoutSlot.
+    - registry: ProtoRegistry
+    - template: LayoutTemplate  (the page)
+    - item:      ComponentTemplate (the source to clone)
+    - slot:      LayoutSlot (target position on the page)
+    """
+    def __init__(self, registry, template, item, slot, description="Place Component into Slot"):
         super().__init__(description)
         self.registry = registry
-        self.item = item
-        self.template = template
-        self.clone = None
+        self.layout   = template          # LayoutTemplate
+        self.source   = item              # ComponentTemplate (to clone)
+        self.slot     = slot              # LayoutSlot (target)
+        self.clone    = None
         self.clone_pid = None
+        self._prev_content = getattr(slot, "content", None)
 
     def redo(self):
         if self.clone is None:
-            self.clone = self.registry.clone(self.template)
+            self.clone = self.registry.clone(self.source)  # registered
             self.clone_pid = self.clone.pid
-            setattr(self.item, "content", self.clone)
         else:
-            self.registry.reinsert(self.clone_pid)
-            self.item.content = self.clone
+            self.registry.reinsert(self.clone_pid)          # move back from orphans
+
+        self.slot.content = self.clone
 
     def undo(self):
-        self.deregister(self.clone_pid)
-        self.item.content = None
+        # restore what was there before
+        self.slot.content = self._prev_content
+        # park the clone in orphans so redo can reinsert
+        if self.clone_pid:
+            self.registry.deregister(self.clone_pid)
 
 class CloneComponentToEmptySlotsCommand(QUndoCommand):
-    def __init__(self, registry, template, comp, description="Autofill Template with Component"):
+    """
+    Fill all empty LayoutSlots in a LayoutTemplate with clones of a ComponentTemplate.
+    """
+    def __init__(self, registry, template, comp, description="Autofill Empty Slots"):
         super().__init__(description)
         self.registry = registry
-        self.template = template
-        self.comp = comp
-        # Save initial state
-        self.old_items = [row[:] for row in template.items]  # deep-ish copy
-        self.old_content = template.content
-        self.old_slot_contents = [slot.content for row in template.items for slot in row]
-        # This will be filled with new clones (only once)
-        self.new_clones = []
+        self.layout   = template          # LayoutTemplate
+        self.source   = comp              # ComponentTemplate to clone
+        # remember original contents (exact restore on undo)
+        self._orig_contents = [slot.content for slot in self.layout.items]
+        # pairs we actually created on first redo: (slot_ref, clone_ref)
+        self._filled_pairs = []
 
     def redo(self):
-        flat_slots = [slot for row in self.template.items for slot in row]
-
-        if not self.new_clones:
-            # First execution: generate clones and assign
-            self.new_clones = []
-            for slot in flat_slots:
-                clone = self.registry.clone(self.comp)
-                slot.content = clone
-                self.new_clones.append(clone)
+        if not self._filled_pairs:
+            # first execution: create clones for empty slots and assign
+            for slot in self.layout.items:
+                if slot.content is None:
+                    clone = self.registry.clone(self.source)  # registered
+                    self._filled_pairs.append((slot, clone))
+                    slot.content = clone
         else:
-            # Redo after undo: reinsert and reassign
-            for clone, slot in zip(self.new_clones, flat_slots):
+            # redo after undo: reinsert and reattach previous clones
+            for slot, clone in self._filled_pairs:
                 self.registry.reinsert(clone.pid)
                 slot.content = clone
 
-        # Set template-level CSV reference
-        self.template.content = self.comp.pid
-        print(f"CLONED: Slots are {[s.pid for row in self.template.items for s in row]}")
+        # optional: if your layout has a 'content' field that tracks the source template id:
+        # self.layout.content = self.source.pid
 
     def undo(self):
-        flat_slots = [slot for row in self.template.items for slot in row]
-
-        # Deregister and clear slot content
-        for slot, clone in zip(flat_slots, self.new_clones):
-            self.registry.deregister(clone.pid)
+        # clear only what we created, and deregister those clones
+        for slot, clone in self._filled_pairs:
             slot.content = None
+            self.registry.deregister(clone.pid)
 
-        # Restore old content per slot
-        for slot, old in zip(flat_slots, self.old_slot_contents):
+        # restore original slot contents exactly
+        for slot, old in zip(self.layout.items, self._orig_contents):
             slot.content = old
-
-        # Restore previous template-wide content ref
-        self.template.content = self.old_content
-        self.template.items = [row[:] for row in self.old_items]
 
 
 

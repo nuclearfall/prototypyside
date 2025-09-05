@@ -5,7 +5,8 @@ from functools import partial
 
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QComboBox, QCheckBox,
-    QLineEdit, QLabel, QToolBar, QListWidgetItem, QMessageBox, QGraphicsView
+    QLineEdit, QLabel, QToolBar, QListWidgetItem, QMessageBox, QGraphicsView,
+    QWidgetAction, QSizePolicy, QFrame
 )
 from PySide6.QtCore import Qt, Signal, Slot, QPointF
 from PySide6.QtGui import QColor, QKeySequence, QShortcut, QUndoStack, QPainter
@@ -17,15 +18,14 @@ from prototypyside.views.palettes.element_palette import ElementPalette
 from prototypyside.views.panels.property_panel import PropertyPanel
 from prototypyside.views.panels.layers_panel import LayersListWidget
 from prototypyside.views.palettes.palettes import ComponentListWidget
+from prototypyside.utils.units.unit_str import UnitStr
 from prototypyside.widgets.unit_str_field import UnitStrField
 from prototypyside.widgets.unit_str_geometry_field import UnitStrGeometryField
-from prototypyside.utils.units.unit_str_helpers import geometry_with_px_pos
 from prototypyside.utils.units.unit_str_geometry import UnitStrGeometry
+from prototypyside.utils.units.unit_str_helpers import geometry_with_px_pos
 from prototypyside.views.overlays.incremental_grid import IncrementalGrid
-from prototypyside.models.component_template import ComponentTemplate
+from prototypyside.services.proto_class import ProtoClass
 from prototypyside.models.component_element import ComponentElement
-from prototypyside.models.text_element import TextElement
-from prototypyside.models.image_element import ImageElement
 
 from prototypyside.services.app_settings import AppSettings
 
@@ -36,7 +36,12 @@ from prototypyside.services.undo_commands import (
 
 if TYPE_CHECKING:
     from PySide6.QtWidgets import QGraphicsItem
-    from prototypyside.models.component_template import ComponentTemplate
+
+def vsep():
+    s = QFrame()
+    s.setFrameShape(QFrame.VLine)
+    s.setFrameShadow(QFrame.Sunken)
+    return s
 
 class ComponentTab(QWidget):
     status_message_signal = Signal(str, str, int)
@@ -50,43 +55,21 @@ class ComponentTab(QWidget):
         self.main_window = main_window
         presets = self.main_window.settings
         self.settings = presets
+        self._dpi = self.settings.dpi           # <- REQUIRED: no fallback, no None
+        self._unit = self.settings.unit         # scene logical unit (e.g., "in")
         self._template = template
         self.undo_stack = QUndoStack()
         self.file_path = None
         self.registry = registry
-        self._unit = self.settings.display_unit
-        self._dpi = self.settings.display_dpi
         self._show_grid   = True
         self._snap_grid   = True
         # self._print_lines = True
 
-        self.debug_count = 0
-
-        self.selected_item: Optional['ComponentElement'] = None
+        self.selected_item: Optional[object] = None
 
         self._current_drawing_color = QColor(0, 0, 0) # For drawing tools
 
         self.setup_ui()
-
-    @property
-    def dpi(self): return self._dpi
-
-    @property
-    def unit(self):
-        return self._unit
-    
-    @property
-    def template(self):
-        return self._template
-
-    @template.setter
-    def template(self, new):
-        if new != self._template and isinstance(new, ComponentTemplate):
-            self._template = new
-
-    @property
-    def tpid(self):
-        return self._template.pid
     
     def focusInEvent(self, event):
         super().focusInEvent(event)
@@ -103,11 +86,9 @@ class ComponentTab(QWidget):
         toolbar_container = QHBoxLayout()
         toolbar_container.setContentsMargins(0,0,0,0)
 
-        self.font_toolbar = FontToolbar()
-        self.font_toolbar.font_changed.connect(self.on_property_changed)
-        self.create_measure_toolbar()
-        #toolbar_container.addWidget(self.measure_toolbar)
-        #toolbar_container.addWidget(self.font_toolbar)
+        self.create_toolbar()
+        #toolbar_container.addWidget(self.measure_bar)
+
         main_layout.addLayout(toolbar_container)
 
         # The QGraphicsView will be the dominant part of the tab
@@ -117,22 +98,23 @@ class ComponentTab(QWidget):
         main_layout.addWidget(self.view)
         # Initialize the property panel and layers panel (their widgets will be placed in docks in QMainWindow)
         self.setup_property_editor()
-        self.setup_component_palette()
+        self.setup_element_palette()
         self.setup_layers_panel()
-
-        # Simple shortcut "Delete" to remove item
-        delete_shortcut = QShortcut(QKeySequence.Delete, self)
-        delete_shortcut.activated.connect(self.remove_selected_item)
-
+        #self._setup_shortcuts()
         self.set_item_controls_enabled(False) # Initial state: no item selected
 
     def build_scene(self):
         # create grid
-        rect = self.template.geometry.to("px", dpi=self.dpi).rect
+        rect = self.template.geometry.to("px", dpi=self._dpi).rect
         self.inc_grid = IncrementalGrid(self.settings, snap_enabled=self._snap_grid, parent=self.template)
-        # self.print_lines = PrintLines(parent=self.template)
-        self.scene = ComponentScene(self.settings, template=self.template, grid=self.inc_grid) #print_lines=self.print_lines)
-        self.scene.addItem(self.template)
+        self.scene = ComponentScene(self.settings, template=self.template, grid=self.inc_grid)
+        if not self.template.scene():
+            self.scene.addItem(self.template)
+        for el in self.template.items:
+            print(f"el is type: {type(el)}")
+            el.setParentItem(self.template)
+            if not el.scene():
+                self.scene.addItem(el)
         self.scene.setSceneRect(rect)
         # print(f"Scene rect in pixels is {self.template.geometry.to("px", dpi=self.settings.dpi).rect}")
         self.view  = ComponentView(self.scene)
@@ -159,11 +141,6 @@ class ComponentTab(QWidget):
         self.scene.item_cloned.connect(self.clone_item)
         self.scene.item_resized.connect(self.on_property_changed)
 
-    def cleanup(self):
-        self.undo_stack.clear()
-        self.scene.clear()
-        self._template = None
-
     @Slot()
     def update_component_scene(self):
         if not self.scene or not self.template:
@@ -173,7 +150,7 @@ class ComponentTab(QWidget):
         self.bleed_checkbox.setChecked(bool(getattr(self.template, "include_bleed", False)))
         self.bleed_checkbox.blockSignals(False)
 
-        self.template_bleed_field.setEnabled(self.bleed_checkbox.isChecked())
+        self.bleed_field.setEnabled(self.bleed_checkbox.isChecked())
 
         self.view.setSceneRect(self._template.geometry.px.rect)
         self.scene.sync_scene_rect()
@@ -185,7 +162,7 @@ class ComponentTab(QWidget):
     def show_status_message(self, message: str, message_type: str = "info", timeout_ms: int = 5000):
         self.status_message_signal.emit(message, message_type, timeout_ms)
 
-    def setup_component_palette(self):
+    def setup_element_palette(self):
         self.palette = ElementPalette()
         components = [
             ("Text Field", "te", "T"),
@@ -195,14 +172,14 @@ class ComponentTab(QWidget):
         for name, etype, icon in components:
             self.palette.add_item(name, etype, icon)
         self.palette.on_item_type_selected.connect(self.clear_scene_selection)
+        #self.palette.on_item_type_selected.connect(self.add_item_from_drop)
         # User clicks a type in the palette; scene arms creation mode.
-        self.palette.on_item_type_selected.connect(self.scene.arm_element_creation)
-
+        #self.palette.on_item_type_selected.connect(self.scene.arm_element_creation)
         # If scene cancels (mouse move, key, focus, or invalid press), clear the palette highlight.
         self.scene.creation_cancelled.connect(self.palette.clear_active_selection)
-
+        # self.scene.item_dropped.connect(self.add_item_from_drop)
         # --- NEW: Scene -> Tab (Step 6 → 7) ---
-        self.scene.create_item_with_dims.connect(self.add_item_with_dims)
+        #mself.scene.create_item_with_dims.connect(self.add_item_with_dims)
 
     def setup_property_editor(self):
         # This will be a widget that the QMainWindow will place in a DockWidget
@@ -220,11 +197,15 @@ class ComponentTab(QWidget):
         self.layers_list.item_z_changed_requested.connect(self.reorder_item_z_from_list_event)
         self.layers_list.itemClicked.connect(self.on_layers_list_item_clicked)
 
-    def create_measure_toolbar(self):
-        self.measure_toolbar = QToolBar("Measurement Toolbar")
-        self.measure_toolbar.setObjectName("MeasurementToolbar")
+    def create_toolbar(self):
+        self.toolbar = QToolBar()
+
+        self.measure_bar = QWidget()
+        self.measure_bar.setObjectName("MeasurementToolbar")
+        measure_layout = QHBoxLayout()
 
         # Unit Selector
+        self.unit_label = QLabel("Unit:")
         self.unit_selector = QComboBox()
         self.unit_selector.addItems(["in", "cm", "mm", "pt", "px"])
         self.unit_selector.setCurrentText(self._unit)
@@ -240,52 +221,82 @@ class ComponentTab(QWidget):
         self.grid_checkbox.setChecked(True)
         self.grid_checkbox.stateChanged.connect(self.toggle_grid)
 
-
         self.template_dims_field = UnitStrGeometryField(self.template, "geometry", labels=["Width", "Height"], display_unit=self.settings.display_unit, 
-                decimal_places=2, stack_cls=QHBoxLayout, dpi=self.dpi)
+                decimal_places=2, stack_cls=QHBoxLayout, dpi=self._dpi)
         self.template_dims_field.valueChanged.connect(self.on_property_changed)
         self.template_dims_field.setMaximumWidth(250)
  
         self.bleed_label = QLabel("Bleed")
         self.bleed_checkbox = QCheckBox("Add Bleed")
-
         self.bleed_checkbox.setChecked(bool(getattr(self.template, "include_bleed", False)))
         self.bleed_checkbox.toggled.connect(self.toggle_bleed)
-        self.template_bleed_field = UnitStrField(self.template, "bleed", display_unit=self.unit)
-        self.template_bleed_field.valueChanged.connect(self.on_property_changed)
-        self.template_bleed_field.setMaximumWidth(60)   
-        self.template_bleed_field.setEnabled(self.bleed_checkbox.isChecked())    
+        self.bleed_field = UnitStrField(self.template, "bleed", display_unit=self.unit, dpi=self._dpi)
+        self.bleed_field.valueChanged.connect(self.on_property_changed)
+        self.bleed_field.setMaximumWidth(60)   
+        self.bleed_field.setEnabled(self.bleed_checkbox.isChecked())
         self.border_label = QLabel("Border")
-        self.border_width_field = UnitStrField(self.template, "border_width", display_unit=self.unit)
+        self.border_width_field = UnitStrField(self.template, "border_width", display_unit=self.unit, dpi=self._dpi)
         self.border_width_field.valueChanged.connect(self.on_property_changed)
         self.border_width_field.setMaximumWidth(60)
         self.corners_label = QLabel("Corner Radius")
-        self.corners_field = UnitStrField(self.template, "corner_radius", display_unit=self.unit)
+        self.corners_field = UnitStrField(self.template, "corner_radius", display_unit=self.unit, dpi=self._dpi)
         self.corners_field.valueChanged.connect(self.on_property_changed)
         self.corners_field.setMaximumWidth(60)
 
-        self.measure_toolbar.addSeparator()
-        self.measure_toolbar.addWidget(QLabel("Unit:"))
-        self.measure_toolbar.addWidget(self.unit_selector)
-        self.measure_toolbar.addWidget(self.grid_checkbox)
-        self.measure_toolbar.addWidget(self.snap_checkbox)
-        self.measure_toolbar.addSeparator()
-        self.measure_toolbar.addWidget(self.template_dims_field)
-        self.measure_toolbar.addSeparator()
-        self.measure_toolbar.addWidget(self.border_label)
-        self.measure_toolbar.addWidget(self.border_width_field)
-        self.measure_toolbar.addWidget(self.corners_label)
-        self.measure_toolbar.addWidget(self.corners_field)
-        self.measure_toolbar.addWidget(self.bleed_label)
-        self.measure_toolbar.addWidget(self.bleed_checkbox)
-        self.measure_toolbar.addWidget(self.template_bleed_field)
-        self.layout().addWidget(self.measure_toolbar)
+
+        for widget in [
+            self.unit_label,
+            self.unit_selector,
+            vsep(),
+            self.snap_checkbox, 
+            self.grid_checkbox,
+            vsep(),
+            self.template_dims_field,
+            self.bleed_label,
+            self.bleed_checkbox,
+            self.bleed_field,
+            self.corners_label,
+            self.corners_field,
+        ]:
+            # widget.setMinimumHeight(30)
+            measure_layout.addWidget(widget)
+
+        self.measure_bar.setLayout(measure_layout)
+        # self.measure_bar.setMaximumHeight(36)
+        self.toolbar.addWidget(self.measure_bar)
+        self.toolbar.setToolButtonStyle(Qt.ToolButtonIconOnly)  # or TextBesideIcon, your call
+        # self.toolbar.setMinimumHeight(max(self.toolbar.minimumHeight(), 28))
+        self.toolbar.setIconSize(self.toolbar.iconSize()) 
+        self.toolbar.setIconSize(self.toolbar.iconSize())  # forces a re-layout
+
+        self.layout().addWidget(self.toolbar)
+
+    @property
+    def dpi(self):
+        self._dpi
+
+    @dpi.setter
+    def dpi(self, value):
+        self._dpi = value
+
+    @property
+    def unit(self):
+        return self._unit
+    
+    @property
+    def template(self):
+        return self._template
+
+    @template.setter
+    def template(self, new):
+        if new != self._template and isinstance(new, ProtoClass.CT):
+            self._template = new
 
     @Slot(str)
     def on_unit_change(self, unit: str):
         self.settings.unit = unit
         self.template_dims_field.on_unit_change(unit)
-        self.measure_toolbar.update()
+        self.measure_bar.update()
         self.property_panel.on_unit_change(unit)
 
     # called from menu/toolbar checkboxes:
@@ -301,28 +312,36 @@ class ComponentTab(QWidget):
         new = bool(checked)
         old = bool(getattr(self.template, "include_bleed", False))
         if new == old:
-            # nothing to do; avoids spurious undo entries
             return
 
+        # If boundingRect() depends on include_bleed, this is essential:
+        self.template.prepareGeometryChange()
         self.on_property_changed(self.template, "include_bleed", new, old)
 
-        # Enable/disable the bleed value field alongside the checkbox
-        self.template_bleed_field.setEnabled(new)
+        self.bleed_field.setEnabled(new)
 
-        # Let scene resize if your scene rect depends on bleed rect
+        # Recalculate scene rect AFTER the property change
         self.scene.sync_scene_rect()
 
     @Slot()
     def on_property_changed(self, target, prop, new, old):
         command = ChangePropertyCommand(target, prop, new, old)
         self.undo_stack.push(command)
-        print(f"[COMPONENT TAB] Target={target}, prop={prop}, old={old}, new={new}")
 
-    def get_selected_item(self) -> Optional['ComponentElement']:
+    def get_selected_item(self) -> Optional[ComponentElement]:
         items = self.scene.selectedItems()
         if items:
             return items[0] if isinstance(items[0], ComponentElement) else None
         return None
+
+    # def clear(self):
+    #     self.clear_scene_selection()
+    #     i = 0
+    #     while i < len(self.template.items):
+    #         self.template.remove_item(i)
+    #         i += 1
+    #     self.scene.selectedItems() = []
+
 
     def _handle_new_selection(self, new):
         old = self.selected_item
@@ -346,8 +365,6 @@ class ComponentTab(QWidget):
                 new.item_changed.connect(self.on_item_data_changed)
             except RuntimeError:
                 pass  # Already connected, which shouldn't happen due to above logic
-            if hasattr(new, "font"):
-                self.font_toolbar.setTarget(new)
             self.property_panel.set_target(new)
             self._update_layers_selection(new)
         else:
@@ -362,7 +379,7 @@ class ComponentTab(QWidget):
         """Handles selection changes from both scene and layers list"""
         # Get selection source (prioritize scene selection)
         if self.scene.selectedItems():
-            selected = self.scene.selectedItems()[0]
+            target = selected = self.scene.selectedItems()[0]
         else:
             selected = None
         
@@ -461,51 +478,80 @@ class ComponentTab(QWidget):
         if self.scene.selectedItems():
             self.scene.clearSelection()
 
-    @Slot(str, object)
-    def add_item_with_dims(self, prefix: str, geom: UnitStrGeometry):
+    @Slot(ProtoClass)
+    def add_item_from_action(self, proto: ProtoClass):
+        pass
+        # proto = ProtoClass.from_prefix(prefix)
+        # if proto:
+        #     # set the defaults to reasonable values
+        #     default_geom = UnitStrGeometry(width="0.75in", height="0.5in", 
+        #         x="0.125in", y="0.125.in", dpi=self.settings.dpi)
+        #     command = AddElementCommand(proto, self, default_geom)
+        #     self.undo_stack.push(command)
+        #     self.selected_item = self.registry.get_last()
+        #     self.selected_item.resize_finished.connect(self.scene.on_item_resize_finished)
+
+    @Slot(ProtoClass, object)
+    def add_item_with_dims(self, proto: ProtoClass, geom):
         """
         Scene finished a click-drag create. Make it undoable via AddElementCommand.
         Select the created item and wire the resize_finished signal.
         """
-        # 100% matches your requested signature and flow
-        command = AddElementCommand(prefix, self, geom)
+        command = AddElementCommand(proto, self, geom)
         self.undo_stack.push(command)
 
-        # Select last-created element (assuming registry.get_last returns the new element)
+        # Select last-created element
         self.selected_item = self.registry.get_last()
 
         # When user finishes adjusting handles, let the scene reconcile state
         self.selected_item.resize_finished.connect(self.scene.on_item_resize_finished)
 
-    def add_item_from_drop(self, scene_pos: QPointF, item_type: str):
+    @Slot(ProtoClass, object)
+    def add_item_from_drop(self, proto: ProtoClass, scene_pos: QPointF):
         self.scene.clearSelection()
-        rect = UnitStrGeometry(width="0.75in", height="0.5in", dpi=self.template.dpi)
-        new_geometry = geometry_with_px_pos(rect, scene_pos, dpi=self.dpi)
-        command = AddElementCommand(item_type, self, new_geometry)
+        # set the defaults to reasonable values
+        x = UnitStr(scene_pos.x(), dpi=self.dpi)
+        y = UnitStr(scene_pos.y(), dpi=self.dpi)
+
+        geom = UnitStrGeometry(width="0.8125 in", height="0.5in", 
+            x=x, y=y, dpi=self.settings.dpi)
+        command = AddElementCommand(proto, self, geom)
         self.undo_stack.push(command)
         self.selected_item = self.registry.get_last()
         self.selected_item.resize_finished.connect(self.scene.on_item_resize_finished)
 
-    @Slot(ComponentElement, QPointF)
-    def clone_item(self, original, press_scene_pos):
+    @Slot(object, object)
+    def clone_item(self, original, new_geometry):
         """Clone via the registry and immediately begin dragging."""
         # 1) Do the registry‐based clone
-        original.hide_handles()
-        command = CloneElementCommand(original, self)
-        # new = self.registry.clone(original)
-        self.undo_stack.push(command)
-        new = self.registry.get_last()
-        new.setParentItem(self.template)
-        self.scene.addItem(new)
+        # original.hide_handles()
+        # command = CloneElementCommand(original, self)
+        # self.undo_stack.push(command)
+        old_geometry = original.geometry
+        new = self.registry.clone(original, register=True)
+        new.geometry = new_geometry
 
-        # 2) Place it exactly on top of the original
-        new.setPos(original.pos())
-        self.scene.select_exclusive(new)
-        
-        # 3) Compute and stash the drag offset so mouseMoveEvent will pick it up
-        drag_offset = press_scene_pos - new.pos()
-        self.scene._dragging_item = new
-        self.scene._drag_offset   = drag_offset
+        # Set the parent in the Qt scene graph for UI behavior.
+        new.setParentItem(self.template)
+        new.show()
+        self.template.update()
+        self.scene.update()
+        print("From ComponentTab:")
+        print(f" - scene rect: {self.scene.sceneRect()}")
+        print(f" - clone pid, geometry, pos, and rect:\n - pid: {new.pid}\n   - geometry: {new.geometry.px}\n   - pos: {new.scenePos()}\n   - rect: {new.boundingRect()}")
+        print(f"   - original object pid and geometry:\n   - pid: {self.scene.alt_drag_original_item.pid}\n   - geometry: {self.scene.alt_drag_original_item.geometry.px}")
+        print(f" - clone has scene: {True if new.scene() else False}")
+        print(f" - clone scene is template scene: {True if self.template.scene() == new.scene() else False}")
+        print(f" - clone scene is template scene: {True if self.template.scene() == new.scene() else False}")
+        print(f" - clone exists in this registry: {True if self.registry.get(new.pid) else False}")
+        print(f" - clone exists in tab's scene: {True if self.scene == new.scene() else False}")
+        new.update()
+        new.show()
+        self.update_layers_panel()
+
+        # drag_offset = press_scene_pos - new.pos()
+        # self.scene._dragging_item = new
+        # self.scene._drag_offset   = drag_offset
 
     def set_item_controls_enabled(self, enabled: bool):
         self.property_panel.setEnabled(enabled)

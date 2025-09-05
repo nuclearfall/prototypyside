@@ -6,20 +6,20 @@
 
 # # Assuming these are in a sibling directory or accessible via the python path
 # from prototypyside.models.component_element import ComponentElement
-# from prototypyside.utils.units.unit_str import UnitStr
-# from prototypyside.utils.units.unit_str_geometry import UnitStrGeometry
+# from prototypyside.utils.units.unit_str import ProtoClass.US
+# from prototypyside.utils.units.unit_str_geometry import ProtoClasseometry
 
 
-# class UnitStrField(QLineEdit):
+# class ProtoClass.USField(QLineEdit):
 #     """
-#     A QLineEdit widget that binds to a target object's `UnitStr` property.
+#     A QLineEdit widget that binds to a target object's `ProtoClass.US` property.
 
 #     It displays the value in a specified display unit. When editing is
-#     finished, it updates the target's property with a new UnitStr object
+#     finished, it updates the target's property with a new ProtoClass.US object
 #     and emits a comprehensive signal for undo/redo purposes.
 #     """
 #     # Signal emitted after a value has been successfully changed.
-#     # Emits: target_object, property_name, new_UnitStr_value, old_UnitStr_value
+#     # Emits: target_object, property_name, new_ProtoClass.US_value, old_ProtoClass.US_value
 #     valueChanged = Signal(object, str, object, object)
 
 #     def __init__(
@@ -31,11 +31,11 @@
 #         decimal_places: Optional[int] = 4
 #     ):
 #         """
-#         Initializes the UnitStrField.
+#         Initializes the ProtoClass.USField.
 
 #         Args:
 #             target_item: The object to be modified.
-#             property_name: The name of the UnitStr property on the target_item.
+#             property_name: The name of the ProtoClass.US property on the target_item.
 #             display_unit: The unit to display the value in (e.g., "px", "mm").
 #             parent: The parent widget.
 #         """
@@ -48,7 +48,7 @@
 #         if target_item:
 #             self._old_value = self.target_item.geometry
 #             self._dpi = self.target_item._geometry.dpi
-#         self._old_value: Optional[UnitStr] = None
+#         self._old_value: Optional[ProtoClass.US] = None
 
 #         if target_item and property_name:
 #             self.setTarget(target_item, property_name, display_unit = self.display_unit)
@@ -62,7 +62,7 @@
 #         self.display_unit = display_unit
 #         if self.target_item and self.property_name:
 #             initial_value = getattr(self.target_item, self.property_name, None)
-#             if isinstance(initial_value, UnitStr):
+#             if isinstance(initial_value, ProtoClass.US):
 #                 self._dpi = initial_value.dpi
 #                 self._old_value = initial_value
 #                 self.setTextFromValue(initial_value)
@@ -75,12 +75,12 @@
 #         self.display_unit = display_unit
 #         self.setTarget(self.target_item, self.property_name, display_unit)
 
-#     def setTextFromValue(self, value: UnitStr):
+#     def setTextFromValue(self, value: ProtoClass.US):
 #         """
-#         Sets the displayed text by formatting the given UnitStr value.
+#         Sets the displayed text by formatting the given ProtoClass.US value.
 #         The text shown is the numeric value only, without the unit suffix.
 #         """
-#         if not isinstance(value, UnitStr):
+#         if not isinstance(value, ProtoClass.US):
 #             self.clear()
 #             return
 #         # Display value formatted to the display_unit
@@ -88,9 +88,9 @@
 #         self._old_value = value
 #         self.setText(formatted_value)
 
-#     def value(self) -> UnitStr:
+#     def value(self) -> ProtoClass.US:
 #         """
-#         Returns a new UnitStr object from the current text in the line edit.
+#         Returns a new ProtoClass.US object from the current text in the line edit.
 #         The text is interpreted as being in the widget's `display_unit`.
 #         Corrects common input errors like missing leading zeros.
 #         """
@@ -98,7 +98,7 @@
 #         current_text = super().text().strip()
 
 #         if not current_text:
-#             return UnitStr("0", unit=unit, dpi=self._dpi)
+#             return ProtoClass.US.new("0", unit=unit, dpi=self._dpi)
 
 #         # Correct input: ".24" -> "0.24" or "-.24" -> "-0.24"
 #         if current_text.startswith('.'):
@@ -106,9 +106,9 @@
 #         elif current_text.startswith('-.'):
 #             current_text = '-0' + current_text[1:]
 
-#         # Create the UnitStr. If the user-provided text has no unit,
+#         # Create the ProtoClass.US. If the user-provided text has no unit,
 #         # the 'unit' parameter (set to self.display_unit) will be used.
-#         return UnitStr(current_text, unit=unit, dpi=self._dpi)
+#         return ProtoClass.US.new(current_text, unit=unit, dpi=self._dpi)
 
 #     @Slot()
 #     def _on_editing_finished(self):
@@ -147,9 +147,9 @@
 #         self.clearFocus()
 
 
-# class UnitStrGeometryField(QWidget):
+# class ProtoClass.UGField(QWidget):
 #     """
-#     A compound widget for editing a UnitStrGeometry property on a target object.
+#     A compound widget for editing a ProtoClass.UG property on a target object.
 #     Supports labels=['width','height'] or ['width','height','x','y'].
 #     When only width/height are present, x/y are pulled from the target (rect_x/rect_y or x/y).
 #     """
@@ -173,7 +173,7 @@
 #         self._stack_cls = stack_cls
 #         self.target_item: Optional[Any] = None
 #         self.property_name: Optional[str] = None
-#         self._old_geometry: Optional[UnitStrGeometry] = None
+#         self._old_geometry: Optional[ProtoClass.UG] = None
 #         self._display_unit: Optional[str] = display_unit
 #         self._decimal_places: int = decimal_places
 #         self._is_pos: bool = is_pos
@@ -233,7 +233,7 @@
 
 #         if self.target_item and self.property_name:
 #             geom = getattr(self.target_item, self.property_name, None)
-#             if isinstance(geom, UnitStrGeometry):
+#             if isinstance(geom, ProtoClass.UG):
 #                 self._old_geometry = geom
 #                 self._update_display(geom)
 #             else:
@@ -252,11 +252,11 @@
 
 #     # ---------- helpers ----------
 
-#     def _fmt(self, us: UnitStr, dpi: int) -> str:
+#     def _fmt(self, us: ProtoClass.US, dpi: int) -> str:
 #         return us.fmt(f".{self._decimal_places}g", self._display_unit or us.unit, dpi=dpi)
 
-#     def _update_display(self, geom: Optional[UnitStrGeometry]):
-#         if not isinstance(geom, UnitStrGeometry):
+#     def _update_display(self, geom: Optional[ProtoClass.UG]):
+#         if not isinstance(geom, ProtoClass.UG):
 #             self._clear_fields()
 #             return
 #         dpi = geom.dpi
@@ -274,7 +274,7 @@
 #             fld.clear()
 #         self._old_geometry = None
 
-#     def _create_unit_str_from_text(self, text: str, dpi: int) -> UnitStr:
+#     def _create_unit_str_from_text(self, text: str, dpi: int) -> ProtoClass.US:
 #         text = (text or "").strip()
 #         if not text:
 #             text = "0"
@@ -282,21 +282,21 @@
 #             text = '0' + text
 #         elif text.startswith('-.'):
 #             text = '-0' + text[1:]
-#         return UnitStr(text, unit=self._display_unit or "px", dpi=dpi)
+#         return ProtoClass.US.new(text, unit=self._display_unit or "px", dpi=dpi)
 
-#     def _fallback_pos_from_target(self) -> (UnitStr, UnitStr):
+#     def _fallback_pos_from_target(self) -> (ProtoClass.US, ProtoClass.US):
 #         """
 #         Pulls x/y from the target with preference:
 #         rect_x/rect_y -> pos_x/pos_y -> x/y -> 0
-#         Accepts UnitStr or numeric; wraps numeric into UnitStr(px).
+#         Accepts ProtoClass.US or numeric; wraps numeric into ProtoClass.US.new(px).
 #         """
-#         def as_unit(v) -> UnitStr:
-#             if isinstance(v, UnitStr):
+#         def as_unit(v) -> ProtoClass.US:
+#             if isinstance(v, ProtoClass.US):
 #                 return v
 #             try:
-#                 return UnitStr(float(v), unit="px", dpi=getattr(self.target_item, "dpi", 96))
+#                 return ProtoClass.US.new(float(v), unit="px", dpi=getattr(self.target_item, "dpi", 96))
 #             except Exception:
-#                 return UnitStr(0, unit="px", dpi=getattr(self.target_item, "dpi", 96))
+#                 return ProtoClass.US.new(0, unit="px", dpi=getattr(self.target_item, "dpi", 96))
 
 #         # Try Rect position first (frame origin)
 #         for kx, ky in (("rect_x", "rect_y"), ("pos_x", "pos_y"), ("x", "y")):
@@ -341,11 +341,11 @@
 #         tgt_dpi = getattr(self.target_item, "dpi", old.dpi)
 #         disp = self._display_unit or old.unit
 
-#         new_geometry = UnitStrGeometry(
-#             width=UnitStr(w_val, unit=self._display_unit, dpi=tgt_dpi),
-#             height=UnitStr(h_val, unit=self._display_unit, dpi=tgt_dpi),
-#             x=UnitStr(x_val, unit=self._display_unit, dpi=tgt_dpi),
-#             y=UnitStr(w_val, unit=self._display_unit, dpi=tgt_dpi),
+#         new_geometry = ProtoClass.UG.new(
+#             width=ProtoClass.US.new(w_val, unit=self._display_unit, dpi=tgt_dpi),
+#             height=ProtoClass.US.new(h_val, unit=self._display_unit, dpi=tgt_dpi),
+#             x=ProtoClass.US.new(x_val, unit=self._display_unit, dpi=tgt_dpi),
+#             y=ProtoClass.US.new(w_val, unit=self._display_unit, dpi=tgt_dpi),
 #             unit=disp,
 #             dpi=tgt_dpi,
 #         )
@@ -357,9 +357,9 @@
 #         if isinstance(s, QLineEdit): s.clearFocus()
 
 
-# # class UnitStrGeometryField(QWidget):
+# # class ProtoClass.UGField(QWidget):
 # #     """
-# #     A compound widget for editing a UnitStrGeometry property on a target object.
+# #     A compound widget for editing a ProtoClass.UG property on a target object.
 # #     It provides four fields for x, y, width, and height.
 # #     """
 # #     # Signal emitted after a value has been successfully changed.
@@ -376,7 +376,7 @@
 # #         super().__init__(parent)
 # #         self.target_item = None
 # #         self.property_name = None
-# #         self._old_geometry: Optional[UnitStrGeometry] = None
+# #         self._old_geometry: Optional[ProtoClass.UG] = None
 # #         self._display_unit = display_unit
 
 # #         layout = QGridLayout(self)
@@ -402,7 +402,7 @@
 # #         return field
 
 # #     def setTarget(self, target_item: Any, property_name: str, display_unit: str):
-# #         """Sets the target object and its UnitStrGeometry property to edit."""
+# #         """Sets the target object and its ProtoClass.UG property to edit."""
 # #         self.target_item = target_item
 # #         self.property_name = property_name
 # #         self._display_unit = display_unit
@@ -410,8 +410,8 @@
 # #             self.target_item.item_changed.connect(self.update_from_item)
 
 # #         if self.target_item and self.property_name:
-# #             geom: Optional[UnitStrGeometry] = getattr(self.target_item, self.property_name, None)
-# #             if isinstance(geom, UnitStrGeometry):
+# #             geom: Optional[ProtoClass.UG] = getattr(self.target_item, self.property_name, None)
+# #             if isinstance(geom, ProtoClass.UG):
 # #                 self._old_geometry = geom
 # #                 self._update_display(geom)
 # #             else:
@@ -428,8 +428,8 @@
 # #         if self.target_item:
 # #             self._update_display(self.target_item.geometry)
 
-# #     def _update_display(self, geom: UnitStrGeometry):
-# #         """Populates the four fields from a UnitStrGeometry object."""
+# #     def _update_display(self, geom: ProtoClass.UG):
+# #         """Populates the four fields from a ProtoClass.UG object."""
 # #         dpi = geom.dpi
 # #         self.x_field.setText(geom.pos_x.fmt(".4g", self._display_unit, dpi=dpi))
 # #         self.y_field.setText(geom.pos_y.fmt(".4g", self._display_unit, dpi=dpi))
@@ -444,9 +444,9 @@
 # #         self.h_field.clear()
 # #         self._old_geometry = None
 
-# #     def _create_unit_str_from_text(self, text: str, dpi: int) -> UnitStr:
+# #     def _create_unit_str_from_text(self, text: str, dpi: int) -> ProtoClass.US:
 # #         """
-# #         Helper to create a UnitStr from a string, performing input correction.
+# #         Helper to create a ProtoClass.US from a string, performing input correction.
 # #         """
 # #         text = text.strip()
 # #         if not text:
@@ -457,13 +457,13 @@
 # #         elif text.startswith('-.'):
 # #             text = '-0' + text[1:]
 
-# #         return UnitStr(text, unit=self._display_unit, dpi=dpi)
+# #         return ProtoClass.US.new(text, unit=self._display_unit, dpi=dpi)
 
 # #     @Slot()
 # #     def _on_editing_finished(self):
 # #         """
 # #         Called when any sub-field finishes editing.
-# #         Constructs a new UnitStrGeometry, updates the target, and emits a signal.
+# #         Constructs a new ProtoClass.UG, updates the target, and emits a signal.
 # #         """
 # #         if not self.target_item or not self.property_name or self._old_geometry is None:
 # #             if isinstance(self.sender(), QLineEdit): self.sender().clearFocus()
@@ -482,7 +482,7 @@
 # #              if isinstance(self.sender(), QLineEdit): self.sender().clearFocus()
 # #              return
 
-# #         new_geometry = UnitStrGeometry(
+# #         new_geometry = ProtoClass.UG.new(
 # #             x=x_val, y=y_val, width=w_val, height=h_val,
 # #             unit=self._old_geometry.unit, dpi=self._old_geometry.dpi, 
 # #         )
