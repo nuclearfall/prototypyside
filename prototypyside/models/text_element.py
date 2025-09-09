@@ -24,13 +24,10 @@ from PySide6.QtWidgets import QGraphicsItem, QGraphicsObject, QTextEdit, QGraphi
 from prototypyside.utils.units.unit_str import UnitStr
 from prototypyside.utils.units.unit_str_geometry import UnitStrGeometry
 from prototypyside.utils.units.unit_str_helpers import geometry_with_px_rect, geometry_with_px_pos
-from prototypyside.config import HandleType, ALIGNMENT_MAP
-# from prototypyside.widgets.overset_plus_item import OversetPlusItem
 from prototypyside.services.proto_class import ProtoClass
 from prototypyside.models.component_element import ComponentElement
 from prototypyside.utils.units.unit_str_font import UnitStrFont
 from prototypyside.widgets.proto_text_renderer import ProtoTextRenderer
-from prototypyside.views.graphics_items import ResizeHandle
 from prototypyside.views.overlays.element_outline import TextOutline
 from prototypyside.models.component_template import RenderRoute
 from prototypyside.utils.render_context import RenderContext, RenderMode, RenderRoute, TabMode
@@ -64,7 +61,7 @@ class TextElement(ComponentElement):
             name=name, 
             parent=parent)
 
-        self._font: UnitStrFont = font or UnitStrFont(QFont("Arial", 10))
+        self._font: UnitStrFont = font or UnitStrFont(QFont("Arial", 14))
         self._h_align = Qt.AlignLeft
         self._v_align = Qt.AlignTop
         self._content = "This is a sample text that is intentionally made long enough to demonstrate the overset behavior you would typically see in design software like Adobe InDesign. When this text cannot fit within the defined boundaries of the text frame, a small red plus icon will appear, indicating that there is more text than is currently visible."
