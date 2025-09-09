@@ -15,7 +15,9 @@ from prototypyside.utils.units.unit_str import UnitStr #, unitstr_from_raw
 from prototypyside.utils.units.unit_str_geometry import UnitStrGeometry
 # from prototypyside.services.pagination.page_manager import PageManager
 from PySide6.QtCore import Qt, QSizeF, QRectF, QMarginsF, QPointF
+from prototypyside.services.proto_class import ProtoClass
 
+pc = ProtoClass
 
 class ExportManager:
     # Here we're setting dpi to 600 and downscaling to 300 for print.
@@ -156,7 +158,7 @@ class ExportManager:
         }
 
         for i, row in enumerate(rows, start=1):
-            if not isinstance(template, ComponentTemplate):
+            if not pc.isproto(template, pc.CT):
                 raise TypeError("Export must be a ComponentTemplate.")
             comp_inst = self.registry.clone(template)
 
@@ -354,7 +356,7 @@ class ExportManager:
                 painter.scale(1 / scale, 1 / scale)
 
                 for item in slot.content.items:
-                    if isinstance(item, (TextElement, VectorElement)):
+                    if pc.isproto(item, (pc.TE, pc.VE)):
                         painter.save()
                         painter.setTransform(item.sceneTransform(), True)  # compose with current page/slot transform
                         painter.setClipRect(template.boundingRect())

@@ -11,14 +11,17 @@ class ComponentView(QGraphicsView):
     def __init__(self, scene, parent=None):
         super().__init__(scene, parent)
         self.setRenderHints(QPainter.Antialiasing | QPainter.TextAntialiasing | QPainter.SmoothPixmapTransform)
-        self.setDragMode(QGraphicsView.NoDrag)
+
         self.setAcceptDrops(True)
         self.viewport().setAcceptDrops(True)
         # self.setMouseTracking(True)
         self.setTransformationAnchor(QGraphicsView.AnchorUnderMouse)
         self.setResizeAnchor(QGraphicsView.AnchorUnderMouse)
         self.setRenderHints(QPainter.Antialiasing | QPainter.TextAntialiasing | QPainter.SmoothPixmapTransform)
-
+        self.setInteractive(True)
+        self.setDragMode(QGraphicsView.RubberBandDrag)
+        self.setRubberBandSelectionMode(Qt.IntersectsItemShape)
+        self.setViewportUpdateMode(QGraphicsView.SmartViewportUpdate)
         # Accept touch and gestures
         self.setAttribute(Qt.WA_AcceptTouchEvents)
         self.grabGesture(Qt.PinchGesture)

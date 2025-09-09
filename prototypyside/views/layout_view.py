@@ -11,7 +11,6 @@ class LayoutView(QGraphicsView):
     def __init__(self, scene, parent=None):
         super().__init__(scene, parent)
         self.setRenderHints(QPainter.Antialiasing | QPainter.TextAntialiasing | QPainter.SmoothPixmapTransform)
-        self.setDragMode(QGraphicsView.NoDrag)
         self.setAcceptDrops(True)
         self.viewport().setAcceptDrops(True)
         # self.setMouseTracking(True)
@@ -25,7 +24,12 @@ class LayoutView(QGraphicsView):
         self.viewport().setAttribute(Qt.WA_AcceptTouchEvents)
         self.viewport().grabGesture(Qt.PinchGesture)
         self.viewport().installEventFilter(self)
-
+        self.setInteractive(True)
+        self.setDragMode(QGraphicsView.RubberBandDrag)
+        # Rubber band includes items that intersect the band (feels natural)
+        self.setRubberBandSelectionMode(Qt.IntersectsItemShape)
+        # optional: smoother repaints while dragging
+        self.setViewportUpdateMode(QGraphicsView.SmartViewportUpdate)        
         self.current_scale = 1.0
         self._last_scale = 1.0
         self._pinch_start_transform = QTransform()

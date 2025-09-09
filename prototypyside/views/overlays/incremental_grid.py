@@ -41,7 +41,6 @@ class IncrementalGrid(QGraphicsItem):
     def boundingRect(self) -> QRectF:
         return self.scene().sceneRect()
 
-
     def paint(self, painter, *_):
         if not self.isVisible():
             return

@@ -35,14 +35,15 @@ class LayoutTab(QWidget):
     template_selected = Signal(str)  # tpid
     status_message_signal = Signal(str, str, int) # message, type, timeout_ms
     tab_title_changed = Signal(str) # For updating the tab title if needed
-    grid_visibility_changed = Signal(bool)
-    grid_snap_changed = Signal(bool)
 
     def __init__(self, main_window, template, registry, parent=None):
         super().__init__(parent)
         self.main_window = main_window
         presets = self.main_window.settings
-        self.settings = presets
+        self.settings = AppSettings(
+            display_unit=presets.display_unit, 
+            print_unit=presets.print_unit
+        )
         self.registry = registry
         self._template = template
         self.file_path = None
@@ -66,13 +67,9 @@ class LayoutTab(QWidget):
         self.view.setOptimizationFlag(QGraphicsView.DontSavePainterState)
         self.view.setOptimizationFlag(QGraphicsView.DontAdjustForAntialiasing)
         self.view.setScene(self.scene)
-
         # First template mount will set the scene rect; then fit:
         self.view.fitInView(self.scene.sceneRect(), Qt.KeepAspectRatio)
         self.view.show()
-        # connect visibility / snapping controls
-        self.grid_visibility_changed.connect(self.inc_grid.setVisible)
-        self.grid_snap_changed.connect(self.inc_grid.setSnapEnabled)
 
         # initialise from current flags
         self.inc_grid.setVisible(self._show_grid)
@@ -84,50 +81,12 @@ class LayoutTab(QWidget):
 
         # Connect signals to handler methods
         self.scene.component_dropped.connect(self.on_component_dropped)
-        self.layout_toolbar.display_mode_changed.connect(self.on_display_mode_changed)
-        #self.layout_toolbar.number_of_copies.connect(self.on_layout_copy_count_changed)
-        # self.layout_palette.palette_selection_changed.connect(self.on_palette_selection_change)
-        self.layout_palette.select_template.connect(self.on_confirm_template)
-        self.layout_palette.remove_template.connect(self.on_remove_template)
+        self.scene.selectionChanged.connect(self.on_selection_changed)
+        self.update_grid()
         # --- 3. Set the simple, single layout for the tab itself ---
         main_layout = QHBoxLayout(self)
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.addWidget(self.view)
-
-    # --- UI creation stubs --- #
-
-    # def set_template(self, tmpl: LayoutTemplate):
-    #     # disconnect old
-    #     # if self.template:
-    #     #     try:
-    #     #         self.template.policyChanged.disconnect(self._on_template_policy_changed)
-    #     #         self.template.slotsChanged.disconnect(self._on_template_slots_changed)
-    #     #     except TypeError:
-    #     #         pass
-
-    #     self.template = tmpl
-
-    #     # connect new
-    #     tmpl.policyChanged.connect(self._on_template_policy_changed)
-    #     tmpl.slotsChanged.connect(self._on_template_slots_changed)
-
-    #     # first show
-    #     self._refresh_scene_rect()
-    #     self._remount_page()
-
-    # def _prime_grid(self, t):
-    #     # Ensure rows/cols/geometry are set from current policy first.
-    #     # (If you already apply a default policy elsewhere, this is a no-op.)
-    #     # if hasattr(self.layout_toolbar, "current_policy") and self.layout_toolbar.current_policy:
-    #     #     # whatever you do today to apply policy to the template:
-    #     #     self.apply_policy_to_template(self.layout_toolbar.current_policy, t)
-
-    #     # Ensure the grid actually exists before updateGrid/math
-    #     if not t.items or len(t.items) != (t.rows * t.columns):
-    #         t.setGrid(t.rows, t.columns)
-
-    #     # It’s now safe to size/position slots
-    #     t.updateGrid()
 
     def _create_property_panel(self) -> QWidget:
         """Create panel with margin and spacing controls"""
@@ -155,17 +114,7 @@ class LayoutTab(QWidget):
         return self.property_panel
 
     def _create_layout_toolbar(self) -> QWidget:
-        self.layout_toolbar = LayoutToolbar(self.settings, parent=self)
-
-        # Connect signals
-        self.layout_toolbar.page_size_changed.connect(self.on_page_size_changed)
-        self.layout_toolbar.orientation_property_change.connect(self.on_orientation_changed)
-        self.layout_toolbar.grid_size_changed.connect(self.on_grid_size_changed)
-        self.layout_toolbar.autofill_changed.connect(self.on_auto_fill_changed)
-        self.layout_toolbar.pagination_policy_changed.connect(self.on_policy_changed)
-
-        self.layout_toolbar.apply_template(self.template)
-
+        self.layout_toolbar = LayoutToolbar(self, parent=self)
         return self.layout_toolbar
 
     def _create_layout_palette(self) -> QWidget:
@@ -173,19 +122,16 @@ class LayoutTab(QWidget):
             root_registry=self.main_window.registry, 
             layout=self.template, 
             parent=self)
+
+        self.layout_palette.select_template.connect(self.on_confirm_template)
+        self.layout_palette.remove_template.connect(self.on_remove_template)
         # print("LayoutPalette sizeHint:", self.layout_palette.sizeHint())
         # Return a widget listing all open component templates
         pass
 
     # called from menu/toolbar checkboxes:
-    def toggle_grid(self, checked: bool):
-        self._show_grid = checked
-        self.grid_visibility_changed.emit(checked)
-
-    def toggle_snap(self, checked: bool):
-        self._snap_grid = checked
-        self.grid_snap_changed.emit(checked)
-
+    def on_grid_toggled(self, checked: bool):
+        self.inc_grid.setVisible(checked)
 
     def focusInEvent(self, event):
         super().focusInEvent(event)
@@ -239,7 +185,7 @@ class LayoutTab(QWidget):
             self._template = new
 
     # --- Grid/Scene Logic ---
-    @Slot()
+    @Slot(object, str, object, object)
     def on_property_changed(self, target, prop, new, old):
         command = ChangePropertyCommand(target, prop, new, old)
         self.undo_stack.push(command)
@@ -249,44 +195,49 @@ class LayoutTab(QWidget):
     @Slot(str)
     def on_unit_change(self, unit: str):
         self.settings.unit = unit
-        self.template_width_field.on_unit_change(unit)
-        self.template_height_field.on_unit_change(unit)
-        self.layout_toolbar.update()
-        self.property_panel.on_unit_change(unit)
+        old_unit = self.template.unit
+        # Need to change all display_unit for property_panel fields
+
+    @Slot(str)
+    def on_policy_changed(self, new):
+        template = self.template
+        old = self.template.polkey
+        self.on_property_changed(template, "polkey", new, old)
 
     def update_grid(self, rows=None, columns=None):
         """Refresh the scene grid based on template settings."""
         if rows and columns:
             self.template.setGrid(self.registry, rows=rows, columns=columns)
+        slots = self.template.items
+        for slot in slots:
+            if not bool(slot.scene()):
+                self.scene.addItem(slot)
+            if not bool(slot.parentItem()):
+                slot.setParentItem(self.template)
+            slot.update()
         self.template.updateGrid()
+        self.scene.update()
         pass
-
-    @Slot(str)
-    def on_page_size_changed(self, key):
-        t = self.template
-        o = self.template.page_size
-        n = key
-        p = "page_size"
-        command = ChangePropertyCommand(t, p, n, o)
-        self.undo_stack.push(command)
-        self.scene.setSceneRect(self.template.boundingRect())
-        # self._refreshGrid()
-
-    @Slot(str, bool, bool)
-    def on_orientation_changed(self, prop, new, old):
-        t = self.template
-        print(f"BoundingRect before change: {t.boundingRect()}")
-        self.on_property_changed(t, prop, new, old)
-        print(f"BoundingRect after change: {t.boundingRect()}")
-        self.scene.setSceneRect(t.boundingRect())
-
-        t.updateGrid()
-        self.scene.sync_scene_rect()
 
     def cleanup(self):
         self.scene.clear()  # Clears all graphics items
         self.template = None  # Drop reference to ComponentTemplate
         
+    @Slot()
+    def on_selection_changed(self):
+        items = self.scene.selectedItems()
+        n = len(items)
+        if n == 0:
+            # self.property_panel.clear_target()
+            self.show_status_message("No selection", "info")
+        elif n == 1:
+            # self.property_panel.set_target(items[0])
+            self.show_status_message(f"Selected: {getattr(items[0], 'name', type(items[0]).__name__)}", "info")
+        else:
+            # Multi-select: either disable detail or show a compact “multi” editor
+            # self.property_panel.set_multi_target(items)
+            self.show_status_message(f"{n} items selected", "info")
+
     @Slot(str)
     def on_confirm_template(self, pid):
         comp = self.registry.global_get(pid)
@@ -296,20 +247,11 @@ class LayoutTab(QWidget):
     @Slot(str)
     def on_remove_template(self, pid):
         print(f"[LAYOUT_TAB] on_remove_template: Received remove request...")
-        flat_slots = [c for r in self.template.items for c in r]
-        for slot in flat_slots:
-            slot.content = None
-            slot.update()
+        undo = self.undo_stack
+        command = UndoAddToSlots(self.template, slots)
         print(f"All slot content has been set to None")
         # command = CloneComponentToSlotsCommand(self.registry, self.template, None)
         # self.undo_stack.push(command)
-
-    @Slot(str)
-    def on_policy_changed(self, new):
-        template = self.template
-        old = self.template.polkey
-        self.on_property_changed(template, "polkey", new, old)
-        self.template.update()
 
     @Slot(int, int)
     def on_grid_size_changed(self, rows: int, cols: int):
@@ -371,7 +313,6 @@ class LayoutTab(QWidget):
             self._selected_item_pid = None
             self.property_panel.clear_values()
 
-
     def select_item(self, row: int, col: int):
         item = self.template.slots[row][col]
         self._selected_item = item
@@ -388,6 +329,7 @@ class LayoutTab(QWidget):
             self.property_panel.template_
         self._selected_item_pid = item_pid
         self.refresh_panels()
+
 
     @Slot(str, QPointF)
     def on_component_dropped(self, tpid: str, scene_pos: QPointF):
@@ -410,15 +352,6 @@ class LayoutTab(QWidget):
     #     page, root = self._page_manager.mount(self.template, self.scene, self._page_index)
     #     self._page_root = root
         # nothing else needed — your live slots are now children of root
-
-    # Hooks for updates
-    def _on_template_policy_changed(self):
-        # landscape / duplex / item_rotation toggles
-        self._remount_page()
-
-    def _on_template_slots_changed(self):
-        # when autofill rebuilds or you add/remove slots
-        self._remount_page()
 
     # def show_page(self, page_index: int = 0):
     #     if self._page_root:
@@ -447,15 +380,8 @@ class LayoutTab(QWidget):
         self.undo_stack.redo()
 
     # --- Misc/Utility ---
-    def save_state(self):
-        # For persistence (e.g., JSON serialization)
-        pass
-
-    def load_state(self, data: dict):
-        # Restore from saved state
-        pass
-
     def refresh_panels(self):
+        self.layout_property_panel.update()
         # Refresh property panel, palette, import panel, etc.
         pass
 

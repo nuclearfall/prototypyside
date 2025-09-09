@@ -19,6 +19,7 @@ from prototypyside.services.proto_registry import ProtoRegistry
 from prototypyside.services.proto_class import ProtoClass
 from prototypyside.utils.valid_path import ValidPath
 from prototypyside.utils.render_context import RenderContext, RenderMode, RenderRoute, TabMode
+from prototypyside.utils.rotatable_mixin import RotatableMixin
 
 
 
@@ -27,13 +28,14 @@ SHAPES = {
     "rounded_rect":     ShapeFactory.rounded_rect,
     "circle":           ShapeFactory.circle,
     "hexagon":          ShapeFactory.hexagon,
+    "diamond":          ShapeFactory.diamond,
+    "pentagon":         ShapeFactory.pentagon,
+    "octagon":          ShapeFactory.octagon,
     "polygon":          ShapeFactory.polygon,
     "default":          None
 }
 
-
-
-class ComponentTemplate(QGraphicsObject):
+class ComponentTemplate(QGraphicsObject, RotatableMixin):
     template_changed = Signal()
     item_z_order_changed = Signal()
     item_name_change = Signal()
@@ -45,12 +47,14 @@ class ComponentTemplate(QGraphicsObject):
         registry: ProtoRegistry,
         geometry: UnitStrGeometry = None,
         name: Optional[str] = None,
-        shape: str = "default",
+        shape: str = "circle",
         file_path: Optional[Path] = None,
         csv_path: Optional[Path] = None,
+        rotation: float = 0,
         parent: Optional[QGraphicsObject] = None,
     ):
         super().__init__(parent)
+
         SHAPES["default"] = self._default_shape_factory
         self.pid = pid
         self.tpid = None
@@ -59,9 +63,8 @@ class ComponentTemplate(QGraphicsObject):
         self._name = name
         self._file_path = ValidPath.file(file_path, must_exist=True)
         if self._file_path:
-            self._name = self._file_path
+            self._name = ValidPath.file(self._file_path, stem=True)
         self._name = registry.validate_name(proto, name)
-
 
         self._dpi = registry.settings.dpi
         self._ldpi = registry.settings.ldpi
@@ -69,7 +72,7 @@ class ComponentTemplate(QGraphicsObject):
 
         # Unit geometry
         self._geometry = geometry or UnitStrGeometry(width="2.5in", height="3.5in", unit="in", dpi=self._dpi)
- 
+        self._rotation = rotation or 0
         # Visual properties
         self._corner_radius = UnitStr("0.125in", unit="in", dpi=self.dpi)
         self._border_width = UnitStr("0.125in", unit="in", dpi=self.dpi)
@@ -100,7 +103,7 @@ class ComponentTemplate(QGraphicsObject):
         self.render_route: RenderRoute = RenderRoute.COMPOSITE
 
         # Border item/z (drawn above elements by default)
-        self._border_pen = QPen(Qt.black, 1.0)  # adjust if you already have one
+        # self._border_pen = QPen(Qt.black, 1.0)  # adjust if you already have one
         self._border_z: float = 10_000.0
 
         # Create a separate border item that will always be on top
@@ -111,9 +114,35 @@ class ComponentTemplate(QGraphicsObject):
         # LayoutTab GUI renders via raster image in LayoutSlot (so this flag is irrelevant there)
         self.setFlag(QGraphicsItem.ItemClipsChildrenToShape, False)
 
+    # ---- Rotation: delegate to RotatableMixin but emit Qt signals and fix bounds ----
+    @property
+    def rotation(self) -> float:
+        # single source of truth; also mirrors RotatableMixin’s _rotation_deg
+        return float(getattr(self, "_rotation", 0.0))
+
+    @rotation.setter
+    def rotation(self, degrees: float) -> None:
+        import math
+        deg = float(degrees) % 360.0
+        if math.isclose(deg, getattr(self, "_rotation", 0.0), abs_tol=1e-7):
+            return
+
+        # boundingRect/shape depend on rotation; notify scene
+        self.prepareGeometryChange()
+
+        # write both so RotatableMixin helpers (if used) see the same value
+        self._rotation = deg
+
+        # GUI path (QGraphicsItem) uses the item’s native rotation
+        # Offscreen/export paths will be handled by your render wrapper (if using RotatableMixin)
+        self.setRotation(deg)
+
+        self.rotationChanged.emit(deg)
+        self.update()
+
+
     def _default_shape_factory(self, rect: QRectF) -> QPainterPath:
         path = QPainterPath()
-        # ensure a float in pixels; UnitStr.to(...) should return a float here
         radius_px = self._corner_radius.to("px", dpi=self._dpi)
         if radius_px > 0.0:
             path.addRoundedRect(rect, radius_px, radius_px)  # both x & y radii
@@ -206,14 +235,15 @@ class ComponentTemplate(QGraphicsObject):
         if self._geometry == new_geom:
             print(f"[CT] Target ID: {self.pid}, Prop: geometry, New: {new_geom}.\n - value remains unchanged")
             return
-
         self.prepareGeometryChange()
+        rect_px = self._geometry.to("px", dpi=self.dpi).rect
+        self.setTransformOriginPoint(rect_px.center())
         self._geometry = new_geom
         print(f"[CT] Target ID: {self.pid}, Prop: geometry, New: {new_geom}.\n - value changed to {self._geometry}")
-        super().setPos(self._geometry.px.pos)
         if not self.tpid:
             self.template_changed.emit()
         self.setBleedRect()
+        self._update_border_path()
         self.update()
 
     @property
@@ -246,28 +276,31 @@ class ComponentTemplate(QGraphicsObject):
             # also tries to set the position.
             signals_blocked = self.signalsBlocked()
             self.blockSignals(True)
-            geometry_with_px_pos(self._geometry, value, dpi=self.dpi)
+            # geometry_with_px_pos(self._geometry, value, dpi=self.dpi)
             self.blockSignals(signals_blocked)
 
         # If other signals are emitted or updates called for, it breaks the undo stack.
         return super().itemChange(change, value)
 
-    # ——— Bounding Rect ———
+    # def boundingRect(self) -> QRectF:
+    #     if self._include_bleed:
+    #         br = self._geometry.to("px", dpi=self.dpi).rect
+    #         b = float(self._bleed.to("px", dpi=self.dpi))
+    #         return QRectF(
+    #             br.x() - b, br.y() - b,
+    #             br.width() + 2*b, br.height() + 2*b
+    #         )
+    #     rotated = self._geometry.to("px", dpi=self.dpi).rect
+    #     return self.rotated_bounding_rect_px(rotated)
+
+    # --- rotation-aware boundingRect (handles bleed and no-bleed) ---
     def boundingRect(self) -> QRectF:
-        # Use pixel dimensions for scene, so convert geometry to pixels directly
-        base_rect: QRectF = self._geometry.px.rect
-        # Build the shape in pixel coords
-        # shape: QPainterPath = self._shape_factory(base_rect)
         if self._include_bleed:
-            bleed_px = self._bleed.to("px", dpi=self._dpi)
-            br = base_rect
-            return QRectF(
-                br.x() - bleed_px,
-                br.y() - bleed_px,
-                br.width() + 2 * bleed_px,
-                br.height() + 2 * bleed_px
-            )
-        return base_rect
+            base = self.bleed_rect.to("px", dpi=self.dpi).rect
+        else:
+            base = self._geometry.to("px", dpi=self.dpi).rect
+        return self.rotated_bounding_rect_px(base)
+
 
     # allows dynamic shape transformation of components
     @property
@@ -283,12 +316,25 @@ class ComponentTemplate(QGraphicsObject):
         return self._shape
 
     @shape.setter
-    def shape(self, s):
-        if s != self._shape and s in SHAPES:
-            self._shape = s
-            # shape factory setter updates shape
-            self.shape_factory = SHAPES.get(s)
-        
+    def shape(self):
+        # Use the same geometry you expose in boundingRect
+        if self._include_bleed:
+            rect_px = self.bleed_rect.to("px", dpi=self.dpi).rect
+            path = self.bleed_path()
+        else:
+            rect_px = self._geometry.to("px", dpi=self.dpi).rect
+            path = self.shape_path()
+
+        # Map the unrotated path by the current rotation transform
+        return self.map_path_with_rotation(path, rect_px)
+
+    # def shape(self, s):
+    #     if s != self._shape and s in SHAPES:
+    #         self._shape = s
+    #         self.shape_factory = SHAPES.get(s)
+    #         self._update_border_path()
+    #         self._update_border_style()  #
+
     @property
     def shape_factory(self) -> Callable[[QRectF], QPainterPath]:
         return self._shape_factory
@@ -300,6 +346,53 @@ class ComponentTemplate(QGraphicsObject):
         self.prepareGeometryChange()
         self._shape_factory = factory
         self.update()
+
+
+    def shape_path(self) -> QPainterPath:
+        rect_px = self.geometry.to("px", dpi=self.dpi).rect
+        path = (self._shape_factory or self._default_shape_factory)(rect_px)
+        path.setFillRule(Qt.WindingFill)
+        return path
+
+    def bleed_path(self) -> QPainterPath:
+        base_rect = self._geometry.to("px", dpi=self.dpi).rect
+        b = float(self._bleed.to("px", dpi=self.dpi))
+        bleed_rect = QRectF(
+            base_rect.x() - b, base_rect.y() - b,
+            base_rect.width() + 2*b, base_rect.height() + 2*b
+        )
+
+        path = QPainterPath()
+        using_default = (self._shape_factory is None) or (self._shape in ("default", "rounded_rect"))
+        if using_default:
+            cr = float(self._corner_radius.to("px", dpi=self.dpi))
+            r_bleed = max(0.0, cr + b)
+            if r_bleed > 0.0:
+                path.addRoundedRect(bleed_rect, r_bleed, r_bleed)
+            else:
+                path.addRect(bleed_rect)
+        else:
+            path = (self._shape_factory or self._default_shape_factory)(bleed_rect)
+
+        path.setFillRule(Qt.WindingFill)
+        return path
+
+    def _update_border_path(self):
+        if not self._border_item:
+            return
+        self._border_item.setPath(self._inner_border_path())
+
+    # 2) In _update_border_style (for the always-on-top path item)
+    def _update_border_style(self):
+        border_px = float(self._border_width.to("px", dpi=self.dpi))
+        pen = QPen(self._border_color)
+        pen.setWidthF(border_px)
+        pen.setJoinStyle(Qt.MiterJoin)       # <-- was Qt.RoundJoin
+        # pen.setMiterLimit(10.0)            # optional
+        # pen.setCapStyle(Qt.SquareCap)      # optional
+        self._border_item.setPen(pen)
+        self._border_item.setBrush(Qt.NoBrush)
+
 
     @property
     def include_bleed(self) -> bool:
@@ -345,6 +438,16 @@ class ComponentTemplate(QGraphicsObject):
         self.update()
 
     @property
+    def border_z(self) -> float:
+        return self._border_z
+
+    @border_z.setter
+    def border_z(self, z: float) -> None:
+        self._border_z = float(z)
+        if self._border_item:
+            self._border_item.setZValue(self._border_z)
+
+    @property
     def border_width(self):
         return self._border_width
 
@@ -352,17 +455,31 @@ class ComponentTemplate(QGraphicsObject):
     def border_width(self, value):
         if value != self._border_width:
             self._border_width = value
+            self._update_border_style()
+            self._update_border_path()
             self.update()
 
     @property
     def corner_radius(self):
         return self._corner_radius
 
+    @property
+    def border_color(self): return self._border_color
+
+    @border_color.setter
+    def border_color(self, color):
+        if color != self._border_color:
+            self._border_color = color
+    
     @corner_radius.setter
     def corner_radius(self, value: UnitStr):
         if value != self._corner_radius:
             self._corner_radius = value
+            self.prepareGeometryChange()
+            self._update_border_path()
             self.update()
+
+
 
     @property
     def set_print_mode(self):
@@ -480,15 +597,7 @@ class ComponentTemplate(QGraphicsObject):
 
         return inst
 
-    @property
-    def border_z(self) -> float:
-        return self._border_z
 
-    @border_z.setter
-    def border_z(self, z: float) -> None:
-        self._border_z = float(z)
-        if self._border_item:
-            self._border_item.setZValue(self._border_z)
 
     # --- convenience switches you can call from tabs when the tab/render mode changes ---
     def configure_render_context(self, *, render_mode: RenderMode, tab_mode: TabMode, route: RenderRoute | None = None):
@@ -524,50 +633,38 @@ class ComponentTemplate(QGraphicsObject):
         
 
     # --- Shape Path ---
-    def shape_path(self) -> QPainterPath:
-        rect_px: QRectF = self._geometry.to("px", dpi=self._dpi).rect
-        path = self._shape_factory(rect_px) if self._shape_factory else QPainterPath()
-        path.setFillRule(Qt.WindingFill)
-        return path
-
-    def shape(self) -> QPainterPath:
-        return self.shape_path()
-        
+ 
     def render(self, painter: QPainter, context: RenderContext):
-        """
-        Unified rendering method for all rendering scenarios
-        """
         rect_px = self._geometry.to("px", dpi=self.dpi).rect
-        
-        # 1. Paint background
+
+        # 0) Bleed behind everything
+        if self._include_bleed:
+            self._paint_bleed(painter)
+
+        # 1) Background clipped to main shape
         self._paint_background(painter, rect_px)
-        
-        # 2. Paint elements based on rendering context
+
+        # 2) Elements
         if context.is_gui and context.is_component_tab:
-            # ComponentTab GUI - no clipping, free drawing
             self._paint_elements(painter, context, clip=False)
         else:
-            # All other cases - clip to shape
             path = self.shape_path()
+            painter.save()
             painter.setClipPath(path, Qt.ReplaceClip)
             self._paint_elements(painter, context, clip=True)
-            painter.setClipping(False)
-        
-        # 3. Paint border (always on top)
-        self._paint_border(painter, rect_px)
-    
-    def _paint_background(self, painter: QPainter, rect: QRectF):
-        """
-        Paint the template background
-        """
-        if self._bg_color is not None:
-            painter.fillRect(rect, self._bg_color)
-            
-        if self._background_image:
-            img = QImage(str(self._background_image))
-            if not img.isNull():
-                painter.drawImage(rect, img)
-    
+            painter.restore()
+
+        # 3) Border on top
+        self._paint_border(painter)
+
+    def _paint_bleed(self, painter: QPainter):
+        path = self.bleed_path()
+        painter.save()
+        fill_color = self._border_color if self._border_color else self._bg_color 
+        if fill_color is not None:
+            painter.fillPath(path, QBrush(fill_color))
+        painter.restore()
+
     def _paint_elements(self, painter: QPainter, context: RenderContext, clip: bool):
         """
         Paint elements in the correct order based on rendering route
@@ -615,63 +712,44 @@ class ComponentTemplate(QGraphicsObject):
         
         # Restore painter state
         painter.restore()
-    
-    def _paint_border(self, painter: QPainter, rect: QRectF):
-        """
-        Paint the template border
-        """
-        border_px = self._border_width.to("px", dpi=self._dpi)
-        if border_px <= 0:
+
+    def _inner_border_path(self) -> QPainterPath:
+        bw = float(self._border_width.to("px", dpi=self.dpi))
+        inset = bw * 0.5
+        rect = self._geometry.to("px", dpi=self.dpi).rect.adjusted(inset, inset, -inset, -inset)
+
+        # Use the selected shape factory; only apply radius math for rounded shapes.
+        if (self._shape_factory is None) or (self._shape in ("default", "rounded_rect")):
+            # Rounded-rect semantics (or default)
+            cr = float(self._corner_radius.to("px", dpi=self.dpi))
+            cr = max(0.0, cr - inset)  # keep stroke fully inside
+            path = QPainterPath()
+            if cr > 0.0:
+                path.addRoundedRect(rect, cr, cr)
+            else:
+                path.addRect(rect)
+        else:
+            # EXACT shape from the current factory (rect, circle, hex, polygon, etc.)
+            path = (self._shape_factory or self._default_shape_factory)(rect)
+
+        path.setFillRule(Qt.WindingFill)
+        return path
+
+    # 1) In _paint_border
+    def _paint_border(self, painter: QPainter):
+        bw = float(self._border_width.to("px", dpi=self.dpi))
+        if bw <= 0:
             return
-
-        path = self._shape_factory(rect) if self._shape_factory else QPainterPath()
-        pen = QPen(self._border_color)
-        pen.setWidthF(float(border_px))
-        pen.setJoinStyle(Qt.RoundJoin)
-        pen.setCapStyle(Qt.RoundCap)
-
         painter.save()
+        pen = QPen(self._border_color)
+        pen.setWidthF(bw)
+        pen.setJoinStyle(Qt.MiterJoin)       # <-- was Qt.RoundJoin
+        # pen.setMiterLimit(10.0)            # optional: ensure crisp sharp corners
+        # pen.setCapStyle(Qt.SquareCap)      # optional: cap style irrelevant for closed paths
         painter.setPen(pen)
         painter.setBrush(Qt.NoBrush)
-        painter.drawPath(path)
+        painter.drawPath(self._inner_border_path())
         painter.restore()
-    
-    def to_raster_image(self, context: RenderContext) -> QImage:
-        """
-        Render to raster image with the given context
-        """
-        rect_px = self._geometry.to("px", dpi=self.dpi).rect
-        w = max(1, int(rect_px.width()))
-        h = max(1, int(rect_px.height()))
-        
-        img = QImage(w, h, QImage.Format_ARGB32_Premultiplied)
-        img.fill(Qt.transparent)
-        
-        p = QPainter(img)
-        p.setRenderHints(
-            QPainter.Antialiasing | 
-            QPainter.TextAntialiasing | 
-            QPainter.SmoothPixmapTransform, 
-            True
-        )
-        
-        # Render with the provided context
-        self.render(p, context)
-        
-        p.end()
-        return img
-    
-    def paint(self, painter: QPainter, option, widget=None):
-        """
-        Default paint method for scene display
-        """
-        context = RenderContext(
-            mode=RenderMode.GUI,
-            tab_mode=TabMode.COMPONENT,
-            route=self.render_route,
-            dpi=self.dpi
-        )
-        self.render(painter, context)
     
     def to_raster_image(self, context: RenderContext) -> QImage:
         """Render to raster image with the given context"""
@@ -695,15 +773,61 @@ class ComponentTemplate(QGraphicsObject):
         
         p.end()
         return img
-    
+
+    def _paint_background(self, painter: QPainter, rect: QRectF):
+        """
+        Paint the template background clipped to the shape
+        """
+        path = self.shape_path()
+
+        painter.save()
+        # Fill background color inside the rounded shape
+        if self._bg_color is not None:
+            painter.fillPath(path, self._bg_color)
+
+        # Draw background image inside the rounded shape
+        if self._background_image:
+            img = QImage(str(self._background_image))
+            if not img.isNull():
+                painter.setClipPath(path, Qt.ReplaceClip)
+                painter.drawImage(rect, img)
+                painter.setClipping(False)
+        painter.restore()
+        
     # Replace the existing paint method
+    # def paint(self, painter: QPainter, option, widget=None):
+    #     # Default to GUI rendering for scene display
+    #     context = RenderContext(
+    #         mode=RenderMode.GUI,
+    #         tab_mode=TabMode.COMPONENT,
+    #         route=self.render_route,
+    #         dpi=self.dpi
+    #     )
+    #     self.render(painter, context)
+    # --- wrap painting in the rotation helper; GUI uses native QGraphicsItem rotation,
+    # --- offscreen/export uses a painter transform automatically.
     def paint(self, painter: QPainter, option, widget=None):
-        # Default to GUI rendering for scene display
+        # Default to GUI rendering for scene display (ComponentTab)
         context = RenderContext(
             mode=RenderMode.GUI,
             tab_mode=TabMode.COMPONENT,
             route=self.render_route,
             dpi=self.dpi
         )
-        self.render(painter, context)
+
+        rect_px = self._geometry.to("px", dpi=self.dpi).rect
+
+        # IMPORTANT:
+        # - In GUI mode, begin_rotated_paint() will sync self.setTransformOriginPoint/ setRotation(...)
+        #   and NOT apply a painter transform (so picking/handles stay correct).
+        # - In export/offscreen modes (when you call render(...) elsewhere with RenderMode.EXPORT),
+        #   begin_rotated_paint() will apply a painter transform instead.
+        with self.begin_rotated_paint(
+            painter,
+            rect_px,
+            context.mode,           # your RenderMode enum is fine here
+            item_for_gui_sync=self  # let mixin set QGraphicsItem rotation in GUI
+        ):
+            self.render(painter, context)
+
 

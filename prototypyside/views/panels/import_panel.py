@@ -107,7 +107,6 @@ class ImportPanel(QWidget):
             
         self.fields_list.addItem(item)
 
-
     def _connect_template_signals(self) -> None:
         """Listen to template/item changes so the panel stays current."""
         t = self._current_template

@@ -31,7 +31,7 @@ class ShapeFactory:
         return path
 
     @staticmethod
-    def polygon(rect: QRectF, sides: int) -> QPainterPath:
+    def polygon(rect: QRectF, sides: int=4) -> QPainterPath:
         path = QPainterPath()
         cx = rect.center().x()
         cy = rect.center().y()
@@ -46,6 +46,15 @@ class ShapeFactory:
                 path.lineTo(x, y)
         path.closeSubpath()
         return path
+
+    def octagon(rect: QRectF) -> QPainterPath:
+        return ShapeFactory.polygon(rect, 8)
+
+    def pentagon(rect: QRectF) -> QPainterPath:
+        return ShapeFactory.polygon(rect, 5)
+
+    def diamond(rect: QRectF) -> QPainterPath:
+        return ShapeFactory.polygon(rect, 4)
             
     def hexagon(rect: QRectF, extra=None) -> QPainterPath:
         return ShapeFactory.polygon(rect, 6)

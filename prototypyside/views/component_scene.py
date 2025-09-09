@@ -22,6 +22,9 @@ if TYPE_CHECKING:
     from prototypyside.views.overlays.incremental_grid import IncrementalGrid
     from prototypyside.views.overlays.print_lines import PrintLines
 
+pc = ProtoClass
+any_el_type = (pc.CE, pc.TE, pc.IE, pc.VE)
+
 # -------------------------------------------------------------------------
 # Scene
 # -------------------------------------------------------------------------
@@ -30,11 +33,10 @@ class ComponentScene(QGraphicsScene):
     # signals used elsewhere in your app
     item_dropped  = Signal(ProtoClass, QPointF)
     item_cloned   = Signal(ComponentElement, UnitStrGeometry)
-    item_moved    = Signal()
-    item_resized  = Signal(object, str, object, object)
     create_item_with_dims = Signal(ProtoClass, object)
     creation_cancelled = Signal()
     selectionChanged = Signal()
+    selectionChangedEx = Signal()
 
     # ──────────────────────────────── init ────────────────────────────────
     def __init__(
@@ -61,9 +63,9 @@ class ComponentScene(QGraphicsScene):
         self._dup_source: ComponentElement | None = None
         self._dup_preview: ComponentElement | None = None
         self._dup_offset: QPointF | None = None
-        self._dragging_item       = None
-        self._dragging_start_pos  = None
-        self._drag_offset         = None
+        # self._dragging_item       = None
+        # self._dragging_start_pos  = None
+        # self._drag_offset         = None
         self._creation_state: str = 'idle'
         self._creation_prefix: str | None = None
         self._creation_start: QPointF | None = None
@@ -73,6 +75,10 @@ class ComponentScene(QGraphicsScene):
         self._dup_geom = None
 
     # ---------- Public API ----------
+    def select_exclusive(self, item: QGraphicsItem | None):
+        self.clearSelection()
+        if item is not None:
+            item.setSelected(True)
 
     @Slot(str)
     def arm_element_creation(self, prefix: str):
@@ -89,23 +95,14 @@ class ComponentScene(QGraphicsScene):
         """External cancellation hook (tab changes, tool change, etc.)."""
         self._cancel_creation_internal()
 
-    @Slot(object, object, object)
-    def on_item_resize_finished(self, item, new_geometry, old_geometry):
-        """Creates an undo command when an item signals that its resize is complete."""
-        self.item_resized.emit(item, "geometry", new_geometry, old_geometry)
+    # @Slot(object, object, object)
+    # def on_item_resize_finished(self, item, new_geometry, old_geometry):
+    #     """Creates an undo command when an item signals that its resize is complete."""
+    #     self.item_resized.emit(item, "geometry", new_geometry, old_geometry)
 
     # Public helper for FSM / tools
     def snap_to_grid(self, pos: QPointF, level: int = 4) -> QPointF:
         return self.inc_grid.snap_to_grid(pos, level)
-
-    def select_exclusive(self, item: QGraphicsItem):
-        """Deselect all items except `item`, and select `item`."""
-        for other in self.selectedItems():
-            if other is not item:
-                other.setSelected(False)
-        if item is not None and not item.isSelected():
-            item.setSelected(True)
-        self.selectionChanged.emit()
 
     # ─────────────────────────── helpers / utils ──────────────────────────
     def sync_scene_rect(self):
@@ -134,11 +131,6 @@ class ComponentScene(QGraphicsScene):
             if getattr(self, "inc_grid", None) is not None:
                 self.inc_grid.update()
 
-            # If you draw the grid in the scene background instead of an item,
-            # uncomment this:
-            # self.invalidate(self.sceneRect(), QGraphicsScene.BackgroundLayer)
-
-
     @Slot()
     def _on_template_rect_changed(self):
         """Keep scene and grid in sync when the template is resized."""
@@ -148,50 +140,56 @@ class ComponentScene(QGraphicsScene):
 
     # ───────────────────────────── mouse events ───────────────────────────
     def mousePressEvent(self, event: QGraphicsSceneMouseEvent):
-        item = self.itemAt(event.scenePos(), self.views()[0].transform()) if self.views() else None
-        #scene_pos = event.scenePos()
-        # # --- NEW: creation path (Step 4a / 4b) ---
-        # if self._creation_state == 'armed':
-        #     # If the user pressed LMB on blank canvas (no CE), begin creation
-        #     if event.button() == Qt.LeftButton and (item is None or not isinstance(item, ComponentElement)):
-        #         self._creation_state = 'dragging'
-        #         self._creation_start = self.snap_to_grid(event.scenePos()) if hasattr(self, "snap_to_grid") else event.scenePos()
-        #         self._ensure_preview_item()
-        #         self._update_preview(self._creation_start, self._creation_start)
-        #         event.accept()
-        #         return
-        #     # Otherwise (pressed on an element, or not LMB), cancel creation and fall through to normal behavior
-        #     self._cancel_creation_internal()
-            # No return here—let your existing logic (dup/move/select...) run
+        pos = event.scenePos()
+        item = self.itemAt(pos, QTransform())
 
-        # if event.modifiers() & Qt.AltModifier and self._clicked_on_component_element(event.scenePos()):
-        #     self._alt_drag_starting_pos = event.scenePos()
-        #     self._cloned_preview = self.template.registry.clone(item)
-        #     item = self._cloned_preview
+        # Shift-click toggle keeps existing behavior
+        if item and (event.modifiers() & Qt.ShiftModifier):
+            item.setSelected(not item.isSelected())
+            event.accept()
+            return
 
-        # Start alt-drag duplication if Alt is down and we pressed over a ComponentElement
-        if (event.modifiers() & Qt.AltModifier) and isinstance(item, ComponentElement):
-            self.select_exclusive(item) if hasattr(self, "select_exclusive") else None
-            self._begin_alt_dup(item, event.scenePos())
+        # Alt-drag duplication (only when pressed over a ComponentElement)
+        is_component = pc.isproto(item, any_el_type)
+        if (event.modifiers() & Qt.AltModifier) and is_component:
+            if hasattr(self, "select_exclusive"):
+                self.select_exclusive(item)
+            self._begin_alt_dup(item, pos)
             self.alt_drag_original_item = item
             event.accept()
             return
 
-        if is_movable(item):  # For your item type, using the helper function
-            self._dragging_item = item
-            self.select_exclusive(self._dragging_item)
-            snapped_item_pos_at_press = self.snap_to_grid(item.pos())
-            snapped_mouse_press_pos   = self.snap_to_grid(event.scenePos())
-            self._drag_offset = snapped_mouse_press_pos - snapped_item_pos_at_press
-            self._dragging_start_pos = QPointF(item.x(), item.y())  # Store the item's position before drag
-            item.setPos(snapped_item_pos_at_press)                  # Snap item to grid immediately
+        # --- Creation logic ---
+        has_selection = bool(self.selectedItems())
+        over_selectable = self._clicked_over_selectable(pos)  # see helper below
+
+
+        should_begin_creation = (
+            event.button() == Qt.LeftButton
+            and self._creation_state == "armed"
+            and not has_selection
+            and not over_selectable
+            and not (event.modifiers() & (Qt.ShiftModifier | Qt.AltModifier))
+        )
+
+        if should_begin_creation:
+            self._creation_state = "dragging"
+            self._creation_start = pos
+            # If you show a preview rect, initialize it here:
             event.accept()
             return
 
-
+        # Fall back to default handling
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event: QGraphicsSceneMouseEvent):
+        # pos = event.scenePos()
+        # item = self.itemAt(pos, QTransform())
+        # if pc.isproto(item, any_el_type):
+        #     item.hide_handles()
+        #     item.update_handles()
+        #     item.update()
+        #     item.show_handles()
         # --- NEW: creation preview dragging ---
         if self._dup_active:
             self._update_alt_dup(event.scenePos())
@@ -200,15 +198,8 @@ class ComponentScene(QGraphicsScene):
 
         if self._creation_state == 'dragging' and self._creation_start is not None:
             current = self.snap_to_grid(event.scenePos()) if hasattr(self, "snap_to_grid") else event.scenePos()
+            self._ensure_preview_item()
             self._update_preview(self._creation_start, current)
-            event.accept()
-            return
-
-        if self._dragging_item:
-            item = self._dragging_item
-            snapped_current_mouse_pos = self.snap_to_grid(event.scenePos())
-            new_snapped_pos = snapped_current_mouse_pos - self._drag_offset
-            self._dragging_item.setPos(new_snapped_pos)
             event.accept()
             return
 
@@ -250,39 +241,18 @@ class ComponentScene(QGraphicsScene):
                 event.accept()
                 return
 
-
-        # --- YOUR EXISTING LOGIC (unchanged) ---
-        if self._dragging_item and self._dragging_start_pos is not None:
-            geom = self._dragging_item.geometry
-            old_pos = self._dragging_start_pos
-            old = geometry_with_px_pos(geom, old_pos, dpi=self.dpi)
-            new_pos = self._dragging_item.pos()
-            new = geometry_with_px_pos(geom, new_pos, dpi=self.dpi)
-
-            if old_pos != new_pos:
-                self.item_resized.emit(self._dragging_item, "geometry", new, old)
-                    
-        self._dragging_item = None
-        self._drag_offset = None
-        self._dragging_start_pos = None
-
         super().mouseReleaseEvent(event)
 
-        # Cancel on any other “first action” that isn’t a mouse press.
-        # def keyPressEvent(self, event):
-        #     if self._creation_state == 'armed':
-        #         self._cancel_creation_internal()
-        #     super().keyPressEvent(event)
 
-        # def wheelEvent(self, event):
-        #     if self._creation_state == 'armed':
-        #         self._cancel_creation_internal()
-        #     super().wheelEvent(event)
-
-        # def focusOutEvent(self, event):
-        #     if self._creation_state == 'armed':
-        #         self._cancel_creation_internal()
-        #     super().focusOutEvent(event)
+    def keyPressEvent(self, event):
+        if (event.key() == Qt.Key_A) and (event.modifiers() & (Qt.ControlModifier | Qt.MetaModifier)):
+            for it in self.items():
+                if it.flags() & QGraphicsItem.ItemIsSelectable:
+                    it.setSelected(True)
+            event.accept(); return
+        if event.key() == Qt.Key_Escape:
+            self.clearSelection(); event.accept(); return
+        super().keyPressEvent(event)
 
     def dragEnterEvent(self, event: QGraphicsSceneDragDropEvent):
         if self._creation_state == 'armed':
@@ -379,16 +349,15 @@ class ComponentScene(QGraphicsScene):
             self._dup_preview = None
             self._dup_offset  = None
 
-    def _clicked_on_component_element(self, scene_pos: QPointF) -> bool:
-        """True if any existing element is under the click."""
+    def _clicked_over_selectable(self, scene_pos) -> bool:
+        """True if the click is over any selectable, non-preview item."""
         for it in self.items(scene_pos):
-            # Ignore our own temporary preview rect if present
             if it is self._preview_item:
                 continue
-            # If your background/template rect is a known type, you can skip it here as well.
-
-            # Treat any ComponentElement as “occupied”
-            if isinstance(it, ComponentElement):
+            # If you want to restrict to your element types, keep your pc.isproto check:
+            # if not pc.isproto(it, (pc.CE, pc.TE, pc.IE, pc.VE)):
+            #     continue
+            if it.flags() & QGraphicsItem.ItemIsSelectable:
                 return True
         return False
 

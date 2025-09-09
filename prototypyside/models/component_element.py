@@ -3,7 +3,7 @@ from pathlib import Path
 from PySide6.QtCore import Qt, QRectF, QPointF, QSize, Signal, QObject
 from PySide6.QtGui import (QColor, QFont, QPen, QBrush, QPainter, QPixmap, QPalette,
             QAbstractTextDocumentLayout, QTransform, QPainterPath, QPainterPathStroker)
-from PySide6.QtWidgets import QGraphicsItem, QGraphicsObject, QGraphicsSceneMouseEvent, QGraphicsSceneDragDropEvent, QStyleOptionGraphicsItem
+from PySide6.QtWidgets import QGraphicsItem, QGraphicsObject, QGraphicsSceneMouseEvent, QGraphicsSceneDragDropEvent, QStyleOptionGraphicsItem, QStyle
 from typing import Optional, Dict, Any, Union, TYPE_CHECKING
 from prototypyside.views.graphics_items import ResizeHandle
 from prototypyside.views.overlays.element_outline import ElementOutline
@@ -19,6 +19,12 @@ from prototypyside.utils.render_context import RenderContext, RenderMode, TabMod
 
 if TYPE_CHECKING:
     from prototypyside.services.proto_registry import ProtoRegistry
+
+def _qrect_close(a: QRectF, b: QRectF, eps: float = 0.25) -> bool:
+    return (abs(a.x() - b.x()) <= eps and
+            abs(a.y() - b.y()) <= eps and
+            abs(a.width() - b.width()) <= eps and
+            abs(a.height() - b.height()) <= eps)
 
 class ComponentElement(ShapeableElementMixin, QGraphicsObject):
     _serializable_fields = {
@@ -54,8 +60,11 @@ class ComponentElement(ShapeableElementMixin, QGraphicsObject):
     is_raster: bool = False
     item_changed = Signal()
     nameChanged = Signal(str)  # Add this signal
-    property_changed = Signal(str, str, str, object)   # (parent_pid, element_pid, property_name, value)
-    resize_finished = Signal(object, object, object) # item, new_geometry, old_geometry
+    moveCommitted = Signal(object, object, object)
+    geometryAboutToChange = Signal(object)  # old UnitStrGeometry
+    geometryChanged       = Signal(object)  # new UnitStrGeometry
+    rectChanged           = Signal(QRectF)  # convenience (px-space)
+    positionChanged       = Signal(QPointF)
     ### TODO: Should fonts be sticky?
     # new_default_font = Signal(object)
     ###
@@ -69,7 +78,7 @@ class ComponentElement(ShapeableElementMixin, QGraphicsObject):
         parent: Optional[QGraphicsObject] = None
     ):
         super().__init__(parent)
-
+        self._updating_from_itemChange = False  # guard
         # assigned by param
         self.proto = proto
         self._pid = pid
@@ -95,9 +104,16 @@ class ComponentElement(ShapeableElementMixin, QGraphicsObject):
         # these aren't serialized or rehydrated
         self._pre_resize_state = {}
         self._display_outline = True
-
+        self._is_selected = False
         self._is_hovered = False
         self._handles: Dict[HandleType, ResizeHandle] = {}
+
+        self.setFlag(QGraphicsItem.ItemIsSelectable, True)
+        self.setFlag(QGraphicsItem.ItemIsMovable, True)
+        self._group_drag_active = False
+        self._group_drag_items = []
+        self._group_drag_start_pos = {}
+        self._group_anchor_pos = QPointF()
 
         self.setFlags(
             QGraphicsItem.ItemIsSelectable |
@@ -111,10 +127,47 @@ class ComponentElement(ShapeableElementMixin, QGraphicsObject):
         self._outline = ElementOutline(
             target_element=self
         )
-
+        
         self.create_handles()
 
     # ---- UnitStrGeometry rect and position handling ---- #
+    @property
+    def geometry(self):
+        return self._geometry
+
+    @geometry.setter
+    def geometry(self, new_geom: UnitStrGeometry):
+        if new_geom is self._geometry:
+            return
+
+        old = self._geometry
+        old_px_rect = old.to("px", dpi=self._dpi).rect if old else None
+        new_px      = new_geom.to("px", dpi=self._dpi)
+        new_px_rect = new_px.rect
+
+        # Only size changes require prepareGeometryChange
+        if old_px_rect is None or old_px_rect != new_px_rect:
+            self.prepareGeometryChange()
+
+        # --- emit "about to" BEFORE mutation
+        self.geometryAboutToChange.emit(old)
+
+        # mutate
+        self._geometry = new_geom
+
+        # keep item position in sync with geometry pos
+        if self.pos() != new_px.pos:
+            super().setPos(new_px.pos)
+
+        # your existing side-effects
+        self.update_handles()
+        self._invalidate_shape_cache()
+        print (f"Geometry after change:\n - Rect: {new_px.rect}\n - Pos: {new_px.pos}")
+        # --- emit "changed" AFTER mutation
+        self.geometryChanged.emit(self._geometry)
+        self.rectChanged.emit(new_px_rect)
+        self.positionChanged.emit(new_px.pos)
+        self.update()
 
     def boundingRect(self) -> QRectF:
         return self._geometry.to("px", dpi=self._dpi).rect
@@ -124,16 +177,27 @@ class ComponentElement(ShapeableElementMixin, QGraphicsObject):
     def setRect(self, new_rect: QRectF):
         if self._geometry.to("px", dpi=self.dpi).rect == new_rect:
             return
-        self.prepareGeometryChange()
+        # geometry setter will call prepareGeometryChange() if needed and emit signals
         self.geometry = geometry_with_px_rect(self._geometry, new_rect, dpi=self.dpi)
         self._invalidate_shape_cache()
 
     def itemChange(self, change: QGraphicsItem.GraphicsItemChange, value):
-        if change == QGraphicsItem.ItemPositionChange and value != self.pos():
-            signals_blocked = self.signalsBlocked()
-            self.blockSignals(True)
-            geometry_with_px_pos(self._geometry, value, dpi=self.dpi)
-            self.blockSignals(signals_blocked)
+        # Use post-change hook; no prepareGeometryChange for pure pos changes
+        if change == QGraphicsItem.ItemPositionHasChanged and not self._updating_from_itemChange:
+            self._updating_from_itemChange = True
+            try:
+                old = self._geometry
+                new_geom = geometry_with_px_pos(old, self.pos(), dpi=self.dpi)
+                if new_geom.to("px", dpi=self.dpi).pos != old.to("px", dpi=self.dpi).pos:
+                    # keep signals consistent with setter:
+                    self.geometryAboutToChange.emit(old)
+                    self._geometry = new_geom
+                    self._invalidate_shape_cache()
+                    self.geometryChanged.emit(self._geometry)
+                    self.positionChanged.emit(self._geometry.to("px", dpi=self._dpi).pos)
+            finally:
+                self._updating_from_itemChange = False
+
         return super().itemChange(change, value)
 
     @property
@@ -191,23 +255,6 @@ class ComponentElement(ShapeableElementMixin, QGraphicsObject):
             self._invalidate_shape_cache()
             # unit change may not require geometry change; update visuals anyway
             self.update()
-
-    @property
-    def geometry(self):
-        return self._geometry
-    
-
-    @geometry.setter
-    def geometry(self, new_geom: UnitStrGeometry):
-        if self._geometry == new_geom:
-            return
-        self.prepareGeometryChange()
-        self._geometry = new_geom
-        super().setPos(self._geometry.px.pos)
-        self.update_handles()
-        self._invalidate_shape_cache()
-        self.item_changed.emit()
-        self.update()
 
     @property
     def corner_radius(self):
@@ -400,40 +447,49 @@ class ComponentElement(ShapeableElementMixin, QGraphicsObject):
         Subclasses should override this to render their specific content
         """
         pass
-    
+        
     def paint_border(self, painter: QPainter, rect: QRectF):
         """
-        Paint the element border
+        Paint the element border fully inside the given rect.
         """
         bw = self.border_width.to("px", dpi=self.dpi)
         if bw <= 0:
             return
-            
+
         painter.save()
         pen = QPen(self.border_color)
         pen.setWidthF(bw)
         painter.setPen(pen)
         painter.setBrush(Qt.NoBrush)
-        
-        # Handle rounded corners if applicable
-        if hasattr(self, 'corner_radius') and self.corner_radius.to("px", dpi=self.dpi) > 0:
-            cr = self.corner_radius.to("px", dpi=self.dpi)
-            painter.drawRoundedRect(rect, cr, cr)
+
+        # Shrink rect by half border width so the stroke stays inside
+        inset = bw / 2.0
+        inner_rect = rect.adjusted(inset, inset, -inset, -inset)
+
+        if hasattr(self, "corner_radius") and self.corner_radius.to("px", dpi=self.dpi) > 0:
+            cr = max(0.0, self.corner_radius.to("px", dpi=self.dpi) - inset)
+            painter.drawRoundedRect(inner_rect, cr, cr)
         else:
-            painter.drawRect(rect)
-            
+            painter.drawRect(inner_rect)
+
         painter.restore()
+
     
     def paint(self, painter: QPainter, option, widget=None):
         """
         Default paint method uses GUI context
         """
+
         context = RenderContext(
             mode=RenderMode.GUI,
             tab_mode=TabMode.COMPONENT,
             dpi=self.dpi
         )
         self.render_with_context(painter, context)
+        if option.state & QStyle.State_Selected:
+            self.show_handles()
+        else:
+            self.hide_handles()
 
     def hoverEnterEvent(self, event):
         self._is_hovered = True
@@ -510,18 +566,6 @@ class ComponentElement(ShapeableElementMixin, QGraphicsObject):
             "transform": scene_tx,
             "inv_transform": inv_tx,
         }
-
-    def finalize_resize(self):
-        if not self._pre_resize_state:
-            return
-
-        # Get stored geometry instead of rect
-        old_geometry = self._pre_resize_state.get('geometry')
-        new_geometry = self.geometry
-
-        if old_geometry != new_geometry:
-            self.resize_finished.emit(self, new_geometry, old_geometry)
-        self._pre_resize_state.clear()
 
     def _edge_centers(self, to_scene=True):
         # Always a QRectF in *local* coords
@@ -706,3 +750,41 @@ class ComponentElement(ShapeableElementMixin, QGraphicsObject):
             painter.fillRect(QRectF(0, 0, rect_px.width(), rect_px.height()), bg)
         # subclasses draw content here (no global translations)
         painter.restore()
+
+    def mousePressEvent(self, event):
+        if event.button() == Qt.LeftButton and self.isSelected():
+            items = self.scene().selectedItems() if self.scene() else [self]
+            self._group_drag_items = [it for it in items
+                                      if (it is self) or (it.flags() & QGraphicsItem.ItemIsMovable)]
+            self._group_drag_start_pos = {it: it.pos() for it in self._group_drag_items}
+            self._group_anchor_pos = self.pos()
+            self._group_drag_active = True
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if self._group_drag_active:
+            super().mouseMoveEvent(event)  # move the lead item (snapping/constraints happen here)
+            delta = self.pos() - self._group_anchor_pos
+            if not delta.isNull():
+                for it in self._group_drag_items:
+                    if it is self: 
+                        continue
+                    it.setPos(self._group_drag_start_pos[it] + delta)
+        else:
+            super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        try:
+            super().mouseReleaseEvent(event)
+        finally:
+            if self._group_drag_active:
+                ends = {it: it.pos() for it in self._group_drag_items}
+                # Only emit if anything actually moved
+                moved = any(ends[it] != self._group_drag_start_pos[it] for it in self._group_drag_items)
+                if moved:
+                    self.moveCommitted.emit(self._group_drag_items, self._group_drag_start_pos, ends)
+            # cleanup
+            self._group_drag_active = False
+            self._group_drag_items = []
+            self._group_drag_start_pos = {}
+            self._group_anchor_pos = QPointF()

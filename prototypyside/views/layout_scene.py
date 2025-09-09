@@ -95,3 +95,21 @@ class LayoutScene(QGraphicsScene):
             event.acceptProposedAction()
         else:
             super().dropEvent(event)
+
+    def keyPressEvent(self, event):
+        if (event.key() == Qt.Key_A) and (event.modifiers() & (Qt.ControlModifier | Qt.MetaModifier)):
+            for it in self.items():
+                if it.flags() & QGraphicsItem.ItemIsSelectable:
+                    it.setSelected(True)
+            event.accept(); return
+        if event.key() == Qt.Key_Escape:
+            self.clearSelection(); event.accept(); return
+        super().keyPressEvent(event)
+
+    def mousePressEvent(self, event):
+        item = self.itemAt(event.scenePos(), QTransform())
+        if item and (event.modifiers() & Qt.ShiftModifier):
+            item.setSelected(not item.isSelected())
+            event.accept()
+            return
+        super().mousePressEvent(event)

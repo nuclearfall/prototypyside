@@ -231,8 +231,7 @@ class ImageElement(ComponentElement):
                 setattr(inst, f"{attr}", from_fn(raw))
             else:
                 setattr(inst, f"_{attr}", from_fn(raw))
-        content = data.get("content")
-        inst.content = None
+        content = data.get("content", None)
         inst.content = content
         return inst
 

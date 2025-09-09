@@ -117,8 +117,11 @@ class ProtoClass(Enum):
         return cls._by_class().get(kls)
 
     @classmethod
-    def isproto(cls, obj, pc_type):
-        return cls.from_class(obj) == pc_type
+    def isproto(cls, obj, pc_type_or_list):
+        pc = cls.from_class(obj)
+        if isinstance(pc_type_or_list, (list, set, tuple)):
+            return any(pc == t for t in pc_type_or_list)
+        return pc == pc_type_or_list
 
 
     # ---------- PID helpers ----------

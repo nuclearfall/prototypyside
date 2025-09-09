@@ -2,7 +2,7 @@ from dataclasses import dataclass, field
 from typing import List, Optional, Dict, Tuple, Any, TYPE_CHECKING
 from enum import Enum, auto
 import json
-from PySide6.QtWidgets import QGraphicsObject, QGraphicsItem, QStyleOptionGraphicsItem, QGraphicsSceneMouseEvent
+from PySide6.QtWidgets import QGraphicsObject, QGraphicsItem, QStyle, QStyleOptionGraphicsItem, QGraphicsSceneMouseEvent
 from PySide6.QtCore import Qt, QRectF, QPointF, QSizeF, QMarginsF, Signal
 from PySide6.QtGui import QPainter, QPixmap, QColor, QImage, QPen, QBrush,  QPageLayout, QPageSize, QTransform
 
@@ -60,11 +60,13 @@ class LayoutSlot(QGraphicsObject):
         self._hovered = False
         self._set_print_mode = False
         self._rotation = 0
+        self._component_pid = None
 
+        self._hovered = False
         self.setAcceptHoverEvents(True)
         self.setAcceptedMouseButtons(Qt.LeftButton)
-        self.setFlag(QGraphicsObject.ItemIsSelectable, False)
-        self.setFlag(QGraphicsObject.ItemIsMovable, False)
+        self.setFlag(QGraphicsObject.ItemIsSelectable, True)
+        self.setFlag(QGraphicsObject.ItemIsFocusable, True)
 
     def boundingRect(self) -> QRectF:
         # LOCAL rect only (no x,y)
@@ -208,6 +210,7 @@ class LayoutSlot(QGraphicsObject):
     @content.setter
     def content(self, obj):
         self._content = obj
+        self._component_pid = obj.pid if obj else None
         for item in obj.items:
             item._display_outline = False
         if ProtoClass.isproto(self.content, ProtoClass.CC):
@@ -339,9 +342,6 @@ class LayoutSlot(QGraphicsObject):
         return inst
    
     def paint(self, painter: QPainter, option, widget=None):
-        if not self._content:
-            return
-        
         # Create appropriate context based on current mode
         context = RenderContext(
             mode=RenderMode.GUI,
@@ -351,13 +351,39 @@ class LayoutSlot(QGraphicsObject):
         )
         
         # Render content as raster image for LayoutTab GUI
-        if context.is_layout_tab:
+        if context.is_layout_tab and self._content:
             img = self._content.to_raster_image(context)
             painter.drawImage(QPointF(0, 0), img)
-        else:
+        elif self._content:
+            self._content
             # Direct rendering for ComponentTab
             self._content.render(painter, context)
-    
+
+        # --- OUTLINE (last, on top) ---
+        if context.mode is RenderMode.GUI:
+            r = self.boundingRect()  # (0,0,w,h) in item-local coords
+            painter.save()
+
+            # Pen: cosmetic 1px cyan outline
+            pen = QPen(QColor(0, 195, 255, 200))
+            pen.setCosmetic(True)
+            pen.setWidthF(1.0)
+            painter.setPen(pen)
+
+            # Brush: none by default; light fill on hover, stronger when selected
+            if self.isSelected():
+                brush = QBrush(QColor(0, 195, 255, 70))
+            elif option.state & QStyle.State_MouseOver:
+                brush = QBrush(QColor(0, 195, 255, 35))
+            else:
+                brush = Qt.NoBrush
+            painter.setBrush(brush)
+
+            # Inset so the 1px stroke doesn't get clipped
+            r = r.adjusted(0.5, 0.5, -0.5, -0.5)
+            painter.drawRect(r)
+            painter.restore()
+
     def export_to_qimage(self, export_dpi: int) -> QImage:
         """
         Raster export method

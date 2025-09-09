@@ -6,9 +6,9 @@ from functools import partial
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QComboBox, QCheckBox,
     QLineEdit, QLabel, QToolBar, QListWidgetItem, QMessageBox, QGraphicsView,
-    QWidgetAction, QSizePolicy, QFrame
+    QWidgetAction, QSizePolicy, QFrame, QGraphicsObject
 )
-from PySide6.QtCore import Qt, Signal, Slot, QPointF
+from PySide6.QtCore import Qt, Signal, Slot, QPointF, QObject, QEvent 
 from PySide6.QtGui import QColor, QKeySequence, QShortcut, QUndoStack, QPainter
 
 from prototypyside.views.component_scene import ComponentScene
@@ -31,8 +31,10 @@ from prototypyside.services.app_settings import AppSettings
 
 from prototypyside.services.undo_commands import (
     AddElementCommand, RemoveElementCommand, CloneElementCommand,
-    ResizeTemplateCommand, ChangePropertyCommand
+    ResizeTemplateCommand, ChangePropertyCommand, MoveSelectionCommand
 )
+pc = ProtoClass
+elem_types = (pc.CE, pc.TE, pc.IE, pc.VE)
 
 if TYPE_CHECKING:
     from PySide6.QtWidgets import QGraphicsItem
@@ -54,7 +56,10 @@ class ComponentTab(QWidget):
         super().__init__(parent)
         self.main_window = main_window
         presets = self.main_window.settings
-        self.settings = presets
+        self.settings = AppSettings(
+            display_unit=presets.display_unit, 
+            print_unit=presets.print_unit
+        )
         self._dpi = self.settings.dpi           # <- REQUIRED: no fallback, no None
         self._unit = self.settings.unit         # scene logical unit (e.g., "in")
         self._template = template
@@ -63,14 +68,21 @@ class ComponentTab(QWidget):
         self.registry = registry
         self._show_grid   = True
         self._snap_grid   = True
-        # self._print_lines = True
 
+        # state to aggregate a gesture:
+        self._gesture_active = False
+        self._old_rects = {}   # item -> QRectF
+        self._new_rects = {}   # item -> QRectF
+        self._old_positions = {}  # item -> QPointF
+        self._new_positions = {}
+        self._old_by_item = {}  # {item: UnitStrGeometry}
+        self._new_by_item = {}  # {item: UnitStrGeometry}
+        self._connected_items = []
         self.selected_item: Optional[object] = None
-
-        self._current_drawing_color = QColor(0, 0, 0) # For drawing tools
-
+        for item in self.template.items:
+            self._connect_item_signals(item)
         self.setup_ui()
-    
+   
     def focusInEvent(self, event):
         super().focusInEvent(event)
         # Assuming you have a way to get the main window, e.g., self.window()
@@ -88,9 +100,6 @@ class ComponentTab(QWidget):
 
         self.create_toolbar()
         #toolbar_container.addWidget(self.measure_bar)
-
-        main_layout.addLayout(toolbar_container)
-
         # The QGraphicsView will be the dominant part of the tab
 
 
@@ -101,7 +110,6 @@ class ComponentTab(QWidget):
         self.setup_element_palette()
         self.setup_layers_panel()
         #self._setup_shortcuts()
-        self.set_item_controls_enabled(False) # Initial state: no item selected
 
     def build_scene(self):
         # create grid
@@ -110,14 +118,9 @@ class ComponentTab(QWidget):
         self.scene = ComponentScene(self.settings, template=self.template, grid=self.inc_grid)
         if not self.template.scene():
             self.scene.addItem(self.template)
-        for el in self.template.items:
-            print(f"el is type: {type(el)}")
-            el.setParentItem(self.template)
-            if not el.scene():
-                self.scene.addItem(el)
         self.scene.setSceneRect(rect)
         # print(f"Scene rect in pixels is {self.template.geometry.to("px", dpi=self.settings.dpi).rect}")
-        self.view  = ComponentView(self.scene)
+        self.view = ComponentView(self.scene)
         self.view.setRenderHints(QPainter.Antialiasing | QPainter.TextAntialiasing | QPainter.SmoothPixmapTransform)
         self.view.setViewportUpdateMode(QGraphicsView.FullViewportUpdate)
         self.view.setOptimizationFlag(QGraphicsView.DontSavePainterState)
@@ -135,11 +138,14 @@ class ComponentTab(QWidget):
 
         # Connect signals specific to this tab's template and scene
         self.template.template_changed.connect(self.update_component_scene)
-        self.template.item_z_order_changed.connect(self.update_layers_panel)
+        # self.template.item_z_order_changed.connect(self.update_layers_panel)
         self.scene.selectionChanged.connect(self.on_selection_changed)
+
+        # hook scene press/release to bracket gestures
+        self.scene.installEventFilter(self)
         self.scene.item_dropped.connect(self.add_item_from_drop)
         self.scene.item_cloned.connect(self.clone_item)
-        self.scene.item_resized.connect(self.on_property_changed)
+        # self.scene.item_resized.connect(self.on_property_changed)
 
     @Slot()
     def update_component_scene(self):
@@ -174,22 +180,22 @@ class ComponentTab(QWidget):
         self.palette.on_item_type_selected.connect(self.clear_scene_selection)
         #self.palette.on_item_type_selected.connect(self.add_item_from_drop)
         # User clicks a type in the palette; scene arms creation mode.
-        #self.palette.on_item_type_selected.connect(self.scene.arm_element_creation)
+        self.palette.on_item_type_selected.connect(self.scene.arm_element_creation)
         # If scene cancels (mouse move, key, focus, or invalid press), clear the palette highlight.
         self.scene.creation_cancelled.connect(self.palette.clear_active_selection)
         # self.scene.item_dropped.connect(self.add_item_from_drop)
         # --- NEW: Scene -> Tab (Step 6 → 7) ---
-        #mself.scene.create_item_with_dims.connect(self.add_item_with_dims)
+        self.scene.create_item_with_dims.connect(self.add_item_with_dims)
 
     def setup_property_editor(self):
         # This will be a widget that the QMainWindow will place in a DockWidget
         self.property_panel = PropertyPanel(None, display_unit=self.unit, parent=self, dpi=self.settings.dpi)
         self.property_panel.property_changed.connect(self.on_property_changed)
+        self.property_panel.batch_property_changed.connect(self.on_batch_property_changed)
         # self.property_panel.geometry_changed.connect(self.on_geometry_changed)
         self.remove_item_btn = QPushButton("Remove Selected Element")
         self.remove_item_btn.setMaximumWidth(200)
         self.remove_item_btn.clicked.connect(self.remove_selected_item)
-        self.set_item_controls_enabled(False) # Ensure this disables the new button too
 
     def setup_layers_panel(self):
         self.layers_list = LayersListWidget(self)
@@ -209,7 +215,7 @@ class ComponentTab(QWidget):
         self.unit_selector = QComboBox()
         self.unit_selector.addItems(["in", "cm", "mm", "pt", "px"])
         self.unit_selector.setCurrentText(self._unit)
-        self.unit_selector.currentTextChanged.connect(self.on_unit_change) 
+        self.unit_selector.currentTextChanged.connect(self.on_unit_change)
 
         # Snap to Grid
         self.snap_checkbox = QCheckBox("Snap to Grid")
@@ -273,7 +279,7 @@ class ComponentTab(QWidget):
 
     @property
     def dpi(self):
-        self._dpi
+        return self._dpi
 
     @dpi.setter
     def dpi(self, value):
@@ -287,16 +293,13 @@ class ComponentTab(QWidget):
     def template(self):
         return self._template
 
-    @template.setter
-    def template(self, new):
-        if new != self._template and isinstance(new, ProtoClass.CT):
-            self._template = new
-
     @Slot(str)
     def on_unit_change(self, unit: str):
         self.settings.unit = unit
         self.template_dims_field.on_unit_change(unit)
         self.measure_bar.update()
+        self.corners_field.on_unit_change(unit)
+        self.bleed_field.on_unit_change(unit)
         self.property_panel.on_unit_change(unit)
 
     # called from menu/toolbar checkboxes:
@@ -323,150 +326,322 @@ class ComponentTab(QWidget):
         # Recalculate scene rect AFTER the property change
         self.scene.sync_scene_rect()
 
+    def _wire_panel_live_updates(self, items: list):
+        """Connect selected items' change signals to the panel for read-only refresh."""
+        # Disconnect prior
+        for it in getattr(self, "_panel_items", []):
+            try:
+                it.geometryChanged.disconnect(self._panel_on_item_geometry)
+            except Exception:
+                pass
+            try:
+                # Optional generic data change signal if your elements expose it
+                it.item_changed.disconnect(self._panel_on_item_generic)
+            except Exception:
+                pass
+
+        self._panel_items = list(items or [])
+
+        # Connect new
+        for it in self._panel_items:
+            # Live geometry refresh
+            it.geometryChanged.connect(self._panel_on_item_geometry)
+            # If elements have an item_changed signal for non-geometry props, wire it too
+            if hasattr(it, "item_changed"):
+                it.item_changed.connect(self._panel_on_item_generic)
+
+    @Slot(object)
+    def _panel_on_item_geometry(self, new_geom):
+        """Selected item geometry changed; ask panel to refresh without emitting changes."""
+        it = self.sender()
+        # Call a 'read-only' update on the panel (no undo, no property_changed emit)
+        if hasattr(self.property_panel, "on_external_property_changed"):
+            self.property_panel.on_external_property_changed(it, "geometry", new_geom)
+        else:
+            # Fallback: refresh entire panel targets if you don't have a targeted updater
+            self.property_panel.refresh()
+
     @Slot()
+    def _panel_on_item_generic(self):
+        """Selected item changed some other property; do a light refresh."""
+        if hasattr(self.property_panel, "refresh_selected"):
+            self.property_panel.refresh_selected()
+        else:
+            self.property_panel.refresh()
+
+    @Slot(object, str, object, object)
     def on_property_changed(self, target, prop, new, old):
         command = ChangePropertyCommand(target, prop, new, old)
         self.undo_stack.push(command)
 
-    def get_selected_item(self) -> Optional[ComponentElement]:
-        items = self.scene.selectedItems()
-        if items:
-            return items[0] if isinstance(items[0], ComponentElement) else None
-        return None
+    @Slot(list, str, object, list)
+    def on_batch_property_changed(self, items, prop, new_value, old_values):
+        # push a single undoable command that applies to all items
+        # (or loop and push a macro-command with child commands)
+        for it, old in zip(items, old_values):
+            setattr(it, prop, new_value)
+            if hasattr(it, "element_changed"):
+                it.element_changed.emit()
 
-    # def clear(self):
-    #     self.clear_scene_selection()
-    #     i = 0
-    #     while i < len(self.template.items):
-    #         self.template.remove_item(i)
-    #         i += 1
-    #     self.scene.selectedItems() = []
+    # --- Add these helpers somewhere in your class ---
+    def get_primary_selected_item(self):
+        """Convenience: first selected or None (for legacy single-target UIs)."""
+        items = self.get_selected_items()
+        return items[0] if items else None
 
+    # --- ComponentTab ---
 
-    def _handle_new_selection(self, new):
-        old = self.selected_item
-        if old is new:
-            return
-
-        # Cleanup previous selection
-        if old:
-            old.hide_handles()
-            try:
-                old.item_changed.disconnect(self.on_item_data_changed)
-            except RuntimeError:
-                pass  # Signal wasn't connected
-
-        # Update selection
-        self.selected_item = new
-
-        if new:
-            new.show_handles()
-            try:
-                new.item_changed.connect(self.on_item_data_changed)
-            except RuntimeError:
-                pass  # Already connected, which shouldn't happen due to above logic
-            self.property_panel.set_target(new)
-            self._update_layers_selection(new)
-        else:
-            self.property_panel.clear_target()
-            self._clear_layers_selection()
-
-        self.set_item_controls_enabled(bool(new))
-
+    def get_selected_items(self) -> list:
+        """Return currently selected ComponentElements in the scene."""
+        return [it for it in self.scene.selectedItems() if pc.isproto(it, elem_types)]
 
     @Slot()
     def on_selection_changed(self):
-        """Handles selection changes from both scene and layers list"""
-        # Get selection source (prioritize scene selection)
-        if self.scene.selectedItems():
-            target = selected = self.scene.selectedItems()[0]
+        """Entry point from QGraphicsScene.selectionChanged."""
+        items = self.get_selected_items()
+        self._handle_new_selection(items)
+
+    def _handle_new_selection(self, items, *, source: str = "scene"):
+        """
+        Centralized selection handler.
+        - items: list[QGraphicsItem]; we keep only ComponentElements.
+        - Updates PropertyPanel with full list (InDesign-style).
+        - Mirrors selection to Layers.
+        - Enforces handle policy once.
+        """
+        # 1) Normalize & de-dup check
+        sel = [it for it in (items or []) if pc.isproto(it, elem_types)]
+        current_ids = frozenset(map(id, sel))
+        if hasattr(self, "_last_selection_ids") and current_ids == getattr(self, "_last_selection_ids", frozenset()):
+            # Keep panel fresh even if selection didn't change structurally
+            if sel:
+                self.property_panel.refresh()
+            else:
+                self.property_panel.clear_target()
+            self._apply_handle_policy(sel)
+            return
+        self._last_selection_ids = current_ids
+
+        # 2) Update PropertyPanel (multi-target)
+        if sel:
+            self.property_panel.set_targets(sel)       # full list (shows common/mixed)
+            self.property_panel.set_panel_enabled(True)
+            self.remove_item_btn.setEnabled(True)
         else:
-            selected = None
-        
-        self._handle_new_selection(selected)
+            self.property_panel.clear_target()
+            self.property_panel.set_panel_enabled(False)
+            self.remove_item_btn.setEnabled(False)
+
+        self._wire_panel_live_updates(sel)
+        # 3) Mirror into Layers without loops
+        if hasattr(self, "layers_list"):
+            try:
+                self.layers_list.blockSignals(True)
+                self._update_layers_selection(sel)
+            finally:
+                self.layers_list.blockSignals(False)
+
+        # 5) Status line (optional)
+        if hasattr(self, "show_status_message"):
+            if not sel:
+                self.show_status_message("No selection.", "info")
+            elif len(sel) == 1:
+                self.show_status_message(f"Selected: {sel[0].name}", "info")
+            else:
+                self.show_status_message(f"{len(sel)} items selected.", "info")
+
+        # 6) Handle visibility policy (single → one shows; multi → all show)
+        self._apply_handle_policy(sel)
+
+    def set_selection(self, items):
+        """
+        items may be:
+          - None or []: no selection
+          - a single item
+          - a list of items
+        """
+        # Normalize to list
+        if items is None:
+            items = []
+        elif not isinstance(items, (list, tuple, set)):
+            items = [items]
+
+        if not items:
+            self._clear_targets()
+            self._disable_panel()
+            return
+
+        # Exactly one
+        self._set_target(items[0])
+        self._enable_panel()
 
     @Slot(QListWidgetItem)
-    def on_layers_list_item_clicked(self, item):
-        """Handles selection from layers list"""
-        item = item.data(Qt.UserRole)
-        if item:
-            self.scene.blockSignals(True)
+    def on_layers_list_item_clicked(self, list_item):
+        """Compatibility: single-click selects exactly one item."""
+        elem = list_item.data(Qt.UserRole)
+        if not elem:
+            return
+        self.scene.blockSignals(True)
+        try:
             self.scene.clearSelection()
-            item.setSelected(True)
+            elem.setSelected(True)
+        finally:
             self.scene.blockSignals(False)
-            self._handle_new_selection(item)
+        self.on_selection_changed()  # propagate changes
 
-    def _update_layers_selection(self, item):
-        """Sync layers list selection with current item"""
+    @Slot(list)
+    def on_layers_list_selection_changed(self, elements):
+        """Mirror layers panel multi-selection into the scene."""
+        elems_set = set(elements)
+        self.scene.blockSignals(True)
+        try:
+            # Clear all, then reselect the chosen ones
+            for it in self.scene.items():
+                if hasattr(it, "setSelected"):
+                    it.setSelected(False)
+            for e in elems_set:
+                e.setSelected(True)
+        finally:
+            self.scene.blockSignals(False)
+        self.on_selection_changed()
+
+
+    # --- Fix and generalize your layers selection sync ---
+
+    def _update_layers_selection(self, selected_elements: list):
+        """Sync layers list selection with a list of selected scene items."""
+        sel_set = set(selected_elements)
         self.layers_list.blockSignals(True)
-        self.layers_list.clearSelection()
-        
-        for i in range(self.layers_list.count()):
-            item = self.layers_list.item(i)
-            if item.data(Qt.UserRole) is item:
-                item.setSelected(True)
-                self.layers_list.scrollToItem(item)
-                break
-        
-        self.layers_list.blockSignals(False)
+        try:
+            self.layers_list.clearSelection()
+            for i in range(self.layers_list.count()):
+                row = self.layers_list.item(i)
+                elem = row.data(Qt.UserRole)
+                row.setSelected(elem in sel_set)
+                # scroll first selected into view (optional)
+            # Optional: ensure top-most selected is visible
+            for i in range(self.layers_list.count()):
+                row = self.layers_list.item(i)
+                if row.isSelected():
+                    self.layers_list.scrollToItem(row)
+                    break
+        finally:
+            self.layers_list.blockSignals(False)
 
     def _clear_layers_selection(self):
         self.layers_list.blockSignals(True)
-        self.layers_list.clearSelection()
-        self.layers_list.blockSignals(False)
+        try:
+            self.layers_list.clearSelection()
+        finally:
+            self.layers_list.blockSignals(False)
 
-    @Slot()
-    def update_layers_panel(self):
-        self.layers_list.update_list(self.template.items)
+
+    # --- Z-order helpers and actions (multi-select aware) ---
 
     def _adjust_z_value(self, item, new_z):
         """Helper for z-order operations"""
         item.setZValue(new_z)
+        # Keep internal list sorted (lowest->highest or however you rely on it)
         self.template.items.sort(key=lambda e: e.zValue())
         self.template.item_z_order_changed.emit()
 
     @Slot(int)
     def adjust_z_order_of_selected(self, direction: int):
-        if not (item := self.get_selected_item()):
+        """
+        Move selection up/down one step as a *block*, preserving relative order.
+        direction > 0 => up (toward front), direction < 0 => down (toward back)
+        """
+        sel = self.get_selected_items()
+        if not sel:
             return
-        
-        items = self.template.items
-        sorted_items = sorted(items, key=lambda e: e.zValue())
-        idx = sorted_items.index(item)
-        
-        if direction > 0 and idx < len(sorted_items) - 1:  # Move up
-            next_z = sorted_items[idx + 1].zValue()
-            self._adjust_z_value(item, next_z + 1)
-        elif direction < 0 and idx > 0:  # Move down
-            prev_z = sorted_items[idx - 1].zValue()
-            self._adjust_z_value(item, prev_z - 1)
+
+        items = list(self.template.items)
+        # Sort by current Z ascending so index order matches paint order (back->front)
+        items.sort(key=lambda e: e.zValue())
+        idx_map = {e: i for i, e in enumerate(items)}
+
+        selected_flags = [it in sel for it in items]  # parallel to items
+
+        if direction > 0:  # move up: scan from top toward back so we swap safely
+            for i in range(len(items) - 2, -1, -1):  # second-to-last down to 0
+                if selected_flags[i] and not selected_flags[i + 1]:
+                    # swap i and i+1
+                    items[i], items[i + 1] = items[i + 1], items[i]
+                    selected_flags[i], selected_flags[i + 1] = selected_flags[i + 1], selected_flags[i]
+        elif direction < 0:  # move down: scan from back toward top
+            for i in range(1, len(items)):
+                if selected_flags[i] and not selected_flags[i - 1]:
+                    # swap i and i-1
+                    items[i], items[i - 1] = items[i - 1], items[i]
+                    selected_flags[i], selected_flags[i - 1] = selected_flags[i - 1], selected_flags[i]
+
+        # Reassign Zs with spacing so we keep clean ordering
+        step = 100.0
+        base = 0.0
+        for i, e in enumerate(items):
+            new_z = base + step * (i + 1)
+            if e.zValue() != new_z:
+                e.setZValue(new_z)
+
+        self.template.items = items
+        self.template.item_z_order_changed.emit()
+        self.update_layers_panel()
+
+    @Slot()
+    def update_layers_panel(self):
+        self.layers_list.update_list(self.template.items)
 
     @Slot()
     def bring_selected_to_front(self):
-        if item := self.get_selected_item():
-            max_z = max(e.zValue() for e in self.template.items)
-            if item.zValue() < max_z:
-                self._adjust_z_value(item, max_z + 1)
+        sel = self.get_primary_selected_item()
+        if not sel:
+            return
+
+        # Maintain relative order among the selected when bringing forward
+        non_sel = [e for e in self.template.items if e not in sel]
+        step = 100.0
+        base = 0.0
+        # new order: non-selected (back) + selected (front)
+        new_order = non_sel + sel
+        for i, e in enumerate(sorted(new_order, key=lambda e: (e in sel, e.zValue()))):
+            # The sort above ensures stable ordering; we’ll assign final Zs below anyway.
+            pass
+
+        # Assign Z strictly by this order (back->front)
+        for i, e in enumerate(new_order):
+            e.setZValue(base + step * (i + 1))
+
+        self.template.items = new_order
+        # self.template.item_z_order_changed.emit()
+        self.update_layers_panel()
 
     @Slot()
     def send_selected_to_back(self):
-        if item := self.get_selected_item():
-            min_z = min(e.zValue() for e in self.template.items)
-            if item.zValue() > min_z:
-                self._adjust_z_value(item, min_z - 1)
+        sel = self.get_selected_items()
+        if not sel:
+            return
+
+        non_sel = [e for e in self.template.items if e not in sel]
+        step = 100.0
+        base = 0.0
+        # new order: selected (back) + non-selected (front)
+        new_order = sel + non_sel
+
+        for i, e in enumerate(new_order):
+            e.setZValue(base + step * (i + 1))
+
+        self.template.items = new_order
+        # self.template.item_z_order_changed.emit()
+        self.update_layers_panel()
 
     @Slot(object, int)
     def reorder_item_z_from_list_event(self, item: object, direction: int):
-        # Reuse existing logic
-        self.adjust_z_order_of_selected(direction)
-
-    @Slot("QGraphicsItem")
-    def select_item_from_layers_list(self, item: "QGraphicsItem"):
-        if isinstance(item, ComponentElement):
-            self.scene.blockSignals(True)
-            self.scene.clearSelection()
-            item.setSelected(True)
-            self.scene.blockSignals(False)
+        """
+        Layers panel notified us a manual reorder occurred.
+        You can either rebuild Zs from layers order or reuse the move-by-one API.
+        Here we just refresh layers and scene; Zs are already set by the panel handler.
+        """
+        self.update_layers_panel()
 
     @Slot()
     def on_item_data_changed(self):
@@ -478,19 +653,6 @@ class ComponentTab(QWidget):
         if self.scene.selectedItems():
             self.scene.clearSelection()
 
-    @Slot(ProtoClass)
-    def add_item_from_action(self, proto: ProtoClass):
-        pass
-        # proto = ProtoClass.from_prefix(prefix)
-        # if proto:
-        #     # set the defaults to reasonable values
-        #     default_geom = UnitStrGeometry(width="0.75in", height="0.5in", 
-        #         x="0.125in", y="0.125.in", dpi=self.settings.dpi)
-        #     command = AddElementCommand(proto, self, default_geom)
-        #     self.undo_stack.push(command)
-        #     self.selected_item = self.registry.get_last()
-        #     self.selected_item.resize_finished.connect(self.scene.on_item_resize_finished)
-
     @Slot(ProtoClass, object)
     def add_item_with_dims(self, proto: ProtoClass, geom):
         """
@@ -499,12 +661,10 @@ class ComponentTab(QWidget):
         """
         command = AddElementCommand(proto, self, geom)
         self.undo_stack.push(command)
-
+        item = self.registry.get_last()
         # Select last-created element
-        self.selected_item = self.registry.get_last()
-
-        # When user finishes adjusting handles, let the scene reconcile state
-        self.selected_item.resize_finished.connect(self.scene.on_item_resize_finished)
+        item.setSelected(True)
+        self._connect_item_signals(item)
 
     @Slot(ProtoClass, object)
     def add_item_from_drop(self, proto: ProtoClass, scene_pos: QPointF):
@@ -517,8 +677,9 @@ class ComponentTab(QWidget):
             x=x, y=y, dpi=self.settings.dpi)
         command = AddElementCommand(proto, self, geom)
         self.undo_stack.push(command)
-        self.selected_item = self.registry.get_last()
-        self.selected_item.resize_finished.connect(self.scene.on_item_resize_finished)
+        item = self.registry.get_last()
+        item.setSelected(True)
+        self._connect_item_signals(item)
 
     @Slot(object, object)
     def clone_item(self, original, new_geometry):
@@ -547,6 +708,7 @@ class ComponentTab(QWidget):
         print(f" - clone exists in tab's scene: {True if self.scene == new.scene() else False}")
         new.update()
         new.show()
+        self._connect_item_signals(new)
         self.update_layers_panel()
 
         # drag_offset = press_scene_pos - new.pos()
@@ -554,26 +716,91 @@ class ComponentTab(QWidget):
         # self.scene._drag_offset   = drag_offset
 
     def set_item_controls_enabled(self, enabled: bool):
-        self.property_panel.setEnabled(enabled)
+        # Do NOT disable the PropertyPanel widget itself.
+        # Let the panel control its inner form state.
+        self.property_panel._set_panel_enabled(enabled)
         self.remove_item_btn.setEnabled(enabled)
+
+    def _apply_handle_policy(self, selected_items: list):
+        """Show handles according to selection policy:
+           - exactly one selected: only that one shows handles
+           - multiple selected: all selected show handles
+           - none selected: none show handles
+        """
+        selected_set = set(selected_items or [])
+        # Iterate only over real elements in the scene
+        for it in self.scene.items():
+            if hasattr(it, "show_handles") and hasattr(it, "hide_handles"):
+                if it in selected_set:
+                    it.show_handles()
+                else:
+                    it.hide_handles()
 
     @Slot()
     def remove_selected_item(self):
         item = self.get_selected_item()
-        if item:
-            reply = QMessageBox.question(self, "Remove Element",
-                                         f"Are you sure you want to remove '{item.name}'?",
-                                         QMessageBox.Yes | QMessageBox.No)
-            if reply == QMessageBox.No:
-                self.show_status_message("Element removal cancelled.", "info")
-                return
-            command = RemoveElementCommand(item, self)
-            self.undo_stack.push(command)
-            self.on_selection_changed()
-            self.show_status_message(f"Element '{item.name}' removed.", "info")
-        else:
+        if not item:
             self.show_status_message("No item selected to remove.", "warning")
+            return
+        
+        reply = QMessageBox.question(
+            self, "Remove Element",
+            f"Are you sure you want to remove '{item.name}'?",
+            QMessageBox.Yes | QMessageBox.No
+        )
+        if reply == QMessageBox.No:
+            self.show_status_message("Element removal cancelled.", "info")
+            return
+        
+        # 1) Unbind the panel first so no child editors hold the item
 
+        # 2) Clear selection in the scene (prevents selection-changed churn)
+        sel_items = list(self.scene.selectedItems())
+        for it in sel_items:
+            self._disconnect_item_signals(item)
+            it.setSelected(False)
+        self.property_panel.clear_target()
+        # 3) Delete via undo command
+        command = RemoveElementCommand(item, self)
+        self.undo_stack.push(command)
+        
+        # 4) Panel stays empty until the user selects something else
+        self.on_selection_changed()
+        print(f"Confirming the removal method is being called")
+        self.show_status_message(f"Element '{item.name}' removed.", "info")
+
+    @Slot(QObject)
+    def _on_selected_item_destroyed(self, _=None):
+        """
+        If the selected item gets destroyed (removed via undo/redo or elsewhere),
+        clear the selection / property panel.
+        """
+        # Only clear if we were actually pointing to the sender
+        self._handle_new_selection(None)
+
+    def _connect_item_signals(self, item: QGraphicsObject):
+        if not item:
+            print(f"Warning {item} is not a valid item type.")
+            return
+        try:
+            item.geometryAboutToChange.connect(self._on_geom_about_to_change)
+            item.geometryChanged.connect(self._on_geom_changed)
+            item.moveCommitted.connect(self._on_items_moved_commit)
+        except (RuntimeError, TypeError):
+            pass
+
+    def _disconnect_item_signals(self, item):
+        """Safely disconnect per-item signals."""
+        if not item:
+            print(f"Warning {item} is not a valid item type.")
+            return
+        try:
+            item.item_changed.disconnect(self.on_item_data_changed)
+            item.moveCommitted.disconnect(self._on_items_moved_commit)
+            item.geometryChanged.disconnect(self._on_geom_changed)
+            item.geometryAboutToChange.disconnect(self._on_geom_about_to_change)
+        except (RuntimeError, TypeError):
+            pass
 
     @Slot()
     def set_component_background_image(self):
@@ -586,3 +813,68 @@ class ComponentTab(QWidget):
                 self.show_status_message("Background Error: Could not set background image. File may be invalid.", "error")
         else:
             self.show_status_message("Background image selection cancelled.", "info")
+
+    def eventFilter(self, obj, ev):
+        et = ev.type()
+        if et == QEvent.GraphicsSceneMousePress:
+            self._begin_gesture()
+        elif et in (QEvent.GraphicsSceneMouseRelease, QEvent.GraphicsSceneMouseDoubleClick):
+            self._end_gesture()
+        return False
+
+    def _begin_gesture(self):
+        self._gesture_active = True
+        self._old_by_item.clear()
+        self._new_by_item.clear()
+
+    def _on_geom_about_to_change(self, old_geom):
+        if not self._gesture_active:
+            return
+        it = self.sender()
+        # Snapshot the very first old geometry we see for this item in this gesture
+        self._old_by_item.setdefault(it, old_geom)
+
+    def _on_geom_changed(self, new_geom):
+        if not self._gesture_active:
+            return
+        it = self.sender()
+        self._new_by_item[it] = new_geom
+        self._panel_on_item_geometry(new_geom)
+
+
+    def _end_gesture(self):
+        if not self._gesture_active:
+            return
+        self._gesture_active = False
+
+        # Filter to items that genuinely changed
+        changed_items = []
+        for it, new_geom in self._new_by_item.items():
+            old_geom = self._old_by_item.get(it)
+            if old_geom is None:
+                continue
+            if new_geom.to("px", dpi=it.dpi).rect != old_geom.to("px", dpi=it.dpi).rect or \
+               new_geom.to("px", dpi=it.dpi).pos  != old_geom.to("px", dpi=it.dpi).pos:
+                changed_items.append(it)
+
+        if not changed_items:
+            self._old_by_item.clear(); self._new_by_item.clear()
+            return
+
+        # One undo step, many items: reuse your existing on_property_changed calls
+        self.undo_stack.beginMacro("Change geometry")
+        try:
+            for it in changed_items:
+                old_g = self._old_by_item[it]
+                new_g = self._new_by_item[it]
+                # Route through your pipeline:
+                self.on_property_changed(it, "geometry", new_g, old_g)
+        finally:
+            self.undo_stack.endMacro()
+
+        self._old_by_item.clear()
+        self._new_by_item.clear()
+
+    def _on_items_moved_commit(self, items, starts, ends):
+        cmd = MoveSelectionCommand(items, starts, ends)
+        self.undo_stack.push(cmd)

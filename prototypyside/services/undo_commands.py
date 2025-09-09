@@ -1,9 +1,61 @@
+from typing import List, Any
 from PySide6.QtGui import QUndoCommand
 from PySide6.QtCore import QPointF, QRectF
 
 # from prototypyside.models.component_template import ComponentTemplate
+from prototypyside.utils.units.unit_str_helpers import geometry_with_px_rect, geometry_with_px_pos
 from prototypyside.utils.unit_converter import pos_to_unit_str
 from prototypyside.services.proto_class import ProtoClass
+
+class BatchPropertyChangeCommand(QUndoCommand):
+    """
+    Undoable command that changes one property across multiple items.
+
+    - items: List of model/graphics objects
+    - prop:  Property/attribute name (e.g., "geometry", "rotation", "color")
+    - new_value: The value to apply to each item
+    - old_values: Old values aligned with 'items' (len(old_values) == len(items))
+    """
+    def __init__(
+        self,
+        items: List[object],
+        prop: str,
+        new_value: Any,
+        old_values: List[Any],
+        text: "Change Property for Selected Items"
+    ):
+        super().__init__(text or f'Change "{prop}" for {len(items)} item(s)')
+        assert len(items) == len(old_values), "items and old_values must be same length"
+        self._items = items
+        self._prop = prop
+        self._new = new_value
+        self._olds = old_values
+
+    def redo(self):
+        for it in self._items:
+            setattr(it, self._prop, value)
+
+    def undo(self):
+        for it, old in zip(self._items, self._olds):
+            setattr(it, old)
+
+class MoveSelectionCommand(QUndoCommand):
+    def __init__(self, items, starts, ends, text="Move Items"):
+        super().__init__(text)
+        # Keep strong refs so items don’t get GC’d during undo/redo history
+        self._items = list(items)
+        self._starts = starts  # dict[item, QPointF]
+        self._ends = ends      # dict[item, QPointF]
+
+    def undo(self):
+        for it in self._items:
+            it.geometry = geometry_with_px_pos(it.geometry, self._starts[it])
+            it.setPos(self._starts[it])
+
+    def redo(self):
+        for it in self._items:
+            it.geometry = geometry_with_px_pos(it.geometry, self._ends[it])
+            it.setPos(self._ends[it])
 
 class AddSlotCommand(QUndoCommand):
     def __init__(self, registry, template):

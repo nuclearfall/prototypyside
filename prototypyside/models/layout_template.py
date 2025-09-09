@@ -21,6 +21,8 @@ from prototypyside.services.proto_registry import ProtoRegistry
 from prototypyside.utils.valid_path import ValidPath
 from prototypyside.utils.graphics_item_helpers import rotate_by
 
+pc = ProtoClass
+
 class WhitespaceIndex(IntEnum):
     MARGIN_TOP    = 0
     MARGIN_BOTTOM = 1
@@ -440,7 +442,7 @@ class LayoutTemplate(QGraphicsObject):
                 reused_idx += 1
             else:
                 slot = registry.create(
-                    ProtoClass.LS,
+                    pc.LS,
                     geometry=geom,
                     row=rr, column=cc,
                     parent=self
@@ -603,7 +605,8 @@ class LayoutTemplate(QGraphicsObject):
                 return
 
             source = self._registry.global_get(source_pid)
-            if not source or not isinstance(source, ComponentTemplate):
+            is_component = pc.isproto(source, pc.CT)
+            if not source or not is_component:
                 raise TypeError(f"Template with {source_pid} couldn't be located in the registry.")
 
             updated_count = 0
@@ -660,14 +663,14 @@ class LayoutTemplate(QGraphicsObject):
 
     @classmethod
     def from_dict(cls, data: dict, registry: "ProtoRegistry") -> "LayoutTemplate":
-        serial_pid = ProtoClass.validate_pid(data.get("pid"))
+        serial_pid = pc.validate_pid(data.get("pid"))
         if not serial_pid:
             raise ValueError(f"Invalid or missing pid for LayoutTemplate: {serial_pid!r}")
 
         geom = UnitStrGeometry.from_dict(data.get("geometry", None))
         # Do NOT pass geometry=... to __init__; your __init__ doesn't accept it.
         inst = cls(
-            proto=ProtoClass.LT,
+            proto=pc.LT,
             pid=serial_pid,
             registry=registry,
             pagination_policy=data.get("pagination_policy"),

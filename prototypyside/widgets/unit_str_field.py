@@ -53,6 +53,25 @@ class UnitStrField(QLineEdit):
 
         self.editingFinished.connect(self._on_editing_finished)
 
+    # In unit_str_field.py, add this method to UnitStrField class
+    def clearTarget(self, *, clear_ui: bool = True, disable: bool = False):
+        """
+        Safely unbind from the current model/property and (optionally) blank the UI.
+        """
+      # Clear binding and local cache
+        self.target_item = None
+        self.property_name = None
+        self._old_value = None
+        
+        # Clear UI if requested
+        if clear_ui:
+            self.clear()  # Directly call QLineEdit.clear()
+            self.blockSignals(False)
+        
+        # Disable if requested
+        if disable and hasattr(self, "setEnabled"):
+            self.setEnabled(False)
+
     def setTarget(self, target_item: Any, property_name: str, display_unit: str):
         """Sets or resets the target object and property for the field."""
         self.target_item = target_item

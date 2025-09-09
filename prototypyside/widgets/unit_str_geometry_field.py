@@ -1,3 +1,4 @@
+from contextlib import suppress
 from PySide6.QtWidgets import (
     QWidget, QLabel, QHBoxLayout, QVBoxLayout, QFormLayout
 )
@@ -109,60 +110,129 @@ class UnitStrGeometryField(QWidget):
             self.setTarget(target_item, property_name, display_unit=display_unit)
 
     # ---------------- target / display unit ----------------
+    # In unit_str_geometry_field.py, modify the clearTarget method
+    def clearTarget(self, clear_ui=True, disable=False):
+        """Unbind composite, ask children to clear themselves, and disable the composite."""
+        # Disconnect composite from previous target
+        prev = getattr(self, "target_item", None)
+   
+        self.target_item = None
+        self.property_name = None
+        self._old_geometry = None
+        
+        # Delegate to each UnitStrField (UI clear, do NOT disable children permanently)
+        for f in self._fields.values():
+            with suppress(Exception):
+                # let the field clear its own target & UI; don't disable the child
+                f.clearTarget(clear_ui=True, disable=False)
+        
+        # Disable only the composite to signal "no selection"
+        if hasattr(self, "setEnabled"):
+            self.setEnabled(False)
 
-    def setTarget(self, target_item: Any, property_name: str, display_unit: Optional[str]):
+    def clear(self):
+        self.clearTarget(clear_ui=True, disable=False)
+
+    def setTarget(self, target_item, property_name, display_unit=None):
+        if not target_item or not property_name:
+            if display_unit:
+                self._display_unit = display_unit
+            self.clearTarget()
+            return
+
+        # Disconnect from old target if different
+        if self.target_item is not None and self.target_item is not target_item:
+            with suppress(Exception):
+                if hasattr(self.target_item, "item_changed"):
+                    self.target_item.item_changed.disconnect(self.update_from_item)
+
         self.target_item = target_item
         self.property_name = property_name
-        self._display_unit = display_unit or self._display_unit
+        if display_unit:
+            self._display_unit = display_unit
 
-        # Set each subfield’s display unit + dpi (use target dpi if available)
+        # Re-enable composite and children; propagate display unit & DPI
+        if hasattr(self, "setEnabled"):
+            self.setEnabled(True)
+
         tgt_dpi = getattr(self.target_item, "dpi", None)
         for f in self._fields.values():
-            f.display_unit = self._display_unit or f.display_unit
-            # force dpi (UnitField relies on having a dpi)
-            f._dpi = tgt_dpi if tgt_dpi is not None else (f._dpi or 96)
+            with suppress(Exception):
+                if hasattr(f, "setEnabled"):
+                    f.setEnabled(True)  # in case a child was previously disabled
+                if hasattr(f, "setDisplayUnit") and self._display_unit:
+                    f.setDisplayUnit(self._display_unit)
+                if hasattr(f, "setDpi"):
+                    f.setDpi(tgt_dpi if tgt_dpi is not None else getattr(f, "_dpi", 96))
 
-        # keep UI in sync with the element (if provided)
-        try:
-            self.target_item.item_changed.connect(self.update_from_item)
-        except Exception:
-            pass
+        # Connect composite to target signals (single connection)
+        with suppress(Exception):
+            if hasattr(self.target_item, "item_changed"):
+                self.target_item.item_changed.connect(self.update_from_item)
 
         self.update_from_item()
 
     def on_unit_change(self, display_unit: str):
         self._display_unit = display_unit
-        # propagate to subfields
         for f in self._fields.values():
-            f.on_unit_change(display_unit)
+            # Prefer explicit unit-change API if present
+            if hasattr(f, "on_unit_change"):
+                f.on_unit_change(display_unit)
+            elif hasattr(f, "setDisplayUnit"):
+                f.setDisplayUnit(display_unit)
         self.update_from_item()
 
     def update_from_item(self):
+        # When unbound, ensure fields clear and stay disabled
         if not (self.target_item and self.property_name):
-            self._clear_fields()
+            self.clear()
+            self.setEnabled(False)
             return
+
+        self.setEnabled(True)  # we have a target
         geom = getattr(self.target_item, self.property_name, None)
         self._update_display(geom if isinstance(geom, UnitStrGeometry) else None)
 
     # ---------------- display helpers ----------------
 
-    def _update_display(self, geom: Optional[UnitStrGeometry]):
+    def _update_display(self, geom):
         if not isinstance(geom, UnitStrGeometry):
-            self._clear_fields()
+            # ask children to clear themselves (UI only)
+            for f in self._fields.values():
+                with suppress(Exception):
+                    f.clearTarget(clear_ui=True, disable=False)
+            self._old_geometry = None
             return
-        self._old_geometry = geom
-        # feed ProtoClass.USs directly into fields (UnitField handles formatting)
-        self._fields["width"].setTextFromValue(geom.width)
-        self._fields["height"].setTextFromValue(geom.height)
-        if "x" in self._fields:
-            self._fields["x"].setTextFromValue(geom.pos_x)
-        if "y" in self._fields:
-            self._fields["y"].setTextFromValue(geom.pos_y)
 
-    def _clear_fields(self):
-        for f in self._fields.values():
-            f.clear()
-        self._old_geometry = None
+        self._old_geometry = geom
+        mapping = [
+            ("width",  getattr(geom, "width", None)),
+            ("height", getattr(geom, "height", None)),
+        ]
+        if "x" in self._fields and "y" in self._fields:
+            mapping += [
+                ("x", getattr(geom, "pos_x", getattr(geom, "x", None))),
+                ("y", getattr(geom, "pos_y", getattr(geom, "y", None))),
+            ]
+
+        for key, val in mapping:
+            f = self._fields.get(key)
+            if not f:
+                continue
+            with suppress(Exception):
+                if hasattr(f, "blockSignals"):
+                    f.blockSignals(True)
+                try:
+                    if val is None:
+                        f.clearTarget(clear_ui=True, disable=False)
+                    else:
+                        if hasattr(f, "setTextFromValue"):
+                            f.setTextFromValue(val)
+                        elif hasattr(f, "setText"):
+                            f.setText(str(val))
+                finally:
+                    if hasattr(f, "blockSignals"):
+                        f.blockSignals(False)
 
     def _fallback_pos_from_target(self) -> (UnitStr, UnitStr):
         """Prefer rect_x/rect_y → pos_x/pos_y → x/y → 0."""

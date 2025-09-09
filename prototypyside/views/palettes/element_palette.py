@@ -5,7 +5,7 @@ from PySide6.QtWidgets import QListWidget, QListWidgetItem, QApplication
 
 class ElementPalette(QListWidget):
     on_item_type_selected = Signal(str)
-
+    
     def __init__(self, parent=None, tab=None):
         super().__init__(parent)
         self.setDragEnabled(True)

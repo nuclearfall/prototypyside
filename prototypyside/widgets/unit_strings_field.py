@@ -29,10 +29,9 @@ class UnitStringsField(QWidget):
         super().__init__(parent)
         self._layout = QVBoxLayout(self)
         self._layout.setContentsMargins(0, 0, 0, 0)
-
         self.target_item = None
         self.property_name = None
-        self._display_unit = display_unit
+        self._display_unit = display_unit or "in"
         self.decimal_places = decimal_places
         self._dpi = dpi
 
@@ -43,9 +42,21 @@ class UnitStringsField(QWidget):
         self._labels: List[str] = list(labels) if labels else []
 
         if target_item is not None and property_name:
-            self.setTarget(target_item, property_name=property_name, labels=labels, display_unit=display_unit)
+            self.setTarget(
+                target_item, 
+                property_name=property_name, 
+                display_unit=display_unit,
+                labels=labels
+            )
 
     # -------- Public API --------
+    def clear(self) -> None:
+        """
+        Clear all contained UnitStrFields. Does not change the number of rows.
+        """
+        for f in self._rows:
+            if hasattr(f, "clear"):
+                f.clear()
 
     def setTarget(self, target_item: Any, property_name: str,
                   display_unit: Optional[str] = None,
@@ -56,6 +67,8 @@ class UnitStringsField(QWidget):
             self._display_unit = display_unit
         if labels is not None:
             self._labels = list(labels)
+        if self.target_item is None or self.property_name is None:
+            self.clear()
 
         if hasattr(self.target_item, "item_changed"):
             try:
@@ -69,7 +82,7 @@ class UnitStringsField(QWidget):
             self._old_values = list(values)
             if values:
                 self._dpi = getattr(values[0], "dpi", self._dpi)
-            elif getattr(self.target_item, "_geometry", None) is not None:
+            elif getattr(self.target_item, "geometry", None) is not None:
                 self._dpi = getattr(self.target_item._geometry, "dpi", self._dpi)
             self._ensure_row_count(len(values))
             self._update_labels()

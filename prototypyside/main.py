@@ -13,7 +13,7 @@ from prototypyside.utils.valid_path import ValidPath  # <-- uses your one-stop v
 if TYPE_CHECKING:
     from pathlib import Path
 
-
+pc = ProtoClass
 # --- Helpers ---------------------------------------------------------------
 
 def _norm(p):
@@ -67,14 +67,14 @@ def _is_ct(obj, mw: MainDesignerWindow) -> bool:
     if callable(fn):
         return fn(obj)
     # Fallback: loose heuristics
-    return isinstance(obj, ProtoClass.CT) or hasattr(obj, "elements")
+    return pc.isproto(obj, pc.CT)
 
 def _is_lt(obj, mw: MainDesignerWindow) -> bool:
     fn = getattr(mw, "_is_layout_template", None)
     if callable(fn):
         return fn(obj)
     # Fallback: loose heuristics
-    return isinstance(obj, ProtoClass.LT) or hasattr(obj, "slots")
+    return pc.isproto(obj, pc.LT)
 
 
 # --- Main ------------------------------------------------------------------

@@ -32,11 +32,11 @@ from prototypyside.views.tabs.layout_tab import LayoutTab
 
 class MainDesignerWindow(QMainWindow):
     logical_disp_change = Signal()
+    send_unit_changed = Signal(str)
 
     def __init__(self, init_tabs=None, is_headless=False):
         super().__init__()
         screen = self.screen()
-        # Main application settings
         # Validation temporarily disabled pending schema updates
         self.settings = AppSettings()
         self.settings.dpi_changed.connect(self.on_dpi_changed)
@@ -50,7 +50,6 @@ class MainDesignerWindow(QMainWindow):
         self.setWindowTitle("ProtoTypySide")
         self.resize(1400, 900)
         self.setMinimumSize(800, 600)
-
         self.tab_widget: Optional[QTabWidget] = None
         self.palette_dock: Optional[QDockWidget] = None
         self.layers_dock: Optional[QDockWidget] = None
@@ -265,10 +264,18 @@ class MainDesignerWindow(QMainWindow):
         for act in actions:
             act.setShortcutContext(Qt.ApplicationShortcut)
 
+    @property
+    def tabs(self):
+        all_tabs = []
+        for i in range(self.tab_widget.count()):
+            widget = self.tab_widget.widget(i)
+            all_tabs.append(widget)
+
+        return all_tabs
+
     def update_menu_states(self, index):
         current_tab = self.tab_widget.widget(index)
         self.import_data_action.setEnabled(isinstance(current_tab, ComponentTemplate))
-
 
     # ––—— Current Tab  ———— #
     @Slot()
@@ -402,9 +409,9 @@ class MainDesignerWindow(QMainWindow):
     def on_unit_changed(self, new_unit):
         unit_str_field_like = find_unit_str_like_fields(self, max_depth=4)
         unit = self.settings.unit
-        for item in unit_str_field_like:
-            item.setUnit(new_unit)
-            item.setDpi(self.settings.dpi)
+        # for item in unit_str_field_like:
+        #     item.setUnit(new_unit)
+        #     item.setDpi(self.settings.dpi)
 
     @Slot(int, str)
     def on_tab_title_changed(self, index, new_name: str):
@@ -480,7 +487,7 @@ class MainDesignerWindow(QMainWindow):
         else:
             self._new_tab(obj, new_template=False)
 
-    @Slot(object, object)
+    @Slot(object)
     def add_new_tab(self, proto):
         """
         Create the appropriate tab for a ComponentTemplate or LayoutTemplate,
@@ -732,7 +739,6 @@ class MainDesignerWindow(QMainWindow):
         else:
             print("[IMPORT] No CSVData returned")
      
-
     @Slot()
     def export_from_type(self):
         active_tab = self.tab_widget.currentWidget()
