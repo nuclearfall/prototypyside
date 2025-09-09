@@ -183,14 +183,6 @@ class ComponentScene(QGraphicsScene):
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event: QGraphicsSceneMouseEvent):
-        # pos = event.scenePos()
-        # item = self.itemAt(pos, QTransform())
-        # if pc.isproto(item, any_el_type):
-        #     item.hide_handles()
-        #     item.update_handles()
-        #     item.update()
-        #     item.show_handles()
-        # --- NEW: creation preview dragging ---
         if self._dup_active:
             self._update_alt_dup(event.scenePos())
             event.accept()

@@ -50,7 +50,7 @@ class ImageElement(ComponentElement):
         # Image-specific properties
         self._keep_aspect = True
         self.showPlaceholderText = True
-
+        self.setSelected(True)
         self.setAcceptDrops(True)
 
     # --- Image-specific Property Getters and Setters ---

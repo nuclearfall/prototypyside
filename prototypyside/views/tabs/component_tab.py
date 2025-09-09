@@ -685,7 +685,6 @@ class ComponentTab(QWidget):
     def clone_item(self, original, new_geometry):
         """Clone via the registry and immediately begin dragging."""
         # 1) Do the registry‐based clone
-        # original.hide_handles()
         # command = CloneElementCommand(original, self)
         # self.undo_stack.push(command)
         old_geometry = original.geometry

@@ -118,6 +118,10 @@ class ProtoTextRenderer(QObject):
         self._has_overflow = bool(state)
 
     @property
+    def can_expand(self):
+        return self.has_overflow and not self.is_expanded
+
+    @property
     def font(self) -> UnitStrFont:
         return self._font
 
@@ -209,6 +213,40 @@ class ProtoTextRenderer(QObject):
             overset_rect=self.overset_rect,
             has_overflow=self._has_overflow,
         )
+
+    def measure(self, frame: QRectF) -> Tuple[QRectF, bool, float]:
+        """
+        Layout text for `frame` width only (no painting) and return:
+          (overset_rect, has_overflow, natural_height)
+        Uses current font/text/wrap/h_align.
+        """
+        doc = QTextDocument()
+        qfont = self.font.scale(ldpi=self.ldpi, dpi=self.dpi).px.qfont
+        doc.setDefaultFont(qfont)
+        doc.setPlainText(self.text or "")
+
+        opt = QTextOption()
+        opt.setWrapMode(self.wrap_mode)
+        if self.h_align & Qt.AlignHCenter:
+            opt.setAlignment(Qt.AlignHCenter)
+        elif self.h_align & Qt.AlignRight:
+            opt.setAlignment(Qt.AlignRight)
+        else:
+            opt.setAlignment(Qt.AlignLeft)
+        doc.setDefaultTextOption(opt)
+
+        frame_w = max(0.0, float(frame.width()))
+        frame_h = max(0.0, float(frame.height()))
+        doc.setTextWidth(frame_w)
+        natural_h = float(doc.size().height())
+
+        has_overflow = natural_h > frame_h
+        overset = QRectF(frame.x(), frame.y(), frame_w, natural_h)
+
+        # keep these members consistent with render()
+        self.overset_rect = overset
+        self._has_overflow = has_overflow
+        return overset, has_overflow, natural_h
 
 
 

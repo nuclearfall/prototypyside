@@ -163,7 +163,7 @@ class FontToolbar(QWidget):
         usf = getattr(self._target, "font")
         if not isinstance(usf, UnitStrFont):
             try:
-                usf = UnitStrFont(usf)  # be permissive if QFont sneaks in
+                usf = UnitStrFont(usf)
             except Exception:
                 return
         self._sync_from_usf(usf)

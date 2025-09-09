@@ -40,6 +40,7 @@ class VectorElement(ComponentElement):
 
         self._renderer: Optional[QSvgRenderer] = None
         self.showPlaceholderText = True
+        self.setSelected(True)
         self.setAcceptDrops(True)
 
 

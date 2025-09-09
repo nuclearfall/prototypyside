@@ -5,13 +5,14 @@ from PySide6.QtGui import (QColor, QFont, QPen, QBrush, QPainter, QPixmap, QPale
             QAbstractTextDocumentLayout, QTransform, QPainterPath, QPainterPathStroker)
 from PySide6.QtWidgets import QGraphicsItem, QGraphicsObject, QGraphicsSceneMouseEvent, QGraphicsSceneDragDropEvent, QStyleOptionGraphicsItem, QStyle
 from typing import Optional, Dict, Any, Union, TYPE_CHECKING
-from prototypyside.views.graphics_items import ResizeHandle
+
+# from prototypyside.views.graphics_items import ResizeHandle
 from prototypyside.views.overlays.element_outline import ElementOutline
 from prototypyside.utils.qt_helpers import qrectf_to_list, list_to_qrectf
 from prototypyside.utils.units.unit_str import UnitStr
 from prototypyside.utils.units.unit_str_geometry import UnitStrGeometry
 from prototypyside.utils.units.unit_str_helpers import geometry_with_px_rect, geometry_with_px_pos
-from prototypyside.config import HandleType, HMAP, VMAP, HMAP_REV, VMAP_REV
+from prototypyside.config import HMAP, VMAP, HMAP_REV, VMAP_REV
 from prototypyside.utils.graphics_item_helpers import rotate_by
 from prototypyside.services.proto_class import ProtoClass
 from prototypyside.views.shape_mixin import ShapeableElementMixin
@@ -88,6 +89,8 @@ class ComponentElement(ShapeableElementMixin, QGraphicsObject):
         self._ldpi = 300
         self._unit = self._settings.unit
         self._geometry = geometry or UnitStrGeometry(width="0.75in", height="0.5in", x="10 px", y="10 px", dpi=self._dpi)
+        # Attach the decoupled outline/handle overlay
+        self._outline = ElementOutline(self, parent=self)
         self._name = registry.validate_name(proto, name)
 
         # assigned by default or via rehydration
@@ -102,11 +105,11 @@ class ComponentElement(ShapeableElementMixin, QGraphicsObject):
         self._v_align = VMAP.get("Top")   # Top  | Center | Bottom
 
         # these aren't serialized or rehydrated
-        self._pre_resize_state = {}
+        # self._pre_resize_state = {}
         self._display_outline = True
-        self._is_selected = False
-        self._is_hovered = False
-        self._handles: Dict[HandleType, ResizeHandle] = {}
+        #self._is_selected = False
+        # self._is_hovered = False
+        # self._handles: Dict[HandleType, ResizeHandle] = {}
 
         self.setFlag(QGraphicsItem.ItemIsSelectable, True)
         self.setFlag(QGraphicsItem.ItemIsMovable, True)
@@ -122,13 +125,10 @@ class ComponentElement(ShapeableElementMixin, QGraphicsObject):
         )
         self.setAcceptHoverEvents(True)
         self.setPos(self._geometry.px.pos)
+        self.setSelected(True)
 
-        # Attach the decoupled outline/handle overlay
-        self._outline = ElementOutline(
-            target_element=self
-        )
         
-        self.create_handles()
+        # self.create_handles()
 
     # ---- UnitStrGeometry rect and position handling ---- #
     @property
@@ -160,7 +160,6 @@ class ComponentElement(ShapeableElementMixin, QGraphicsObject):
             super().setPos(new_px.pos)
 
         # your existing side-effects
-        self.update_handles()
         self._invalidate_shape_cache()
         print (f"Geometry after change:\n - Rect: {new_px.rect}\n - Pos: {new_px.pos}")
         # --- emit "changed" AFTER mutation
@@ -185,6 +184,7 @@ class ComponentElement(ShapeableElementMixin, QGraphicsObject):
         # Use post-change hook; no prepareGeometryChange for pure pos changes
         if change == QGraphicsItem.ItemPositionHasChanged and not self._updating_from_itemChange:
             self._updating_from_itemChange = True
+            self._outline._update_visibility_policy()
             try:
                 old = self._geometry
                 new_geom = geometry_with_px_pos(old, self.pos(), dpi=self.dpi)
@@ -354,19 +354,7 @@ class ComponentElement(ShapeableElementMixin, QGraphicsObject):
         if self._border_width != value:
             self._border_width = value
             self.item_changed.emit()
-            self.update()
-
-    @property
-    def corner_radius(self):
-        return self._corner_radius
-
-    @corner_radius.setter
-    def corner_radius(self, value):
-        if value != self._corner_radius:
-            self.prepareGeometryChange()
-            self._corner_radius = value
-            self.item_changed.emit()
-            self.update()        
+            self.update()      
 
     @property
     def rotation(self):
@@ -486,20 +474,20 @@ class ComponentElement(ShapeableElementMixin, QGraphicsObject):
             dpi=self.dpi
         )
         self.render_with_context(painter, context)
-        if option.state & QStyle.State_Selected:
-            self.show_handles()
-        else:
-            self.hide_handles()
+        # if option.state & QStyle.State_Selected:
+        #     self.show_handles()
+        # else:
+        #     self.hide_handles()
 
-    def hoverEnterEvent(self, event):
-        self._is_hovered = True
-        self.update()
-        super().hoverEnterEvent(event)
+    # def hoverEnterEvent(self, event):
+    #     self._is_hovered = True
+    #     self.update()
+    #     super().hoverEnterEvent(event)
 
-    def hoverLeaveEvent(self, event):
-        self._is_hovered = False
-        self.update()
-        super().hoverLeaveEvent(event)
+    # def hoverLeaveEvent(self, event):
+    #     self._is_hovered = False
+    #     self.update()
+    #     super().hoverLeaveEvent(event)
 
     def clone(self):
         registry = self.registry
@@ -544,181 +532,181 @@ class ComponentElement(ShapeableElementMixin, QGraphicsObject):
 
         return inst
         
-    def store_pre_resize_state(self):
-        rect = self._geometry.to("px", dpi=self.dpi).rect
-        scene_tx = self.sceneTransform()
-        inv_tx = scene_tx
-        anchors = self._edge_centers()
+    # def store_pre_resize_state(self):
+    #     rect = self._geometry.to("px", dpi=self.dpi).rect
+    #     scene_tx = self.sceneTransform()
+    #     inv_tx = scene_tx
+    #     anchors = self._edge_centers()
 
-        self._pre_resize_state = {
-            "geometry": self.geometry,  # Store entire geometry
-            "anchors": {
-                HandleType.TOP_LEFT: anchors["TOP_LEFT"],
-                HandleType.TOP_RIGHT: anchors["TOP_RIGHT"],
-                HandleType.BOTTOM_LEFT: anchors["BOTTOM_LEFT"],
-                HandleType.BOTTOM_RIGHT: anchors["BOTTOM_RIGHT"],
-                HandleType.TOP_CENTER: anchors["TOP_CENTER"],
-                HandleType.BOTTOM_CENTER: anchors["BOTTOM_CENTER"],
-                HandleType.LEFT_CENTER: anchors["LEFT_CENTER"],
-                HandleType.RIGHT_CENTER: anchors["RIGHT_CENTER"],
-            },
-            # MOVE TRANSFORMS TO TOP LEVEL
-            "transform": scene_tx,
-            "inv_transform": inv_tx,
-        }
+    #     self._pre_resize_state = {
+    #         "geometry": self.geometry,  # Store entire geometry
+    #         "anchors": {
+    #             HandleType.TOP_LEFT: anchors["TOP_LEFT"],
+    #             HandleType.TOP_RIGHT: anchors["TOP_RIGHT"],
+    #             HandleType.BOTTOM_LEFT: anchors["BOTTOM_LEFT"],
+    #             HandleType.BOTTOM_RIGHT: anchors["BOTTOM_RIGHT"],
+    #             HandleType.TOP_CENTER: anchors["TOP_CENTER"],
+    #             HandleType.BOTTOM_CENTER: anchors["BOTTOM_CENTER"],
+    #             HandleType.LEFT_CENTER: anchors["LEFT_CENTER"],
+    #             HandleType.RIGHT_CENTER: anchors["RIGHT_CENTER"],
+    #         },
+    #         # MOVE TRANSFORMS TO TOP LEVEL
+    #         "transform": scene_tx,
+    #         "inv_transform": inv_tx,
+    #     }
 
-    def _edge_centers(self, to_scene=True):
-        # Always a QRectF in *local* coords
-        rect: QRectF = self.geometry.to("px", dpi=self.dpi).px.rect
+    # def _edge_centers(self, to_scene=True):
+    #     # Always a QRectF in *local* coords
+    #     rect: QRectF = self.geometry.to("px", dpi=self.dpi).px.rect
 
-        cx = rect.center().x()
-        cy = rect.center().y()
+    #     cx = rect.center().x()
+    #     cy = rect.center().y()
 
-        # Local points
-        pts = {
-            "TOP_LEFT":      rect.topLeft(),
-            "TOP_RIGHT":     rect.topRight(),
-            "BOTTOM_LEFT":   rect.bottomLeft(),
-            "BOTTOM_RIGHT":  rect.bottomRight(),
-            "TOP_CENTER":    QPointF(cx, rect.top()),
-            "BOTTOM_CENTER": QPointF(cx, rect.bottom()),
-            "LEFT_CENTER":   QPointF(rect.left(),  cy),
-            "RIGHT_CENTER":  QPointF(rect.right(), cy),
-            "CENTER":        rect.center(),
-        }
+    #     # Local points
+    #     pts = {
+    #         "TOP_LEFT":      rect.topLeft(),
+    #         "TOP_RIGHT":     rect.topRight(),
+    #         "BOTTOM_LEFT":   rect.bottomLeft(),
+    #         "BOTTOM_RIGHT":  rect.bottomRight(),
+    #         "TOP_CENTER":    QPointF(cx, rect.top()),
+    #         "BOTTOM_CENTER": QPointF(cx, rect.bottom()),
+    #         "LEFT_CENTER":   QPointF(rect.left(),  cy),
+    #         "RIGHT_CENTER":  QPointF(rect.right(), cy),
+    #         "CENTER":        rect.center(),
+    #     }
 
-        if not to_scene:
-            return pts
-        # Map to scene (per‑point to avoid polygon conversion)
-        return {k: self.mapToScene(v) for k, v in pts.items()}
+    #     if not to_scene:
+    #         return pts
+    #     # Map to scene (per‑point to avoid polygon conversion)
+    #     return {k: self.mapToScene(v) for k, v in pts.items()}
 
-    @property
-    def handles_visible(self) -> bool:
-        return any(handle.isVisible() for handle in self._handles.values())
+    # @property
+    # def handles_visible(self) -> bool:
+    #     return any(handle.isVisible() for handle in self._handles.values())
 
-    def create_handles(self):
-        if self._handles:
-            return
-        for h_type in HandleType:
-            handle = ResizeHandle(self, h_type)
-            self._handles[h_type] = handle
-        self.update_handles()
+    # def create_handles(self):
+    #     if self._handles:
+    #         return
+    #     for h_type in HandleType:
+    #         handle = ResizeHandle(self, h_type)
+    #         self._handles[h_type] = handle
+    #     self.update_handles()
 
-    def show_handles(self):
-        for handle in self._handles.values():
-            handle.show()
+    # def show_handles(self):
+    #     for handle in self._handles.values():
+    #         handle.show()
 
-    def _axes_for_handle(self, handle_type):
-        # returns (sx, sy, affect_w, affect_h)
-        # sx/sy ∈ {-1, 0, +1} denote which side is being dragged in LOCAL axes.
-        # affect_w/affect_h tell us whether width/height should actually change.
+    # def _axes_for_handle(self, handle_type):
+    #     # returns (sx, sy, affect_w, affect_h)
+    #     # sx/sy ∈ {-1, 0, +1} denote which side is being dragged in LOCAL axes.
+    #     # affect_w/affect_h tell us whether width/height should actually change.
 
-        if handle_type == HandleType.TOP_LEFT:
-            return (-1, -1, True,  True)
-        if handle_type == HandleType.TOP_CENTER:
-            return ( 0, -1, False, True)
-        if handle_type == HandleType.TOP_RIGHT:
-            return (+1, -1, True,  True)
-        if handle_type == HandleType.RIGHT_CENTER:
-            return (+1,  0, True,  False)
-        if handle_type == HandleType.BOTTOM_RIGHT:
-            return (+1, +1, True,  True)
-        if handle_type == HandleType.BOTTOM_CENTER:
-            return ( 0, +1, False, True)
-        if handle_type == HandleType.BOTTOM_LEFT:
-            return (-1, +1, True,  True)
-        if handle_type == HandleType.LEFT_CENTER:
-            return (-1,  0, True,  False)
-        return (0, 0, False, False)
+    #     if handle_type == HandleType.TOP_LEFT:
+    #         return (-1, -1, True,  True)
+    #     if handle_type == HandleType.TOP_CENTER:
+    #         return ( 0, -1, False, True)
+    #     if handle_type == HandleType.TOP_RIGHT:
+    #         return (+1, -1, True,  True)
+    #     if handle_type == HandleType.RIGHT_CENTER:
+    #         return (+1,  0, True,  False)
+    #     if handle_type == HandleType.BOTTOM_RIGHT:
+    #         return (+1, +1, True,  True)
+    #     if handle_type == HandleType.BOTTOM_CENTER:
+    #         return ( 0, +1, False, True)
+    #     if handle_type == HandleType.BOTTOM_LEFT:
+    #         return (-1, +1, True,  True)
+    #     if handle_type == HandleType.LEFT_CENTER:
+    #         return (-1,  0, True,  False)
+    #     return (0, 0, False, False)
 
-    def resize_from_handle(self, handle_type, handle_scene_pos):
-        sc = self.scene()
+    # def resize_from_handle(self, handle_type, handle_scene_pos):
+    #     sc = self.scene()
 
-        st = getattr(self, "_pre_resize_state", None)
-        if not st:
-            return
+    #     st = getattr(self, "_pre_resize_state", None)
+    #     if not st:
+    #         return
 
-        if sc is not None and hasattr(sc, "snap_to_grid"):
-            handle_scene_pos = sc.snap_to_grid(handle_scene_pos)
+    #     if sc is not None and hasattr(sc, "snap_to_grid"):
+    #         handle_scene_pos = sc.snap_to_grid(handle_scene_pos)
 
-        self.prepareGeometryChange()
-        r0        = st["rect0"]
-        pos0      = st["pos0_scene"]
-        handle0   = st["handle_local0"]
-        sx, sy    = st["sx"], st["sy"]
-        affect_w  = st["affect_w"]
-        affect_h  = st["affect_h"]
+    #     self.prepareGeometryChange()
+    #     r0        = st["rect0"]
+    #     pos0      = st["pos0_scene"]
+    #     handle0   = st["handle_local0"]
+    #     sx, sy    = st["sx"], st["sy"]
+    #     affect_w  = st["affect_w"]
+    #     affect_h  = st["affect_h"]
 
-        # Mouse delta in LOCAL space (from snapped scene pos)
-        delta_local = self.mapFromScene(handle_scene_pos) - handle0
+    #     # Mouse delta in LOCAL space (from snapped scene pos)
+    #     delta_local = self.mapFromScene(handle_scene_pos) - handle0
 
-        # Only apply the component(s) that this handle should change
-        dx = delta_local.x() if affect_w else 0.0
-        dy = delta_local.y() if affect_h else 0.0
+    #     # Only apply the component(s) that this handle should change
+    #     dx = delta_local.x() if affect_w else 0.0
+    #     dy = delta_local.y() if affect_h else 0.0
 
-        min_size = 20.0 
-        new_w = max(min_size, r0.width()  + sx * dx)
-        new_h = max(min_size, r0.height() + sy * dy)
+    #     min_size = 20.0 
+    #     new_w = max(min_size, r0.width()  + sx * dx)
+    #     new_h = max(min_size, r0.height() + sy * dy)
 
-        # If pulling left/top, the local origin must shift to keep the opposite edge fixed
-        shift_x_local = (r0.width()  - new_w) if (affect_w and sx == -1) else 0.0
-        shift_y_local = (r0.height() - new_h) if (affect_h and sy == -1) else 0.0
+    #     # If pulling left/top, the local origin must shift to keep the opposite edge fixed
+    #     shift_x_local = (r0.width()  - new_w) if (affect_w and sx == -1) else 0.0
+    #     shift_y_local = (r0.height() - new_h) if (affect_h and sy == -1) else 0.0
 
-        # Convert local shift to a SCENE vector (respects rotation/scale)
-        p00 = self.mapToScene(QPointF(0, 0))
-        pss = self.mapToScene(QPointF(shift_x_local, shift_y_local))
-        shift_scene_vec = pss - p00
+    #     # Convert local shift to a SCENE vector (respects rotation/scale)
+    #     p00 = self.mapToScene(QPointF(0, 0))
+    #     pss = self.mapToScene(QPointF(shift_x_local, shift_y_local))
+    #     shift_scene_vec = pss - p00
 
-        # Apply new scene pos to keep the opposite side visually anchored
-        self.setPos(pos0 + shift_scene_vec)
+    #     # Apply new scene pos to keep the opposite side visually anchored
+    #     self.setPos(pos0 + shift_scene_vec)
 
-        # Update rect (local, origin at 0,0). Do NOT call normalized().
-        final_local_rect = QRectF(0, 0, new_w, new_h)
-        self._geometry = UnitStrGeometry.from_px(rect=final_local_rect, pos=self.pos(), dpi=self.dpi)
+    #     # Update rect (local, origin at 0,0). Do NOT call normalized().
+    #     final_local_rect = QRectF(0, 0, new_w, new_h)
+    #     self._geometry = UnitStrGeometry.from_px(rect=final_local_rect, pos=self.pos(), dpi=self.dpi)
 
-    def begin_handle_resize(self, handle_item, event):
-        r0 = self._geometry.to("px", self.dpi).rect  # local rect, origin at (0,0)
-        sx, sy, affect_w, affect_h = self._axes_for_handle(self._active_handle)
-        sc = self.scene()
+    # def begin_handle_resize(self, handle_item, event):
+    #     r0 = self._geometry.to("px", self.dpi).rect  # local rect, origin at (0,0)
+    #     sx, sy, affect_w, affect_h = self._axes_for_handle(self._active_handle)
+    #     sc = self.scene()
         
-        press_scene_pos = sc.snap_to_grid(event.scenePos()) if sc is not None and hasattr(sc, "snap_to_grid") else event.scenePos()
+    #     press_scene_pos = sc.snap_to_grid(event.scenePos()) if sc is not None and hasattr(sc, "snap_to_grid") else event.scenePos()
 
-        self._pre_resize_state = {
-            "rect0": r0,
-            "pos0_scene": self.pos(),
-            "handle_local0": self.mapFromScene(press_scene_pos),   # ⬅ mapped from snapped scene pos
-            "sx": sx,
-            "sy": sy,
-            "affect_w": affect_w,
-            "affect_h": affect_h,
-        }
+    #     self._pre_resize_state = {
+    #         "rect0": r0,
+    #         "pos0_scene": self.pos(),
+    #         "handle_local0": self.mapFromScene(press_scene_pos),   # ⬅ mapped from snapped scene pos
+    #         "sx": sx,
+    #         "sy": sy,
+    #         "affect_w": affect_w,
+    #         "affect_h": affect_h,
+    #     }
 
-    def end_handle_resize(self):
-        # good place to clear the snapshot, emit a finished signal,
-        # or push an undo command using rect before/after if you track it
-        self._pre_resize_state = None
+    # def end_handle_resize(self):
+    #     # good place to clear the snapshot, emit a finished signal,
+    #     # or push an undo command using rect before/after if you track it
+    #     self._pre_resize_state = None
 
-    def hide_handles(self):
-        for handle in self._handles.values():
-            handle.hide()
+    # def hide_handles(self):
+    #     for handle in self._handles.values():
+    #         handle.hide()
 
-    def update_handles(self):
-        w = self._geometry.px.size.width()
-        h = self._geometry.px.size.height()
-        positions = {
-            HandleType.TOP_LEFT: QPointF(0, 0),
-            HandleType.TOP_CENTER: QPointF(w / 2, 0),
-            HandleType.TOP_RIGHT: QPointF(w, 0),
-            HandleType.RIGHT_CENTER: QPointF(w, h / 2),
-            HandleType.BOTTOM_RIGHT: QPointF(w, h),
-            HandleType.BOTTOM_CENTER: QPointF(w / 2, h),
-            HandleType.BOTTOM_LEFT: QPointF(0, h),
-            HandleType.LEFT_CENTER: QPointF(0, h / 2),
-        }
-        for handle_type, pos in positions.items():
-            handle = self._handles.get(handle_type)
-            if handle:
-                handle.setPos(pos)
+    # def update_handles(self):
+    #     w = self._geometry.px.size.width()
+    #     h = self._geometry.px.size.height()
+    #     positions = {
+    #         HandleType.TOP_LEFT: QPointF(0, 0),
+    #         HandleType.TOP_CENTER: QPointF(w / 2, 0),
+    #         HandleType.TOP_RIGHT: QPointF(w, 0),
+    #         HandleType.RIGHT_CENTER: QPointF(w, h / 2),
+    #         HandleType.BOTTOM_RIGHT: QPointF(w, h),
+    #         HandleType.BOTTOM_CENTER: QPointF(w / 2, h),
+    #         HandleType.BOTTOM_LEFT: QPointF(0, h),
+    #         HandleType.LEFT_CENTER: QPointF(0, h / 2),
+    #     }
+    #     for handle_type, pos in positions.items():
+    #         handle = self._handles.get(handle_type)
+    #         if handle:
+    #             handle.setPos(pos)
                 
     def shape(self) -> QPainterPath:
         """

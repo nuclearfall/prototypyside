@@ -2,9 +2,12 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Optional
 
-from PySide6.QtCore import Qt, QRectF, QPointF, Signal
+from PySide6.QtCore import Qt, QRectF, QPointF, QSizeF, Signal
 from PySide6.QtGui import QPainter, QPen, QColor
-from PySide6.QtWidgets import QGraphicsObject, QGraphicsItem, QGraphicsSceneHoverEvent, QGraphicsSceneMouseEvent
+from PySide6.QtWidgets import (QApplication, QGraphicsObject, 
+    QGraphicsItem, QStyleOptionGraphicsItem, QGraphicsSceneHoverEvent, 
+    QGraphicsSceneMouseEvent
+)
 
 from prototypyside.utils.units.unit_str import UnitStr
 from prototypyside.services.proto_class import ProtoClass
@@ -29,6 +32,12 @@ _ANCHORS = {
     "w":  _Anchor(True,  False, False, False),
 }
 
+def local_rect(rect_or_size):
+    if isinstance(rect_or_size, (QRectF, QSizeF)):
+        w = rect_or_size.width()
+        h = rect_or_size.height()
+        return QRectF(0, 0, w, h)
+    return None
 
 def _cursor_for_anchor(a: _Anchor) -> Qt.CursorShape:
     # Choose intuitive cursors; Qt flips under rotation automatically.
@@ -46,7 +55,7 @@ class _ResizeHandle(QGraphicsObject):
     dragMoved = Signal(object, QPointF) # self, localDelta
     dragEnded = Signal(object)                 # self
 
-    def __init__(self, outline: "ElementOutline", key: str, anchor: _Anchor, size: float = 8.0):
+    def __init__(self, outline: "ElementOutline", key: str, anchor: _Anchor, size: float = 4.0):
         super().__init__(outline)  # child of outline
         self.outline = outline
         self.key = key
@@ -58,22 +67,22 @@ class _ResizeHandle(QGraphicsObject):
         # We never want to select/move handles themselves.
         self.setFlag(QGraphicsItem.ItemIsSelectable, False)
         self.setFlag(QGraphicsItem.ItemIsMovable, False)
-        self.setAcceptedMouseButtons(QtCore.Qt.LeftButton)
+        self.setAcceptedMouseButtons(Qt.LeftButton)
         self.setAcceptHoverEvents(True)
         self.setCursor(_cursor_for_anchor(anchor))
 
     # Small and cheap; no need for complex painting.
-    def boundingRect(self) -> QtCore.QRectF:
+    def boundingRect(self) -> QRectF:
         s = self._size
-        return QtCore.QRectF(-s/2.0, -s/2.0, s, s)
+        return QRectF(-s/2.0, -s/2.0, s, s)
 
-    def paint(self, p: QtGui.QPainter, opt, widget=None):
+    def paint(self, painter: QPainter, opt, widget=None):
         # Keep it lightweight; outline decides visibility.
-        p.save()
-        p.setPen(QtGui.QPen(QtCore.Qt.black))
-        p.setBrush(QtCore.Qt.white)
-        p.drawRect(self.boundingRect())
-        p.restore()
+        painter.save()
+        painter.setPen(QPen(QColor(0, 175, 236, 255)))
+        painter.setBrush(QColor(0, 175, 236, 255))
+        painter.drawRect(self.boundingRect())
+        painter.restore()
 
     def mousePressEvent(self, e: QGraphicsSceneMouseEvent):
         self._startScenePos = e.scenePos()
@@ -82,7 +91,7 @@ class _ResizeHandle(QGraphicsObject):
 
     def mouseMoveEvent(self, e: QGraphicsSceneMouseEvent):
         # Map delta to element-local space; rotation/scales are handled by Qt.
-        el = self.outline._el
+        el = self.outline.element
         localStart = el.mapFromScene(self._startScenePos)
         localNow   = el.mapFromScene(e.scenePos())
         localDelta = localNow - localStart
@@ -95,12 +104,6 @@ class _ResizeHandle(QGraphicsObject):
 
 # prototypyside/views/overlays/element_outline.py
 
-from __future__ import annotations
-from typing import Optional
-
-from PySide6.QtCore import Qt, QRectF, QPointF, QObject
-from PySide6.QtGui import QPainter, QPen, QColor
-from PySide6.QtWidgets import QGraphicsObject
 
 # NOTE: this class is intentionally self-contained and does not import app-specific helpers,
 # except for relying on the element exposing: _geometry, dpi, geometryAboutToChange, rectChanged.
@@ -108,336 +111,276 @@ from PySide6.QtWidgets import QGraphicsObject
 
 class ElementOutline(QGraphicsObject):
     """
-    Generic outline overlay. Lives as a child of the element so coords are local.
-
-    Expectations:
-      - target element stores geometry in UnitStrGeometry (local rect always (0,0,w,h)),
-        with scene position separate in geometry.px.pos.
-      - element exposes Signals:
-          geometryAboutToChange(old_geom)
-          rectChanged(QRectF)  # px-space convenience signal
-          geometryChanged(new_geom)  # optional; we use if present
-      - element provides .dpi
+    Draws the element outline and manages resize handles.
+    IMPORTANT: uses self.element as the referenced element (matches your codebase).
     """
-    def __init__(
-        self,
-        target_element: QGraphicsObject,
-        pen_color: QColor = QColor(0, 175, 236, 255),
-        pen_width_px: float = 1.2,
-    ) -> None:
-        super().__init__(parent=target_element)
 
-        # --- config / public attrs expected by rest of app ---
-        self._el = target_element
-        self.pen_color = QColor(pen_color)
-        self.pen_width_px = float(pen_width_px)
-        self.is_hovered: bool = False
+    def __init__(self, element, parent=None):
+        super().__init__(parent)
+        self.element = element  # <— keep existing name
+        self._handles = {}
+        self._handles_visible = False  # inexpensive visibility toggle
 
-        # Z just above element (handles, if any, can set higher z)
-        try:
-            self.setZValue(self._el.zValue() + 0.5)
-        except Exception:
-            pass
-
-        # Interaction policy (visual only; no selection/move)
-        self.setAcceptHoverEvents(True)
+        # Outline should not be pickable; element remains the primary selection.
         self.setAcceptedMouseButtons(Qt.LeftButton)
-        self.setFlag(QGraphicsObject.ItemIsSelectable, False)
-        self.setFlag(QGraphicsObject.ItemIsMovable, False)
+        self.setAcceptHoverEvents(True)
+        self.setZValue(self.element.zValue() + 1.0)
+        self.setFlag(QGraphicsItem.ItemHasNoContents, False)
 
-        # --- keep outline geometry in sync with element geometry ---
-        # We handle both the "about to change" (for prepareGeometryChange)
-        # and "changed" (to repaint). We also connect rectChanged for convenience.
-        # All of these exist in your ComponentElement.
-        if hasattr(self._el, "geometryAboutToChange"):
-            self._el.geometryAboutToChange.connect(self._on_el_geometry_about_to_change)
-        if hasattr(self._el, "rectChanged"):
-            self._el.rectChanged.connect(self._on_el_rect_changed)
-        if hasattr(self._el, "geometryChanged"):
-            self._el.geometryChanged.connect(self._on_el_geometry_changed)
+        # Signals to stay in sync with geometry & selection.
+        if hasattr(self.element, "geometryAboutToChange"):
+            self.element.geometryAboutToChange.connect(self.prepareGeometryChange)
+        if hasattr(self.element, "geometryChanged"):
+            self.element.geometryChanged.connect(self._on_geometry_changed)
 
-    # ----- convenience -----
-    @property
-    def dpi(self) -> float:
-        # Elements expose dpi; fall back to 96 if missing
-        return getattr(self._el, "dpi", 96.0)
+        # If your element emits these, wire them (optional but nice).
+        if hasattr(self.element, "selectionChanged"):
+            self.element.selectionChanged.connect(self._on_selection_changed)
+        if hasattr(self.element, "visibilityChanged"):
+            self.element.visibilityChanged.connect(self.update)
 
-    def frame_rect(self) -> QRectF:
+        # Create handles once.
+        self._create_handles()
+        # Initial layout.
+        self._on_geometry_changed()
+
+    # ---------- Public-ish helpers ----------
+
+    def show_handles(self, show: bool):
+        if self._handles_visible == show:
+            return
+        self._handles_visible = show
+        for h in self._handles.values():
+            h.setVisible(show)
+        self.update()  # refresh outline paint (selection cues, etc.)
+
+    # ---------- Geometry plumbing ----------
+
+    def _base_local_rect(self) -> QRectF:
         """
-        The element’s local frame. With UnitStrGeometry we always expect (0,0,w,h).
+        Element’s local draw rect. By convention in your app:
+        geometry.px.rect is always (0,0,w,h). We do not read scene pos here.
         """
-        geom = getattr(self._el, "_geometry", None)
-        if geom is None:
-            return QRectF()
-        # UnitStrGeometry -> px -> QRectF
-        px = geom.to("px", dpi=self.dpi)
-        return QRectF(px.rect)
+        gpx = self.element.geometry.px  # UnitStrGeometry px view (your invariant)
+        return QRectF(0, 0, gpx.size.width(), gpx.size.height())
 
-    def _outline_margin_px(self) -> float:
+    def _current_draw_rect(self) -> QRectF:
         """
-        Extra outward padding so the outline’s boundingRect fully contains
-        the painted stroke and the hover highlight (cosmetic pen).
+        What the outline should draw around *right now*.
+        For text, TextElementOutline overrides this to include expanded bounds.
         """
-        # Base stroke + small cushion for hover ring (drawn with cosmetic width ~2px)
-        return max(2.0, self.pen_width_px * 0.5 + 1.5)
+        return self._base_local_rect()
 
-    # ----- QGraphicsObject overrides -----
-    def boundingRect(self) -> QRectF:
-        # Keep it tight around the element frame, expanded by the margin
-        r = self.frame_rect()
-        if r.isNull():
-            return QRectF()
-        m = self._outline_margin_px()
-        return r.adjusted(-m, -m, m, m)
-
-    # ----- painting -----
-    def paint(self, painter: QPainter, option, widget=None) -> None:
-        rect = self.frame_rect()
-        if rect.isNull():
+    def _on_geometry_changed(self, *args):
+        # Layout handles around the current draw rect; cheap early-out.
+        r = self._current_draw_rect()
+        if r.isEmpty():
+            self.show_handles(False)
+            self.update()
             return
 
-        painter.save()
+        # Position 8 handles at corners and mids.
+        cx = (r.left() + r.right()) * 0.5
+        cy = (r.top()  + r.bottom()) * 0.5
+        pos = {
+            "nw": QPointF(r.left(),  r.top()),
+            "n":  QPointF(cx,        r.top()),
+            "ne": QPointF(r.right(), r.top()),
+            "e":  QPointF(r.right(), cy),
+            "se": QPointF(r.right(), r.bottom()),
+            "s":  QPointF(cx,        r.bottom()),
+            "sw": QPointF(r.left(),  r.bottom()),
+            "w":  QPointF(r.left(),  cy),
+        }
+        for k, h in self._handles.items():
+            h.setPos(pos[k])
 
-        # Base outline
-        pen = QPen(self.pen_color)
-        pen.setWidthF(self.pen_width_px)  # keep same behavior as before (non-cosmetic)
-        painter.setPen(pen)
-        painter.setBrush(Qt.NoBrush)
-        # Sub-pixel adjust for crisp stroke
-        painter.drawRect(rect.adjusted(0.5, 0.5, -0.5, -0.5))
-
-        # Hover accent (cosmetic so it reads at any zoom; matches current behavior)
-        if self.is_hovered:
-            hover_pen = QPen(QColor(0, 195, 255, 255))
-            hover_pen.setWidthF(2.0)
-            hover_pen.setCosmetic(True)
-            painter.setPen(hover_pen)
-            painter.setBrush(Qt.NoBrush)
-            painter.drawRect(rect.adjusted(1.0, 1.0, -1.0, -1.0))
-
-        painter.restore()
-
-    # ----- hover -----
-    def hoverMoveEvent(self, ev) -> None:
-        hovered = self.frame_rect().contains(ev.pos())
-        if hovered != self.is_hovered:
-            self.is_hovered = hovered
-            self.update()
-        self.setCursor(Qt.PointingHandCursor if hovered else Qt.ArrowCursor)
-        super().hoverMoveEvent(ev)
-
-    def hoverLeaveEvent(self, ev) -> None:
-        if self.is_hovered:
-            self.is_hovered = False
-            self.update()
-        self.unsetCursor()
-        super().hoverLeaveEvent(ev)
-
-    # ----- element geometry sync -----
-    def _on_el_geometry_about_to_change(self, *_):
-        # Element’s bounding rect is about to change – announce ours too
-        self.prepareGeometryChange()
-
-    def _on_el_rect_changed(self, *_):
-        # After element rect changed, repaint outline
-        # (boundingRect() already updated via prepareGeometryChange above)
+        # Only show when element is selected & visible (policy — tweak as you like).
+        self._update_visibility_policy()
         self.update()
 
-    def _on_el_geometry_changed(self, *_):
-        # Safety: some code paths may emit geometryChanged without rectChanged
-        self.update()
+    def _update_visibility_policy(self):
+        sel = getattr(self.element, "isSelected", None)
+        is_selected = bool(sel()) if callable(sel) else False
+        self.show_handles(is_selected and self.element.isVisible())
 
+    # ---------- Handles ----------
 
-# class ElementOutline(QGraphicsObject):
-#     """
-#     Generic outline overlay. Lives as a child of the element so coords are local.
-#     """
-#     def __init__(
-#         self,
-#         target_element,
-#         pen_color: QColor = QColor(0, 175, 236, 255),
-#         pen_width_px: float = 1.2,
-#     ):
-#         super().__init__(parent=target_element)
+    def _create_handles(self):
+        for key, anchor in _ANCHORS.items():
+            h = _ResizeHandle(self, key, anchor)
+            h.dragBegan.connect(self._on_drag_began)
+            h.dragMoved.connect(self._on_drag_moved)
+            h.dragEnded.connect(self._on_drag_ended)
+            h.hide()  # selection will reveal
+            self._handles[key] = h
 
-#         self._el = target_element
-#         self.pen_color = pen_color
-#         self.pen_width_px = float(pen_width_px)
-#         self.is_hovered = False
-#         # --- in TextOutline.__init__ ---
-#         self._is_expanded = False
-#         self._cached_overset_rect: QRectF | None = None
+    def _on_drag_began(self, handle: _ResizeHandle):
+        # Cache original local rect and parent-space position once
+        self._dragOriginRect = QRectF(self._current_draw_rect())   # (0,0,w,h) in LOCAL
+        self._dragOriginPosParent = QPointF(self.element.pos())        # parent-space pos
 
-#         # Draw above the element (but below handles if they use a higher z)
-#         self.setZValue(self._el.zValue() + 0.5)
-#         self.setAcceptHoverEvents(True)
-#         self.setAcceptedMouseButtons(Qt.LeftButton)
-#         self.setFlag(QGraphicsObject.ItemIsSelectable, False)
-#         self.setFlag(QGraphicsObject.ItemIsMovable, False)
+    def _on_drag_moved(self, handle: _ResizeHandle, localDelta: QPointF):
+        a  = handle.anchor
+        r0 = self._dragOriginRect
 
-#     # ----- geometry -----
-#     def frame_rect(self) -> QRectF:
-#         return self._el._geometry.to("px", dpi=self._el.dpi).rect
+        # Compute new size from the handle's side(s). Local delta is already in the element's space.
+        # Right/bottom increase size with +dx/+dy; left/top increase with -dx/-dy.
+        new_w = r0.width()
+        new_h = r0.height()
 
-#     def el_rect(self):
-#         pass
+        if a.right:
+            new_w = r0.width() + localDelta.x()
+        elif a.left:
+            new_w = r0.width() - localDelta.x()
 
-#     def boundingRect(self) -> QRectF:
-#         # Base outline just tracks the element rect.
-#         return self.frame_rect()
+        if a.bottom:
+            new_h = r0.height() + localDelta.y()
+        elif a.top:
+            new_h = r0.height() - localDelta.y()
 
-#     # ----- painting -----
-#     def paint(self, painter: QPainter, option, widget=None):
-#         painter.save()
-#         rect = self.frame_rect()
+        # Enforce a minimum (avoid collapsing/inversion)
+        min_size = 1.0
+        new_w = max(min_size, new_w)
+        new_h = max(min_size, new_h)
 
-#         pen = QPen(self.pen_color)
-#         pen.setWidthF(self.pen_width_px)
-#         painter.setPen(pen)
-#         painter.setBrush(Qt.NoBrush)
-#         painter.drawRect(rect.adjusted(0.5, 0.5, -0.5, -0.5))
+        # Optional: aspect ratio with Shift
+        mods = QApplication.keyboardModifiers()
+        if mods & Qt.ShiftModifier and r0.height() > 0:
+            ar = r0.width() / r0.height()
+            # Corner drag: lock AR by adjusting the dominant axis
+            if (a.left or a.right) and (a.top or a.bottom):
+                dw = abs(new_w - r0.width())
+                dh = abs(new_h - r0.height())
+                if dw >= dh:
+                    new_h = max(min_size, new_w / ar)
+                else:
+                    new_w = max(min_size, new_h * ar)
+            elif (a.left or a.right):
+                new_h = max(min_size, new_w / ar)
+            elif (a.top or a.bottom):
+                new_w = max(min_size, new_h * ar)
 
-#         if self.is_hovered:
-#             hover_pen = QPen(QColor(0, 195, 255, 255))
-#             hover_pen.setWidthF(2.0)
-#             hover_pen.setCosmetic(True)
-#             painter.setPen(hover_pen)
-#             painter.drawRect(rect.adjusted(1, 1, -1, -1))
+        # Because our local rect must remain (0,0,new_w,new_h),
+        # dragging from LEFT/TOP requires shifting the item's position so
+        # the opposite edge stays visually anchored.
+        shift_x_local = (r0.width()  - new_w) if a.left  else 0.0
+        shift_y_local = (r0.height() - new_h) if a.top   else 0.0
 
-#         painter.restore()
+        # Convert the local shift vector to a parent-space delta
+        p0 = self.element.mapToParent(QPointF(0.0, 0.0))
+        p1 = self.element.mapToParent(QPointF(shift_x_local, shift_y_local))
+        shift_parent = p1 - p0
 
-#     # ----- hover -----
+        # Commit: move the item first, then set the new rect (still local at 0,0)
+        # This ensures pos() reflects the origin shift for left/top drags.
+        self.element.setPos(self._dragOriginPosParent + shift_parent)
 
-#     def hoverMoveEvent(self, ev):
-#         hovered = self.frame_rect().contains(ev.pos())
-#         if hovered != self.is_hovered:
-#             self.is_hovered = hovered
-#             self.update()
-#         self.setCursor(Qt.PointingHandCursor if hovered else Qt.ArrowCursor)
+        # Set the new local rect via the element API (fires signals/handle relayout)
+        self.element.setRect(QRectF(0.0, 0.0, new_w, new_h))
 
-#     def hoverLeaveEvent(self, ev):
-#         if self.is_hovered:
-#             self.is_hovered = False
-#             self.update()
-#         self.unsetCursor()
+    def _on_drag_ended(self, handle: _ResizeHandle):
+        # If you batch undo on scene press/release, nothing to do here.
+        # Otherwise, push a single undo now with the element’s new geometry.
+        pass
+
+    # ---------- Painting ----------
+
+    def boundingRect(self) -> QRectF:
+        # Include a little padding for the handles around the draw rect.
+        r = self._current_draw_rect()
+        pad = 12.0
+        return r.adjusted(-pad, -pad, pad, pad)
+
+    def paint(self, p: QPainter, option: QStyleOptionGraphicsItem, widget=None):
+        # Base outline paint: TextElementOutline overrides as needed.
+        r = self._current_draw_rect()
+        if r.isEmpty():
+            return
+        p.save()
+        pen = QPen(QColor(0, 195, 255, 160), 1.0)
+        p.setPen(pen)
+        p.setBrush(Qt.NoBrush)
+        p.drawRect(r)
+        p.restore()
+
+    def _on_selection_changed(self, *args):
+        self._update_visibility_policy()
 
 
 class TextOutline(ElementOutline):
+    expandedChanged = Signal(bool)
 
     def __init__(
         self,
-        target_element,
+        element,
         pen_color: QColor = QColor(0, 175, 236, 255),
         pen_width_px: float = 1.2,
+        parent=None
     ):
-        super().__init__(target_element=target_element,
-                         pen_color=pen_color,
-                         pen_width_px=pen_width_px)
-
-        self._is_expanded = False
+        super().__init__(element=element, parent=parent)
+        self.pen_color = pen_color
+        self.pen_width_px = pen_width_px
 
     @property
     def renderer(self):
-        return self._el._renderer
+        return self.element._renderer
 
-    # --- fix the setter; keep it tiny & authoritative ---
     @property
-    def is_expanded(self) -> bool:
-        return self._is_expanded
+    def has_overflow(self) -> bool:
+        r = self.renderer
+        return r.has_overflow
+
+    @property
+    def is_expanded(self):
+        return self.renderer.is_expanded
 
     @is_expanded.setter
-    def is_expanded(self, state: bool) -> None:
-        state = bool(state)
-        if state == self._is_expanded:
-            return
-
-        # both outline and element bounding rects will change
-        self._el.prepareGeometryChange()
-        self.prepareGeometryChange()
-
-        if state:
-            r = getattr(self._el, "_renderer", None)
-            orc = getattr(r, "overset_rect", None)
-            if isinstance(orc, QRectF) and not orc.isNull():
-                self._cached_overset_rect = QRectF(orc)
-            else:
-                self._cached_overset_rect = QRectF(self.el_rect())
-        else:
-            self._cached_overset_rect = None
-
-        # keep renderer in sync if it cares
-        if hasattr(self._el, "_renderer"):
-            self._el._renderer.is_expanded = state
-
-        self._is_expanded = state
-
-
-
+    def is_expanded(self, state:bool):
+        self.renderer.is_expanded = state
+        self.expandedChanged.emit(state)
+        self.update()
+    
     # ---------- Utilities ----------
-    def el_rect(self) -> QRectF:
-        return self._el._geometry.to("px", dpi=self._el.dpi).rect
+    def base_rect(self) -> QRectF:
+        return self.element.geometry.to("px", dpi=self.element.dpi).rect
 
-    # Fix overset_rect() – use cached rect while expanded, and fix the return typo
-    def overset_rect(self) -> QRectF:
-        if self.is_expanded and isinstance(self._cached_overset_rect, QRectF):
-            return self._cached_overset_rect
-        r = getattr(self._el, "_renderer", None)
-        if r and getattr(r, "has_overflow", False) and isinstance(getattr(r, "overset_rect", None), QRectF):
-            return r.overset_rect
-        return self.el_rect()   # <-- fixed typo: was return el_rect()
-
-    # frame_rect() stays the same but now respects the cache
     def frame_rect(self) -> QRectF:
+        if not self.renderer.has_overflow or self.renderer.can_expand:
+            return self.base_rect()
         if self.is_expanded:
-            r = self.overset_rect()
-            if isinstance(r, QRectF):
-                return r
-        return self.el_rect()
+            return self.renderer.overset_rect
+        return self.base_rect()
+
+    def boundingRect(self) -> QRectF:
+        return self.united_rect()
+
 
     # --- show the button whenever we're expanded OR we truly have overflow ---
     @property
     def has_overflow(self) -> bool:
-        if self.is_expanded:
-            return True
-        r = getattr(self._el, "_renderer", None)
-        return bool(r and getattr(r, "has_overflow", False))
-
+        return self.renderer.has_overflow
 
     @property
     def can_expand(self) -> bool:
-        return self.has_overflow and not self.is_expanded
+        return self.renderer.has_overflow and not self.renderer.is_expanded
 
     # ---------- Hit target for the ± button ----------
     def _button_size_px(self) -> float:
         # Keep it physically sized
-        return float(UnitStr("4 pt").to("px", dpi=self._el.dpi))
+        return float(UnitStr("4 pt").to("px", dpi=self.element.dpi))
 
     # --- hit/united stays the same; now benefits from the new has_overflow ---
     def hit_and_united_rect(self) -> tuple[Optional[QRectF], QRectF]:
         base = self.frame_rect()
-        if not self.has_overflow:
-            return None, base
-        size_px = self._button_size_px()
+        # if the renderer has no overflow, then there is no hit_rect
+        size_px = 18.0
         x = base.right() - size_px
         y = base.top() + (2 * size_px)
         hit = QRectF(x, y, size_px, size_px)
+        # united ensures that hit rect is included in the rect
+        # united will either be the base geometry 
         return hit, base.united(hit)
-
-    # def hit_and_united_rect(self) -> tuple[Optional[QRectF], QRectF]:
-    #     base = self.frame_rect()
-
-    #     if not self.has_overflow:
-    #         # Nothing to click; just return the base rect
-    #         return None, base
-
-    #     size_px = self._button_size_px()
-    #     # Place near the top-right *inside* the frame
-    #     x = base.right() - size_px
-    #     y = base.top() + (2 * size_px)
-
-    #     hit = QRectF(x, y, size_px, size_px)
-    #     united = base.united(hit)
-        return hit, united
 
     def hit_rect(self) -> Optional[QRectF]:
         hit, _ = self.hit_and_united_rect()
@@ -447,35 +390,18 @@ class TextOutline(ElementOutline):
         _, united = self.hit_and_united_rect()
         return united
 
-    def boundingRect(self) -> QRectF: 
-        return self.united_rect()
-
     # ---------- Paint ----------
     def paint(self, painter: QPainter, option, widget=None):
+        # super().paint(painter, option=option, widget=widget)
         painter.save()
-        hit, frame = self.hit_and_united_rect()
-
+        hit = self.hit_rect()
+        print(f"Hit rect still there? {hit}")
         pen = QPen(self.pen_color)
         painter.setPen(pen)
-        pen.setWidthF(self.pen_width_px)
-        painter.setBrush(Qt.NoBrush)
-        painter.save()
-
-        if self.is_hovered:
-            hover_pen = QPen(QColor(0, 195, 255, 80))
-            hover_pen.setWidthF(2.0)
-            # hover_pen.setCosmetic(True)
-            pen.setWidthF(self.pen_width_px * 2.0)
-            painter.setPen(hover_pen)
-            painter.setBrush(Qt.NoBrush)
-            painter.drawRect(frame.adjusted(1, 1, -1, -1))
-        else:
-            painter.drawRect(frame.adjusted(0.5, 0.5, -0.5, -0.5))
-
-        painter.restore()
 
         # --- (tiny tidy) paint: use the cosmetic pen when drawing the button ---
         if hit:
+            painter.save()
             box_pen = QPen(pen)
             box_pen.setCosmetic(True)
             painter.setPen(box_pen)
@@ -490,25 +416,24 @@ class TextOutline(ElementOutline):
             painter.drawLine(QPointF(inner.left(), cy), QPointF(inner.right(), cy))
 
             # plus stem only when NOT expanded
-            if not self.is_expanded:
+            if not self.renderer.is_expanded:
                 painter.drawLine(QPointF(cx, inner.top()), QPointF(cx, inner.bottom()))
+            painter.restore()
 
         painter.restore()
 
-    # ---------- Events ----------
-    # mousePressEvent – notify the ELEMENT (not only the outline) that its bounding rect changes
-    def mousePressEvent(self, ev):
-        hit = self.hit_rect()
-        if ev.button() == Qt.LeftButton and (hit is not None) and hit.contains(ev.pos()):
-            # Bounding rects will change for both outline and element
-            self._el.prepareGeometryChange()
+    def mousePressEvent(self, e):
+        hr = self.hit_rect()
+        print(f"Outline has hit_rect: {hr}. Event position is {e.pos()}.\nThe position is in the hit rect: {hr.contains(e.pos())}")
+        if hr is not None and not hr.isNull() and hr.contains(e.pos()):
+            # boundingRect will change (expanded uses overset), so announce it first
             self.prepareGeometryChange()
+            self.renderer.is_expanded = not self.renderer.is_expanded
 
-            self.is_expanded = not self.is_expanded
-
-            self._el.update()
             self.update()
-            ev.accept()
-            return
-        super().mousePressEvent(ev)
+            # Element paint path will honor renderer.is_expanded and stop clipping
+            self.element.update()
 
+            e.accept()
+            return
+        e.ignore()
