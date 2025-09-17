@@ -10,7 +10,7 @@ def ustr_to_px(unit_str: "UnitStr", dpi: int | float | None = None) -> float:
     If `dpi` is None, uses the UnitStr's own working DPI.
     """
     effective_dpi = unit_str.dpi if dpi is None else int(dpi)
-    return unit_str.to("px", dpi=effective_dpi)
+    return unit_str.to(self.unit, dpi=effective_dpi)
 
 
 def geometry_with_px_rect(

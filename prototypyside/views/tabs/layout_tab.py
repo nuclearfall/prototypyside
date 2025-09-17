@@ -1,17 +1,13 @@
 # layout_tab.py
-from functools import partial
 from typing import Optional, List
 from PySide6.QtWidgets import (
-    QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QSplitter, QLabel, QGridLayout,
+    QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QLabel,
     QGraphicsView, QGraphicsScene)
 from PySide6.QtCore import Qt, Signal, QRectF, QPointF, Slot, QTimer
-from PySide6.QtGui import (QKeySequence, QShortcut, QUndoStack, 
-    QUndoGroup, QUndoCommand, QPainter, QPageSize, QPixmap, QImage, QPainter)
+from PySide6.QtGui import QKeySequence, QShortcut, QUndoStack, QPainter
 
-from prototypyside.views.overlays.incremental_grid import IncrementalGrid
-from prototypyside.models.layout_template import LayoutTemplate
-from prototypyside.models.layout_slot import LayoutSlot
 from prototypyside.services.app_settings import AppSettings
+from prototypyside.services.proto_class import ProtoClass
 from prototypyside.views.panels.layout_property_panel import LayoutPropertyPanel
 from prototypyside.views.toolbars.layout_toolbar import LayoutToolbar
 from prototypyside.views.palettes.layout_palette import LayoutPalette
@@ -19,13 +15,12 @@ from prototypyside.widgets.unit_str_field import UnitStrField
 from prototypyside.widgets.unit_strings_field import UnitStringsField
 from prototypyside.views.layout_scene import LayoutScene
 from prototypyside.views.layout_view import LayoutView
-from prototypyside.utils.unit_converter import to_px
-from prototypyside.config import PAGE_SIZES
 from prototypyside.services.proto_registry import ProtoRegistry
 from prototypyside.services.undo_commands import (ChangePropertyCommand, 
         CloneComponentTemplateToSlotCommand, CloneComponentToEmptySlotsCommand)
 # # from prototypyside.services.pagination.page_manager import PageManager
 
+pc = ProtoClass
 
 class LayoutTab(QWidget):
     """Tab for editing a LayoutTemplate via grid/item assignment."""
@@ -58,8 +53,8 @@ class LayoutTab(QWidget):
         self._selected_item_pid: Optional[str] = None
 
         # --- 2. Setup the central widget for the tab's main area ---
-        self.inc_grid = IncrementalGrid(self.settings, snap_enabled=self._snap_grid, parent=template)
-        self.scene = LayoutScene(self.settings, template=template, grid=self.inc_grid)
+        self.scene = LayoutScene(self.settings, template=template)
+        self.inc_grid = self.scene.inc_grid
         self.scene.selectionChanged.connect(self.on_scene_selection_changed)
         self.view = LayoutView(self.scene)
         self.view.setRenderHints(QPainter.Antialiasing | QPainter.TextAntialiasing | QPainter.SmoothPixmapTransform)
@@ -74,10 +69,9 @@ class LayoutTab(QWidget):
         # initialise from current flags
         self.inc_grid.setVisible(self._show_grid)
    
-        self._create_layout_toolbar()
-        self._create_layout_palette()
-        self._create_property_panel()
-        self.remove_item_btn = QPushButton("Remove Assignment")
+        self._create_toolbar()
+        self._create_right_dock()
+        self._create_left_dock()
 
         # Connect signals to handler methods
         self.scene.component_dropped.connect(self.on_component_dropped)
@@ -88,43 +82,51 @@ class LayoutTab(QWidget):
         main_layout.setContentsMargins(0, 0, 0, 0)
         main_layout.addWidget(self.view)
 
-    def _create_property_panel(self) -> QWidget:
+    def _create_right_dock(self) -> QWidget:
         """Create panel with margin and spacing controls"""
         unit = self.settings.unit
         dpi = self.settings.dpi
 
-        self.property_panel = QWidget()
-        layout = QVBoxLayout(self.property_panel)
-        layout.setContentsMargins(0, 0, 0, 0)
+        self.right_dock = QWidget()
+        layout = QVBoxLayout(self.right_dock)
+        # layout.setContentsMargins(0, 0, 0, 0)
         
         # Add section headers
-        layout.addWidget(QLabel("Margins and Spacing"))
-
-        
         self.ws_fields = UnitStringsField(
             target_item=self.template,
             property_name="whitespace",
             labels=["Top Margin", "Bottom Margin", "Left Margin", 
                         "Right Margin", "Horizontal Spacing", "Veritical Spacing"],
+            rows=3,
+            columns=2,
+            dpi=self.settings.dpi,
             display_unit=self.settings.display_unit,
-            decimal_places=4)
-
-        self.ws_fields.valueChanged.connect(self.on_property_changed)
+            decimal_places=4,
+            parent=None)
+        layout.addWidget(QLabel("Margins and Spacing"))
         layout.addWidget(self.ws_fields)
-        return self.property_panel
+        self.ws_fields.valueChanged.connect(self.on_property_changed)
+        self.ws_fields.setEnabled(True)
 
-    def _create_layout_toolbar(self) -> QWidget:
-        self.layout_toolbar = LayoutToolbar(self, parent=self)
-        return self.layout_toolbar
+        return self.right_dock
 
-    def _create_layout_palette(self) -> QWidget:
-        self.layout_palette = LayoutPalette(
-            root_registry=self.main_window.registry, 
+    def _create_toolbar(self) -> QWidget:
+        self.toolbar = LayoutToolbar(self, parent=self)
+        return self.toolbar
+
+    def _create_left_dock(self) -> QWidget:
+        self.left_dock = QWidget()
+
+        self.laypal = LayoutPalette(
+            root_registry=self.main_window.registry,
+            tab=self, 
             layout=self.template, 
-            parent=self)
-
-        self.layout_palette.select_template.connect(self.on_confirm_template)
-        self.layout_palette.remove_template.connect(self.on_remove_template)
+            parent=self
+        )
+        layout = QVBoxLayout()
+        self.left_dock.setLayout(layout)
+        layout.addWidget(self.laypal)
+        self.laypal.select_template.connect(self.on_confirm_template)
         # print("LayoutPalette sizeHint:", self.layout_palette.sizeHint())
         # Return a widget listing all open component templates
         pass
@@ -153,7 +155,7 @@ class LayoutTab(QWidget):
 
     # --- Properties ---
     @property
-    def current_selected_item(self) -> Optional[LayoutSlot]:
+    def current_selected_item(self) -> Optional["LayoutSlot"]:
         if self._selected_item_pid:
             return self.registry.get(self._selected_item_pid)
         return None
@@ -181,7 +183,7 @@ class LayoutTab(QWidget):
 
     @template.setter
     def template(self, new):
-        if new != self.template and isinstance(new, LayoutTemplate):
+        if new != self.template and pc.isproto(self.template, pc.LT):
             self._template = new
 
     # --- Grid/Scene Logic ---
@@ -228,30 +230,41 @@ class LayoutTab(QWidget):
         items = self.scene.selectedItems()
         n = len(items)
         if n == 0:
-            # self.property_panel.clear_target()
+            # self.right_dock.clear_target()
             self.show_status_message("No selection", "info")
         elif n == 1:
-            # self.property_panel.set_target(items[0])
+            # self.right_dock.set_target(items[0])
             self.show_status_message(f"Selected: {getattr(items[0], 'name', type(items[0]).__name__)}", "info")
         else:
             # Multi-select: either disable detail or show a compact “multi” editor
-            # self.property_panel.set_multi_target(items)
+            # self.right_dock.set_multi_target(items)
             self.show_status_message(f"{n} items selected", "info")
 
+    @Slot()
+    def on_clear_selected_slots(self):
+        # Only LayoutSlots matter
+        selected_slots = [it for it in self.scene.selectedItems() if pc.isproto(it, pc.LS)]
+        if not selected_slots:
+            return
+        cmd = ClearSlotsCommand(self.registry, selected_slots, "Clear Selected Slots")
+        self.undo_stack.push(cmd)
     @Slot(str)
     def on_confirm_template(self, pid):
         comp = self.registry.global_get(pid)
         command = CloneComponentToEmptySlotsCommand(self.registry, self.template, comp)
         self.undo_stack.push(command)
 
-    @Slot(str)
-    def on_remove_template(self, pid):
-        print(f"[LAYOUT_TAB] on_remove_template: Received remove request...")
-        undo = self.undo_stack
-        command = UndoAddToSlots(self.template, slots)
-        print(f"All slot content has been set to None")
-        # command = CloneComponentToSlotsCommand(self.registry, self.template, None)
-        # self.undo_stack.push(command)
+    def get_selected_items(self):
+        return self.scene.selectedItems()
+
+    # @Slot(str)
+    # def on_remove_template(self, pid):
+    #     print(f"[LAYOUT_TAB] on_remove_template: Received remove request...")
+    #     undo = self.undo_stack
+    #     command = UndoAddToSlots(self.template, slots)
+    #     print(f"All slot content has been set to None")
+    #     # command = CloneComponentToSlotsCommand(self.registry, self.template, None)
+    #     # self.undo_stack.push(command)
 
     @Slot(int, int)
     def on_grid_size_changed(self, rows: int, cols: int):
@@ -304,14 +317,14 @@ class LayoutTab(QWidget):
     @Slot()
     def on_scene_selection_changed(self):
         # Only care about LayoutSlot selections
-        selected_slots = [it for it in self.scene.selectedItems() if isinstance(it, LayoutSlot)]
+        selected_slots = [it for it in self.scene.selectedItems() if pc.isproto(it, pc.LS)]
         if selected_slots:
             slot = selected_slots[-1]  # prefer the last selected if multiple
             self._selected_item_pid = getattr(slot, "pid", None)
-            self.property_panel.display_item(slot)
+            # self.right_dock.display_item(slot)
         else:
             self._selected_item_pid = None
-            self.property_panel.clear_values()
+            # self.right_dock.clear_values()
 
     def select_item(self, row: int, col: int):
         item = self.template.slots[row][col]
@@ -325,8 +338,8 @@ class LayoutTab(QWidget):
         self.refresh_panels()
 
     def on_item_selected(self, item_pid: str):
-        if prefix(item_pid) == "ct":
-            self.property_panel.template_
+        # if prefix(item_pid) == "ct":
+            # self.right_dock.template_
         self._selected_item_pid = item_pid
         self.refresh_panels()
 
@@ -381,7 +394,7 @@ class LayoutTab(QWidget):
 
     # --- Misc/Utility ---
     def refresh_panels(self):
-        self.layout_property_panel.update()
+        # self.layout_property_panel.update()
         # Refresh property panel, palette, import panel, etc.
         pass
 

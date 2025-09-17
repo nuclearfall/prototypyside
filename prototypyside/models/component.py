@@ -5,6 +5,7 @@ from PySide6.QtCore import Qt, QRectF
 from PySide6.QtWidgets import QGraphicsItem
 
 from prototypyside.models.component_template import ComponentTemplate
+from prototypyside.utils.render_context import RenderContext, RenderMode, RenderRoute, TabMode
 
 if TYPE_CHECKING:
     from prototypyside.models.layout_slot import LayoutSlot
@@ -25,7 +26,7 @@ class Component(ComponentTemplate):
         registry: "ProtoRegistry",
         geometry: "UnitStrGeometry" = None,
         name: Optional[str] = None,
-        shape: str = "default",
+        shape: str = "rounded_rect",
         file_path: Optional[Path] = None,
         csv_path: Optional[Path] = None,
         csv_row: Optional[Dict] = None,
@@ -46,23 +47,29 @@ class Component(ComponentTemplate):
         # Will be set by the slot that owns/hosts this component
         self._csv_row: csv_row
         self._has_csv_conent = False
-        if csv_row:
-            self.set_csv_content()
-
         self._slot_pid: Optional[str] = None
+        self._context = RenderContext(
+            mode=RenderMode.GUI,
+            tab_mode=TabMode.LAYOUT,
+            route=RenderRoute.COMPOSITE,
+            dpi=self.dpi
+        )
         # Flags
         self.setAcceptHoverEvents(True)
         self.setAcceptedMouseButtons(Qt.LeftButton)
-        self.setFlag(QGraphicsItem.ItemIsSelectable, True)
-        self.setFlag(QGraphicsItem.ItemIsMovable, True)
+        self.setFlag(QGraphicsItem.ItemIsSelectable, False)
+        self.setFlag(QGraphicsItem.ItemIsMovable, False)
         self.setFlag(QGraphicsItem.ItemClipsChildrenToShape, True)
+        for item in self.items:
+            item.setFlag(QGraphicsItem.ItemIsSelectable, False)
+            item.setFlag(QGraphicsItem.ItemIsMovable, False)
 
     # ---- QGraphicsItem overrides ------------------------------------------
 
     def boundingRect(self) -> QRectF:
-        # assuming UnitStrGeometry exposes a pixel-space QRectF at .px.rect
-        return self._geometry.px.rect  # type: ignore[return-value]
-
+        base = (self._bleed_rect if self._include_bleed else self._geometry).to(self.unit, dpi=self.dpi).rect
+        return QRectF(0, 0, base.width(), base.height())
+        
     # ---- Slot binding ------------------------------------------------------
 
     @property
@@ -90,9 +97,13 @@ class Component(ComponentTemplate):
         for item in self.items:
         	obj._display_outline = False
 
-    def set_csv_content(self):
-        for el in self.items:
-            content = self.csv_row.get(el.name, None)
-            if content:
-                self.has_csv_content = True
-                el.content = content
+    def set_csv_content(self, row: dict):
+        """
+        Apply CSV row values
+        """
+        if row:
+            for item in self.items:
+                content = row.get(item.name)
+                if match:
+                    content = match          
+        return self

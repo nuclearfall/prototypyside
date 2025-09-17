@@ -15,11 +15,14 @@ from prototypyside.utils.units.unit_str_helpers import geometry_with_px_rect, ge
 from prototypyside.config import HMAP, VMAP, HMAP_REV, VMAP_REV
 from prototypyside.utils.graphics_item_helpers import rotate_by
 from prototypyside.services.proto_class import ProtoClass
+from prototypyside.utils.render_context import RenderContext, RenderMode, RenderRoute, TabMode
 from prototypyside.views.shape_mixin import ShapeableElementMixin
 from prototypyside.utils.render_context import RenderContext, RenderMode, TabMode, RenderRoute
 
 if TYPE_CHECKING:
     from prototypyside.services.proto_registry import ProtoRegistry
+
+pc = ProtoClass
 
 def _qrect_close(a: QRectF, b: QRectF, eps: float = 0.25) -> bool:
     return (abs(a.x() - b.x()) <= eps and
@@ -34,7 +37,7 @@ class ComponentElement(ShapeableElementMixin, QGraphicsObject):
         "shape_kind":   (str,                  lambda s: s,                 "rect"),
         "shape_params": (
             lambda d: {k: UnitStr.from_dict(v) if isinstance(v, dict) and "unit" in v else v for k, v in (d or {}).items()},
-            lambda d: {k: (v.to_dict() if isinstance(v, UnitStr) else v) for k, v in (d or {}).items()},
+            lambda d: {k: (v.to_dict() if pc.isproto(v, pc.US) else v) for k, v in (d or {}).items()},
             {},
         ),
         "z_order":      (int,                   lambda z: z,                0),
@@ -48,17 +51,18 @@ class ComponentElement(ShapeableElementMixin, QGraphicsObject):
             # from_fn: accept string OR flag; normalize to flag
             lambda s: HMAP.get(s, s) if isinstance(s, str) else Qt.Alignment(int(s)),
             # to_fn: emit canonical string
-            lambda f: HMAP_REV.get(Qt.Alignment(int(f)), "Left"),
-            "Left",
+            lambda f: HMAP_REV.get(Qt.Alignment(int(f)), Qt.AlignLeft),
+            Qt.AlignLeft,
         ),
         "v_align": (
             lambda s: VMAP.get(s, s) if isinstance(s, str) else Qt.Alignment(int(s)),
-            lambda f: VMAP_REV.get(Qt.Alignment(int(f)), "Top"),
-            "Top",
+            lambda f: VMAP_REV.get(Qt.Alignment(int(f)), Qt.AlignTop),
+            Qt.AlignTop,
         ),
     }
     is_vector: bool = False
     is_raster: bool = False
+    _snapping_now: bool = False 
     item_changed = Signal()
     nameChanged = Signal(str)  # Add this signal
     moveCommitted = Signal(object, object, object)
@@ -66,6 +70,7 @@ class ComponentElement(ShapeableElementMixin, QGraphicsObject):
     geometryChanged       = Signal(object)  # new UnitStrGeometry
     rectChanged           = Signal(QRectF)  # convenience (px-space)
     positionChanged       = Signal(QPointF)
+    selectionChanged = Signal(bool)
     ### TODO: Should fonts be sticky?
     # new_default_font = Signal(object)
     ###
@@ -86,10 +91,16 @@ class ComponentElement(ShapeableElementMixin, QGraphicsObject):
         self._registry = registry
         self._settings = registry.settings
         self._dpi = registry.settings.dpi
-        self._ldpi = 300
+        self._ldpi = registry.settings.ldpi
         self._unit = self._settings.unit
         self._geometry = geometry or UnitStrGeometry(width="0.75in", height="0.5in", x="10 px", y="10 px", dpi=self._dpi)
         # Attach the decoupled outline/handle overlay
+        self._context = RenderContext(
+            mode=RenderMode.GUI,
+            tab_mode=TabMode.COMPONENT,
+            route=RenderRoute.COMPOSITE,
+        )
+        
         self._outline = ElementOutline(self, parent=self)
         self._name = registry.validate_name(proto, name)
 
@@ -104,13 +115,6 @@ class ComponentElement(ShapeableElementMixin, QGraphicsObject):
         self._h_align = HMAP.get("Left")  # Left | Center | Right | Justify
         self._v_align = VMAP.get("Top")   # Top  | Center | Bottom
 
-        # these aren't serialized or rehydrated
-        # self._pre_resize_state = {}
-        self._display_outline = True
-        #self._is_selected = False
-        # self._is_hovered = False
-        # self._handles: Dict[HandleType, ResizeHandle] = {}
-
         self.setFlag(QGraphicsItem.ItemIsSelectable, True)
         self.setFlag(QGraphicsItem.ItemIsMovable, True)
         self._group_drag_active = False
@@ -123,12 +127,15 @@ class ComponentElement(ShapeableElementMixin, QGraphicsObject):
             QGraphicsItem.ItemIsMovable |
             QGraphicsItem.ItemSendsGeometryChanges
         )
+        self.setFlag(QGraphicsItem.ItemSendsGeometryChanges, True)
+        self._suppress_snap = False  # guard for internal moves
         self.setAcceptHoverEvents(True)
-        self.setPos(self._geometry.px.pos)
+        self.setPos(self._geometry.to(self.unit, dpi=self.dpi).pos)
         self.setSelected(True)
-
         
-        # self.create_handles()
+    @property
+    def outline(self):
+        return self._outline
 
     # ---- UnitStrGeometry rect and position handling ---- #
     @property
@@ -141,60 +148,74 @@ class ComponentElement(ShapeableElementMixin, QGraphicsObject):
             return
 
         old = self._geometry
-        old_px_rect = old.to("px", dpi=self._dpi).rect if old else None
-        new_px      = new_geom.to("px", dpi=self._dpi)
-        new_px_rect = new_px.rect
+        old_px_rect = old.to(self.unit, dpi=self._dpi).rect if old else None
+        new = new_geom
+        new_px_pos = new.to(self.unit, dpi=self._dpi).pos
+        new_px_rect = new.to(self.unit, dpi=self._dpi).rect
 
         # Only size changes require prepareGeometryChange
-        if old_px_rect is None or old_px_rect != new_px_rect:
+        if old != new_geom:
             self.prepareGeometryChange()
 
         # --- emit "about to" BEFORE mutation
         self.geometryAboutToChange.emit(old)
 
-        # mutate
+        # change geometry
         self._geometry = new_geom
 
         # keep item position in sync with geometry pos
-        if self.pos() != new_px.pos:
-            super().setPos(new_px.pos)
+        if self.pos() != new_px_pos:
+            self.setPos(new_px_pos)
 
         # your existing side-effects
         self._invalidate_shape_cache()
-        print (f"Geometry after change:\n - Rect: {new_px.rect}\n - Pos: {new_px.pos}")
+        print (f"Geometry after change:\n - Rect: {new_px_rect}\n - Pos: {new_px_pos}")
         # --- emit "changed" AFTER mutation
         self.geometryChanged.emit(self._geometry)
         self.rectChanged.emit(new_px_rect)
-        self.positionChanged.emit(new_px.pos)
+        self.positionChanged.emit(new_px_pos)
         self.update()
 
     def boundingRect(self) -> QRectF:
-        return self._geometry.to("px", dpi=self._dpi).rect
+        r = self._geometry.to(self.unit, dpi=self._dpi).rect
+        return QRectF(0, 0, r.width(), r.height())
 
     # This method is for when ONLY the rectangle (size) changes,
     # not the position.
     def setRect(self, new_rect: QRectF):
-        if self._geometry.to("px", dpi=self.dpi).rect == new_rect:
+        if self._geometry.to(self.unit, dpi=self.dpi).rect == new_rect:
             return
+
         # geometry setter will call prepareGeometryChange() if needed and emit signals
         self.geometry = geometry_with_px_rect(self._geometry, new_rect, dpi=self.dpi)
         self._invalidate_shape_cache()
 
+    # component_element.py
     def itemChange(self, change: QGraphicsItem.GraphicsItemChange, value):
-        # Use post-change hook; no prepareGeometryChange for pure pos changes
+        # PRE-change: before Qt commits the new position, quantize it
+        if change == QGraphicsItem.ItemSelectedHasChanged:
+            self.selectionChanged.emit(bool(value))
+
+        if change == QGraphicsItem.ItemPositionChange and not self._snapping_now:
+            scn = self.scene()
+            if scn:
+                snapped = scn.snap_to_grid(QPointF(value))
+                return snapped
+
+        # POST-change: your existing geometry/signal updates
         if change == QGraphicsItem.ItemPositionHasChanged and not self._updating_from_itemChange:
             self._updating_from_itemChange = True
-            self._outline._update_visibility_policy()
+            self._outline.update_visibility_policy()
             try:
                 old = self._geometry
                 new_geom = geometry_with_px_pos(old, self.pos(), dpi=self.dpi)
-                if new_geom.to("px", dpi=self.dpi).pos != old.to("px", dpi=self.dpi).pos:
+                if new_geom.to(self.unit, dpi=self.dpi).pos != old.to(self.unit, dpi=self.dpi).pos:
                     # keep signals consistent with setter:
                     self.geometryAboutToChange.emit(old)
                     self._geometry = new_geom
                     self._invalidate_shape_cache()
                     self.geometryChanged.emit(self._geometry)
-                    self.positionChanged.emit(self._geometry.to("px", dpi=self._dpi).pos)
+                    self.positionChanged.emit(self._geometry.to(self.unit, dpi=self._dpi).pos)
             finally:
                 self._updating_from_itemChange = False
 
@@ -392,7 +413,7 @@ class ComponentElement(ShapeableElementMixin, QGraphicsObject):
 
     # --- SHAPE PATH: build from the effective rect so clipping grows when expanded ---
     def shape_path(self) -> QPainterPath:
-        rect_local = self._geometry.to("px", dpi=self.dpi).rect
+        rect_local = self._geometry.to(self.unit, dpi=self.dpi).rect
         path = QPainterPath()
         # TODO: if you support corner radius, draw a rounded rect here instead
         path.addRect(rect_local)
@@ -413,34 +434,24 @@ class ComponentElement(ShapeableElementMixin, QGraphicsObject):
         """
         Base rendering method that handles background, border, and delegates to content rendering
         """
-        rect_px = self.geometry.to("px", dpi=self.dpi).rect
-        
+        geom = self.geometry
+        rect = geom.to(self.unit, dpi=self.dpi).rect
         # Paint background
         if self._bg_color.alpha() > 0:
-            painter.fillRect(rect_px, self._bg_color)
+            painter.fillRect(rect, self._bg_color)
         
         # Paint content (delegate to subclass)
-        self.render_content(painter, context, rect_px)
+        self.render_content(painter, context, geom)
         
         # Paint border
-        if self.border_width.to("px", dpi=self.dpi) > 0:
-            self.paint_border(painter, rect_px)
-            
-        # Paint outline if in GUI mode
-        if self.display_outline and context.is_gui:
-            self._outline.paint(painter, None, None)
-    
-    def render_content(self, painter: QPainter, context: RenderContext, rect: QRectF):
-        """
-        Subclasses should override this to render their specific content
-        """
-        pass
+        if self.border_width > 0:
+            self.paint_border(painter, geom)
         
     def paint_border(self, painter: QPainter, rect: QRectF):
         """
         Paint the element border fully inside the given rect.
         """
-        bw = self.border_width.to("px", dpi=self.dpi)
+        bw = self.border_width.to(self.unit, dpi=self.dpi)
         if bw <= 0:
             return
 
@@ -454,8 +465,8 @@ class ComponentElement(ShapeableElementMixin, QGraphicsObject):
         inset = bw / 2.0
         inner_rect = rect.adjusted(inset, inset, -inset, -inset)
 
-        if hasattr(self, "corner_radius") and self.corner_radius.to("px", dpi=self.dpi) > 0:
-            cr = max(0.0, self.corner_radius.to("px", dpi=self.dpi) - inset)
+        if hasattr(self, "corner_radius") and self.corner_radius.to(self.unit, dpi=self.dpi) > 0:
+            cr = max(0.0, self.corner_radius.to(self.unit, dpi=self.dpi) - inset)
             painter.drawRoundedRect(inner_rect, cr, cr)
         else:
             painter.drawRect(inner_rect)
@@ -467,27 +478,7 @@ class ComponentElement(ShapeableElementMixin, QGraphicsObject):
         """
         Default paint method uses GUI context
         """
-
-        context = RenderContext(
-            mode=RenderMode.GUI,
-            tab_mode=TabMode.COMPONENT,
-            dpi=self.dpi
-        )
-        self.render_with_context(painter, context)
-        # if option.state & QStyle.State_Selected:
-        #     self.show_handles()
-        # else:
-        #     self.hide_handles()
-
-    # def hoverEnterEvent(self, event):
-    #     self._is_hovered = True
-    #     self.update()
-    #     super().hoverEnterEvent(event)
-
-    # def hoverLeaveEvent(self, event):
-    #     self._is_hovered = False
-    #     self.update()
-    #     super().hoverLeaveEvent(event)
+        self.render_with_context(painter, self.context)
 
     def clone(self):
         registry = self.registry
@@ -531,188 +522,12 @@ class ComponentElement(ShapeableElementMixin, QGraphicsObject):
                 setattr(inst, f"_{key}", default)
 
         return inst
-        
-    # def store_pre_resize_state(self):
-    #     rect = self._geometry.to("px", dpi=self.dpi).rect
-    #     scene_tx = self.sceneTransform()
-    #     inv_tx = scene_tx
-    #     anchors = self._edge_centers()
-
-    #     self._pre_resize_state = {
-    #         "geometry": self.geometry,  # Store entire geometry
-    #         "anchors": {
-    #             HandleType.TOP_LEFT: anchors["TOP_LEFT"],
-    #             HandleType.TOP_RIGHT: anchors["TOP_RIGHT"],
-    #             HandleType.BOTTOM_LEFT: anchors["BOTTOM_LEFT"],
-    #             HandleType.BOTTOM_RIGHT: anchors["BOTTOM_RIGHT"],
-    #             HandleType.TOP_CENTER: anchors["TOP_CENTER"],
-    #             HandleType.BOTTOM_CENTER: anchors["BOTTOM_CENTER"],
-    #             HandleType.LEFT_CENTER: anchors["LEFT_CENTER"],
-    #             HandleType.RIGHT_CENTER: anchors["RIGHT_CENTER"],
-    #         },
-    #         # MOVE TRANSFORMS TO TOP LEVEL
-    #         "transform": scene_tx,
-    #         "inv_transform": inv_tx,
-    #     }
-
-    # def _edge_centers(self, to_scene=True):
-    #     # Always a QRectF in *local* coords
-    #     rect: QRectF = self.geometry.to("px", dpi=self.dpi).px.rect
-
-    #     cx = rect.center().x()
-    #     cy = rect.center().y()
-
-    #     # Local points
-    #     pts = {
-    #         "TOP_LEFT":      rect.topLeft(),
-    #         "TOP_RIGHT":     rect.topRight(),
-    #         "BOTTOM_LEFT":   rect.bottomLeft(),
-    #         "BOTTOM_RIGHT":  rect.bottomRight(),
-    #         "TOP_CENTER":    QPointF(cx, rect.top()),
-    #         "BOTTOM_CENTER": QPointF(cx, rect.bottom()),
-    #         "LEFT_CENTER":   QPointF(rect.left(),  cy),
-    #         "RIGHT_CENTER":  QPointF(rect.right(), cy),
-    #         "CENTER":        rect.center(),
-    #     }
-
-    #     if not to_scene:
-    #         return pts
-    #     # Map to scene (per‑point to avoid polygon conversion)
-    #     return {k: self.mapToScene(v) for k, v in pts.items()}
-
-    # @property
-    # def handles_visible(self) -> bool:
-    #     return any(handle.isVisible() for handle in self._handles.values())
-
-    # def create_handles(self):
-    #     if self._handles:
-    #         return
-    #     for h_type in HandleType:
-    #         handle = ResizeHandle(self, h_type)
-    #         self._handles[h_type] = handle
-    #     self.update_handles()
-
-    # def show_handles(self):
-    #     for handle in self._handles.values():
-    #         handle.show()
-
-    # def _axes_for_handle(self, handle_type):
-    #     # returns (sx, sy, affect_w, affect_h)
-    #     # sx/sy ∈ {-1, 0, +1} denote which side is being dragged in LOCAL axes.
-    #     # affect_w/affect_h tell us whether width/height should actually change.
-
-    #     if handle_type == HandleType.TOP_LEFT:
-    #         return (-1, -1, True,  True)
-    #     if handle_type == HandleType.TOP_CENTER:
-    #         return ( 0, -1, False, True)
-    #     if handle_type == HandleType.TOP_RIGHT:
-    #         return (+1, -1, True,  True)
-    #     if handle_type == HandleType.RIGHT_CENTER:
-    #         return (+1,  0, True,  False)
-    #     if handle_type == HandleType.BOTTOM_RIGHT:
-    #         return (+1, +1, True,  True)
-    #     if handle_type == HandleType.BOTTOM_CENTER:
-    #         return ( 0, +1, False, True)
-    #     if handle_type == HandleType.BOTTOM_LEFT:
-    #         return (-1, +1, True,  True)
-    #     if handle_type == HandleType.LEFT_CENTER:
-    #         return (-1,  0, True,  False)
-    #     return (0, 0, False, False)
-
-    # def resize_from_handle(self, handle_type, handle_scene_pos):
-    #     sc = self.scene()
-
-    #     st = getattr(self, "_pre_resize_state", None)
-    #     if not st:
-    #         return
-
-    #     if sc is not None and hasattr(sc, "snap_to_grid"):
-    #         handle_scene_pos = sc.snap_to_grid(handle_scene_pos)
-
-    #     self.prepareGeometryChange()
-    #     r0        = st["rect0"]
-    #     pos0      = st["pos0_scene"]
-    #     handle0   = st["handle_local0"]
-    #     sx, sy    = st["sx"], st["sy"]
-    #     affect_w  = st["affect_w"]
-    #     affect_h  = st["affect_h"]
-
-    #     # Mouse delta in LOCAL space (from snapped scene pos)
-    #     delta_local = self.mapFromScene(handle_scene_pos) - handle0
-
-    #     # Only apply the component(s) that this handle should change
-    #     dx = delta_local.x() if affect_w else 0.0
-    #     dy = delta_local.y() if affect_h else 0.0
-
-    #     min_size = 20.0 
-    #     new_w = max(min_size, r0.width()  + sx * dx)
-    #     new_h = max(min_size, r0.height() + sy * dy)
-
-    #     # If pulling left/top, the local origin must shift to keep the opposite edge fixed
-    #     shift_x_local = (r0.width()  - new_w) if (affect_w and sx == -1) else 0.0
-    #     shift_y_local = (r0.height() - new_h) if (affect_h and sy == -1) else 0.0
-
-    #     # Convert local shift to a SCENE vector (respects rotation/scale)
-    #     p00 = self.mapToScene(QPointF(0, 0))
-    #     pss = self.mapToScene(QPointF(shift_x_local, shift_y_local))
-    #     shift_scene_vec = pss - p00
-
-    #     # Apply new scene pos to keep the opposite side visually anchored
-    #     self.setPos(pos0 + shift_scene_vec)
-
-    #     # Update rect (local, origin at 0,0). Do NOT call normalized().
-    #     final_local_rect = QRectF(0, 0, new_w, new_h)
-    #     self._geometry = UnitStrGeometry.from_px(rect=final_local_rect, pos=self.pos(), dpi=self.dpi)
-
-    # def begin_handle_resize(self, handle_item, event):
-    #     r0 = self._geometry.to("px", self.dpi).rect  # local rect, origin at (0,0)
-    #     sx, sy, affect_w, affect_h = self._axes_for_handle(self._active_handle)
-    #     sc = self.scene()
-        
-    #     press_scene_pos = sc.snap_to_grid(event.scenePos()) if sc is not None and hasattr(sc, "snap_to_grid") else event.scenePos()
-
-    #     self._pre_resize_state = {
-    #         "rect0": r0,
-    #         "pos0_scene": self.pos(),
-    #         "handle_local0": self.mapFromScene(press_scene_pos),   # ⬅ mapped from snapped scene pos
-    #         "sx": sx,
-    #         "sy": sy,
-    #         "affect_w": affect_w,
-    #         "affect_h": affect_h,
-    #     }
-
-    # def end_handle_resize(self):
-    #     # good place to clear the snapshot, emit a finished signal,
-    #     # or push an undo command using rect before/after if you track it
-    #     self._pre_resize_state = None
-
-    # def hide_handles(self):
-    #     for handle in self._handles.values():
-    #         handle.hide()
-
-    # def update_handles(self):
-    #     w = self._geometry.px.size.width()
-    #     h = self._geometry.px.size.height()
-    #     positions = {
-    #         HandleType.TOP_LEFT: QPointF(0, 0),
-    #         HandleType.TOP_CENTER: QPointF(w / 2, 0),
-    #         HandleType.TOP_RIGHT: QPointF(w, 0),
-    #         HandleType.RIGHT_CENTER: QPointF(w, h / 2),
-    #         HandleType.BOTTOM_RIGHT: QPointF(w, h),
-    #         HandleType.BOTTOM_CENTER: QPointF(w / 2, h),
-    #         HandleType.BOTTOM_LEFT: QPointF(0, h),
-    #         HandleType.LEFT_CENTER: QPointF(0, h / 2),
-    #     }
-    #     for handle_type, pos in positions.items():
-    #         handle = self._handles.get(handle_type)
-    #         if handle:
-    #             handle.setPos(pos)
                 
     def shape(self) -> QPainterPath:
         """
         Accurate local shape for clipping/hit tests. Includes stroke if present.
         """
-        rect_px: QRectF = self.geometry.to("px", dpi=self.dpi).rect
+        rect_px: QRectF = self.geometry.to(self.unit, dpi=self.dpi).rect
         path = QPainterPath()
         path.addRect(QRectF(0, 0, rect_px.width(), rect_px.height()))
         pen = getattr(self, "_border_pen", None)
@@ -725,19 +540,19 @@ class ComponentElement(ShapeableElementMixin, QGraphicsObject):
         path.setFillRule(Qt.WindingFill)
         return path
 
-    def paint(self, painter: QPainter, option, widget=None):
-        """
-        IMPORTANT: draw in *local* coordinates at (0,0).
-        Do not translate by rect.x()/rect.y() here.
-        """
-        rect_px: QRectF = self.geometry.to("px", dpi=self.dpi).rect
-        painter.save()
-        # background fill if you use it:
-        bg = getattr(self, "_bg_color", None)
-        if bg is not None:
-            painter.fillRect(QRectF(0, 0, rect_px.width(), rect_px.height()), bg)
-        # subclasses draw content here (no global translations)
-        painter.restore()
+    # def paint(self, painter: QPainter, option, widget=None):
+    #     """
+    #     IMPORTANT: draw in *local* coordinates at (0,0).
+    #     Do not translate by rect.x()/rect.y() here.
+    #     """
+    #     rect_px: QRectF = self.geometry.to(self.unit, dpi=self.dpi).rect
+    #     painter.save()
+    #     # background fill if you use it:
+    #     bg = getattr(self, "_bg_color", None)
+    #     if bg is not None:
+    #         painter.fillRect(QRectF(0, 0, rect_px.width(), rect_px.height()), bg)
+    #     # subclasses draw content here (no global translations)
+    #     painter.restore()
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton and self.isSelected():

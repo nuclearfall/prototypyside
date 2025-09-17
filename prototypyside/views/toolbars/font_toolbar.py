@@ -16,6 +16,7 @@ from PySide6.QtWidgets import (
 )
 
 # Project font/unit helpers
+from prototypyside.config import HMAP, VMAP, HMAP_REV, VMAP_REV
 from prototypyside.utils.units.unit_str import UnitStr
 from prototypyside.utils.units.unit_str_font import UnitStrFont
 
@@ -78,6 +79,7 @@ class FontToolbar(QWidget):
         self.h_left_btn = QToolButton(self); self.h_left_btn.setCheckable(True); self.h_left_btn.setIcon(QIcon.fromTheme("format-justify-left")); self.h_left_btn.setToolTip("Align Left")
         self.h_center_btn = QToolButton(self); self.h_center_btn.setCheckable(True); self.h_center_btn.setIcon(QIcon.fromTheme("format-justify-center")); self.h_center_btn.setToolTip("Align Center")
         self.h_right_btn = QToolButton(self); self.h_right_btn.setCheckable(True); self.h_right_btn.setIcon(QIcon.fromTheme("format-justify-right")); self.h_right_btn.setToolTip("Align Right")
+        self.h_justified_btn = QToolButton(self); self.h_justified_btn.setCheckable(True); self.h_justified_btn.setIcon(QIcon.fromTheme("format-justify-fill")); self.h_justified_btn.setToolTip("Align Justified")
 
         self.v_top_btn = QToolButton(self); self.v_top_btn.setCheckable(True); self.v_top_btn.setText("⭱"); self.v_top_btn.setToolTip("Align Top")
         self.v_middle_btn = QToolButton(self); self.v_middle_btn.setCheckable(True); self.v_middle_btn.setText("⇵"); self.v_middle_btn.setToolTip("Align Middle")
@@ -85,7 +87,7 @@ class FontToolbar(QWidget):
 
         # Grouping
         self.h_group = QButtonGroup(self); self.h_group.setExclusive(True)
-        self.h_group.addButton(self.h_left_btn); self.h_group.addButton(self.h_center_btn); self.h_group.addButton(self.h_right_btn)
+        self.h_group.addButton(self.h_left_btn); self.h_group.addButton(self.h_center_btn); self.h_group.addButton(self.h_justified_btn), self.h_group.addButton(self.h_right_btn)
 
         self.v_group = QButtonGroup(self); self.v_group.setExclusive(True)
         self.v_group.addButton(self.v_top_btn); self.v_group.addButton(self.v_middle_btn); self.v_group.addButton(self.v_bottom_btn)
@@ -106,9 +108,10 @@ class FontToolbar(QWidget):
         align_row.addWidget(self.bold_btn, stretch=0)
         align_row.addWidget(self.italic_btn, stretch=0)
         align_row.addWidget(self.underline_btn, stretch=0)
-        align_row.addStretch(0)
+        align_row.addSpacing(10)   # spacer between H and V groups
         align_row.addWidget(self.h_left_btn, 0)
         align_row.addWidget(self.h_center_btn, 0)
+        align_row.addWidget(self.h_justified_btn, 0)
         align_row.addWidget(self.h_right_btn, 0)
         align_row.addSpacing(10)   # spacer between H and V groups
         align_row.addWidget(self.v_top_btn, 0)
@@ -230,20 +233,20 @@ class FontToolbar(QWidget):
     @Slot()
     def _on_halign_change(self, btn, checked: bool):
         if not checked or not self._target: return
-        old = getattr(self._target, "h_align", "Left")
-        new = {self.h_left_btn:"Left", self.h_center_btn:"Center", self.h_right_btn:"Right"}[btn]
+        old = getattr(self._target, "h_align", Qt.AlignLeft)
+        new = {self.h_left_btn:"Left", self.h_center_btn:"Center", self.h_justified_btn: "Justify", self.h_right_btn:"Right"}[btn]
+        new_align = HMAP.get(new)
         if new != old:
-            setattr(self._target, "h_align", new)
-            self.hAlignChanged.emit(self._target, "h_align", new, old)
+            self.hAlignChanged.emit(self._target, "h_align", new_align, old)
 
     @Slot()
     def _on_valign_change(self, btn, checked: bool):
         if not checked or not self._target: return
-        old = getattr(self._target, "v_align", "Top")
+        old = getattr(self._target, "v_align", Qt.AlignTop)
         new = {self.v_top_btn:"Top", self.v_middle_btn:"Middle", self.v_bottom_btn:"Bottom"}[btn]
+        new_align = VMAP.get(new)
         if new != old:
-            setattr(self._target, "v_align", new)
-            self.vAlignChanged.emit(self._target, "v_align", new, old)
+            self.vAlignChanged.emit(self._target, "v_align", new_align, old)
 
     @Slot()
     def _on_any_change(self) -> None:

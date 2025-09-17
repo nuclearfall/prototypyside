@@ -4,7 +4,7 @@ from __future__ import annotations
 from pathlib import Path
 from typing import Optional
 
-from PySide6.QtCore import Qt, QRectF, QPointF
+from PySide6.QtCore import Qt, QRectF, QPointF, QSize 
 from PySide6.QtGui import QPainter, QPixmap, QPen, QPainterPath
 from PySide6.QtWidgets import (
     QGraphicsItem,
@@ -91,11 +91,11 @@ class ImageElement(ComponentElement):
 
     def render_with_context(self, painter: QPainter, context: RenderContext):
         """Render image with the given context"""
-        rect = self.geometry.to("px", dpi=self.dpi).rect
+        rect = self.geometry.to(self.unit, dpi=self.dpi).rect
         
         # Rounded-rect clipping
-        if hasattr(self, "corner_radius") and self.corner_radius.to("px", dpi=self.dpi) > 0:
-            cr = self.corner_radius.to("px", dpi=self.dpi)
+        if hasattr(self, "corner_radius") and self.corner_radius.to(self.unit, dpi=self.dpi) > 0:
+            cr = self.corner_radius.to(self.unit, dpi=self.dpi)
             path = QPainterPath()
             path.addRoundedRect(rect, cr, cr)
             painter.setClipPath(path)
@@ -152,13 +152,13 @@ class ImageElement(ComponentElement):
         Paints an image inside the bounding rect, respecting aspect ratio and logical units.
         Always draws the border *after* the content so it sits on top.
         """
-        rect = self.geometry.to("px", dpi=self.dpi).rect
-        size = self.geometry.to("px", dpi=self.dpi).size
+        rect = self.geometry.to(self.unit, dpi=self.dpi).rect
+        size = self.geometry.to(self.unit, dpi=self.dpi).size
         w, h = size.width(), size.height()
 
         # Rounded-rect clipping (independent of border)
-        if hasattr(self, "corner_radius") and self.corner_radius.to("px", dpi=self.dpi) > 0:
-            cr = self.corner_radius.to("px", dpi=self.dpi)
+        if hasattr(self, "corner_radius") and self.corner_radius.to(self.unit, dpi=self.dpi) > 0:
+            cr = self.corner_radius.to(self.unit, dpi=self.dpi)
             path = QPainterPath()
             path.addRoundedRect(rect, cr, cr)
             painter.setClipPath(path)
@@ -186,6 +186,7 @@ class ImageElement(ComponentElement):
 
                 painter.drawPixmap(rect.topLeft() + QPointF(dx, dy), scaled)
             else:
+                size = QSize(size.width(), size.height())
                 painter.drawPixmap(
                     rect.topLeft(),
                     self._pixmap.scaled(size, Qt.IgnoreAspectRatio, Qt.SmoothTransformation)
@@ -241,8 +242,8 @@ class ImageElement(ComponentElement):
         Render image content based on the rendering context
         """
         # Apply rounded rect clipping if needed
-        if hasattr(self, "corner_radius") and self.corner_radius.to("px", dpi=self.dpi) > 0:
-            cr = self.corner_radius.to("px", dpi=self.dpi)
+        if hasattr(self, "corner_radius") and self.corner_radius.to(self.unit, dpi=self.dpi) > 0:
+            cr = self.corner_radius.to(self.unit, dpi=self.dpi)
             path = QPainterPath()
             path.addRoundedRect(rect, cr, cr)
             painter.setClipPath(path)

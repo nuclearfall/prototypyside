@@ -1,251 +1,187 @@
 # unit_strings_field.py
+from __future__ import annotations
 from typing import Any, List, Optional
-from PySide6.QtCore import QObject, Signal, Slot
+from PySide6.QtCore import Signal, Slot
 from PySide6.QtWidgets import QWidget, QVBoxLayout, QHBoxLayout, QLabel
 
 from prototypyside.widgets.unit_str_field import UnitStrField
-from prototypyside.services.proto_class import ProtoClass
-_US = ProtoClass.US.resolve()      # UnitStr class object
-
-class _RowModel(QObject):
-    # UnitStrField listens to this to refresh when 'value' changes.
-    item_changed = Signal()
-    def __init__(self, us: _US):
-        super().__init__()
-        self.value: _US = us  # <- authoritative per-row UnitStr
+from prototypyside.utils.units.unit_str import UnitStr as _US
 
 class UnitStringsField(QWidget):
-    # Emits (target_item, property_name, new_val_list, old_val_list)
-    valueChanged = Signal(object, str, object, object)
+    """
+    A composite field that manages a grid of UnitStrField children and
+    aggregates their values into a single list, emitting:
+        valueChanged(target_item, property_name, new_list, old_list)
+    """
+    valueChanged = Signal(object, str, object, object)  # (target, prop_name, new_values, old_values)
 
-    def __init__(self,
-                 parent: Optional[QWidget] = None,
-                 target_item: Any = None,
-                 property_name: Optional[str] = None,
-                 display_unit: str = "in",
-                 decimal_places: int = 2,
-                 dpi: int = 300,
-                 labels: Optional[List[str]] = None):
+    def __init__(
+        self,
+        target_item: Optional[Any],
+        property_name: Optional[str],
+        labels: Optional[List[str]],
+        rows: int,
+        columns: int,
+        dpi: int,
+        display_unit: str = "in",
+        decimal_places: int = 2,
+        parent: Optional[QWidget] = None,
+    ) -> None:
         super().__init__(parent)
+
+        # Model
+        self.target_item: Optional[Any] = target_item
+        self.property_name: Optional[str] = property_name
+        self._labels_text: List[str] = labels or []
+        self._rows_count = int(rows)
+        self._cols_count = int(columns)
+        self._dpi = int(dpi)
+        self._display_unit = display_unit
+        self._decimal_places = int(decimal_places)
+
+        # UI containers
         self._layout = QVBoxLayout(self)
         self._layout.setContentsMargins(0, 0, 0, 0)
-        self.target_item = None
-        self.property_name = None
-        self._display_unit = display_unit or "in"
-        self.decimal_places = decimal_places
-        self._dpi = dpi
 
+        # Children
+        self._labels: List[QLabel] = []
+        self._fields: List[UnitStrField] = []  # flattened row-major order
+
+        # State
         self._old_values: List[_US] = []
-        self._rows: List[UnitStrField] = []
-        self._row_models: List[_RowModel] = []
-        self._row_labels: List[QLabel] = []
-        self._labels: List[str] = list(labels) if labels else []
 
-        if target_item is not None and property_name:
-            self.setTarget(
-                target_item, 
-                property_name=property_name, 
-                display_unit=display_unit,
-                labels=labels
-            )
+        # Build grid
+        total = self._rows_count * self._cols_count
+        for r in range(self._rows_count):
+            row_layout = QHBoxLayout()
+            for c in range(self._cols_count):
+                idx = r * self._cols_count + c
 
-    # -------- Public API --------
-    def clear(self) -> None:
-        """
-        Clear all contained UnitStrFields. Does not change the number of rows.
-        """
-        for f in self._rows:
-            if hasattr(f, "clear"):
-                f.clear()
+                # Label (optional)
+                lbl_text = self._labels_text[idx] if idx < len(self._labels_text) else f"#{idx + 1}"
+                lbl = QLabel(lbl_text)
+                self._labels.append(lbl)
+                row_layout.addWidget(lbl)
 
-    def setTarget(self, target_item: Any, property_name: str,
-                  display_unit: Optional[str] = None,
-                  labels: Optional[List[str]] = None):
-        self.target_item = target_item
-        self.property_name = property_name
-        if display_unit is not None:
-            self._display_unit = display_unit
-        if labels is not None:
-            self._labels = list(labels)
-        if self.target_item is None or self.property_name is None:
-            self.clear()
+                # Child field (target for children can be None; they will carry their own value)
+                child_prop = f"{self.property_name}_{idx}" if self.property_name else f"unit[{idx}]"
+                uf = UnitStrField(
+                    target_item=None,  # important: child doesn't need a real prop on the target
+                    property_name=child_prop,
+                    display_unit=self._display_unit,
+                    decimal_places=self._decimal_places,
+                    dpi=self._dpi,
+                    parent=self,
+                )
+                # Whenever a child changes, aggregate & emit
+                uf.valueChanged.connect(self._on_child_changed)
+                self._fields.append(uf)
+                row_layout.addWidget(uf)
 
-        if hasattr(self.target_item, "item_changed"):
-            try:
-                self.target_item.item_changed.disconnect(self.update_from_item)
-            except Exception:
-                pass
-            self.target_item.item_changed.connect(self.update_from_item)
+            self._layout.addLayout(row_layout)
 
-        values = getattr(self.target_item, self.property_name, None)
-        if isinstance(values, list) and all(isinstance(v, _US) for v in values):
-            self._old_values = list(values)
-            if values:
-                self._dpi = getattr(values[0], "dpi", self._dpi)
-            elif getattr(self.target_item, "geometry", None) is not None:
-                self._dpi = getattr(self.target_item._geometry, "dpi", self._dpi)
-            self._ensure_row_count(len(values))
-            self._update_labels()
-            self._update_display(values)
+        # Initialize from target, if present
+        if self.target_item is not None and self.property_name:
+            maybe_list = getattr(self.target_item, self.property_name, None)
+            if isinstance(maybe_list, list) and all(isinstance(v, _US) for v in maybe_list):
+                self.setValues(maybe_list)
+            else:
+                # no initial list; keep old_values aligned with field count
+                self._old_values = [getattr(f, "value", lambda: None)() or _US("0", self._dpi) for f in self._fields]
         else:
-            self._old_values = []
-            self._ensure_row_count(0)
-            self._update_labels()
+            self._old_values = [getattr(f, "value", lambda: None)() or _US("0", self._dpi) for f in self._fields]
 
-    def setLabels(self, labels: List[str]) -> None:
-        self._labels = list(labels)
-        self._update_labels()
+    # ---------- Public API ----------
+
+    def setTarget(self, target_item: Optional[Any]) -> None:
+        """Point this composite at a new target. Pulls current list from property if available."""
+        self.target_item = target_item
+        if self.target_item is not None and self.property_name:
+            vals = getattr(self.target_item, self.property_name, None)
+            if isinstance(vals, list) and all(isinstance(v, _US) for v in vals):
+                self.setValues(vals)
+            else:
+                # no list present on target; do not clobber target, just refresh UI from children
+                self._old_values = self.values()
 
     def values(self) -> List[_US]:
-        # Prefer child.value() if it exists; else our row_model.value
+        """Return the list composed from all child fields (row-major)."""
         out: List[_US] = []
-        for i, f in enumerate(self._rows):
+        for f in self._fields:
             if hasattr(f, "value"):
                 us = f.value()
+                if isinstance(us, _US):
+                    out.append(us)
+                else:
+                    # best-effort: try to coerce; UnitStr usually accepts strings or numbers
+                    out.append(_US(str(us), self._dpi))
             else:
-                us = self._row_models[i].value
-            if isinstance(us, _US):
-                out.append(us)
+                out.append(_US("0", self._dpi))
         return out
 
-    def setValues(self, unit_values: List[_US]):
+    def setValues(self, unit_values: List[_US]) -> tuple[Any, Optional[str], List[_US], List[_US]]:
+        """Set all child field values, then emit aggregated change."""
         assert isinstance(unit_values, list) and all(isinstance(v, _US) for v in unit_values), \
             "UnitStringsField.setValues requires List[UnitStr]"
-        self._ensure_row_count(len(unit_values))
-        self._update_labels()
-        self._update_display(unit_values)  # writes into row models & refreshes fields
+
+        # Write into children (truncate/pad to grid size)
+        total = len(self._fields)
+        for i in range(total):
+            us = unit_values[i] if i < len(unit_values) else unit_values[-1] if unit_values else _US("0", self._dpi)
+            if hasattr(self._fields[i], "setValue"):
+                self._fields[i].setValue(us)
 
         old_list = list(self._old_values)
         new_list = self.values()
 
+        # Update target's list property if configured
         if self.target_item is not None and self.property_name:
             setattr(self.target_item, self.property_name, new_list)
 
         self._old_values = list(new_list)
-        self.valuesChanged.emit(self.target_item, self.property_name, new_list, old_list)
+        self.valueChanged.emit(self.target_item, self.property_name or "", new_list, old_list)
         return (self.target_item, self.property_name, new_list, old_list)
 
-    # -------- Internals --------
+    def clear(self) -> None:
+        for f in self._fields:
+            if hasattr(f, "clear"):
+                f.clear()
+        self._old_values = self.values()
 
-    def _ensure_row_count(self, count: int):
-        # grow
-        while len(self._rows) < count:
-            idx = len(self._rows)
+    # ---------- Child passthroughs ----------
 
-            # UI row layout: [QLabel][UnitStrField]
-            row_layout = QHBoxLayout()
-            row_layout.setContentsMargins(0, 0, 0, 0)
-
-            lbl = QLabel(self._label_text_for_index(idx))
-            self._row_labels.append(lbl)
-            row_layout.addWidget(lbl)
-
-            # row model placeholder (will be replaced/assigned in _update_display)
-            model = _RowModel(us=_US(0, unit=self._display_unit, dpi=self._dpi))  # create a benign UnitStr
-            self._row_models.append(model)
-
-            field = UnitStrField(
-                parent=self,
-                display_unit=self._display_unit,
-                decimal_places=self.decimal_places,
-                dpi=self._dpi,
-            )
-            # IMPORTANT: use UnitStrField's setTarget (not setValue)
-            field.setTarget(model, "value", display_unit=self._display_unit)
-
-            # When child field changes, we get a UnitStr back
-            if hasattr(field, "valueChanged"):
-                field.valueChanged.connect(lambda us, i=idx: self._on_row_changed(i, us))
-            self._rows.append(field)
-
-            row_layout.addWidget(field)
-            self._layout.addLayout(row_layout)
-
-        # shrink
-        while len(self._rows) > count:
-            last = self._layout.takeAt(self._layout.count() - 1)
-            if last and last.layout():
-                lyt = last.layout()
-                while lyt.count():
-                    sub = lyt.takeAt(0)
-                    w = sub.widget()
-                    if w is not None:
-                        w.setParent(None)
-                        w.deleteLater()
-            f = self._rows.pop()
-            f.setParent(None)
-            f.deleteLater()
-
-            m = self._row_models.pop()
-            m.deleteLater()
-            lbl = self._row_labels.pop()
-            lbl.setParent(None)
-            lbl.deleteLater()
-
-    def _label_text_for_index(self, idx: int) -> str:
-        return self._labels[idx] if idx < len(self._labels) else f"#{idx + 1}"
-
-    def _update_labels(self):
-        for i, lbl in enumerate(self._row_labels):
-            lbl.setText(self._label_text_for_index(i))
-
-    def _update_display(self, values: List[_US]):
-        # Write UnitStrs into row models and nudge children via item_changed
-        for i, us in enumerate(values):
-            model = self._row_models[i]
-            model.value = us  # keep raw UnitStr (no conversion)
-            # make sure display settings are in sync (child handles formatting)
-            f = self._rows[i]
-            if hasattr(f, "setDisplayUnit"): f.setDisplayUnit(self._display_unit)
-            if hasattr(f, "setDecimalPlaces"): f.setDecimalPlaces(self.decimal_places)
-            if hasattr(f, "setDpi"): f.setDpi(self._dpi)
-            model.item_changed.emit()  # tells UnitStrField to refresh from model.value
-
-    @Slot()
-    def update_from_item(self):
-        if not (self.target_item and self.property_name):
-            return
-        values = getattr(self.target_item, self.property_name, None)
-        if isinstance(values, list) and all(isinstance(v, _US) for v in values):
-            self._ensure_row_count(len(values))
-            self._update_labels()
-            self._update_display(values)
-
-    @Slot(object)
-    def _on_row_changed(self, index: int, us: _US):
-        if not isinstance(us, _US):
-            return
-        current = self.values()
-        if index >= len(current):
-            self._ensure_row_count(index + 1)
-            self._update_labels()
-            current = self.values()
-        current[index] = us
-
-        old_list = list(self._old_values)
-        new_list = current
-
-        if self.target_item is not None and self.property_name:
-            setattr(self.target_item, self.property_name, new_list)
-
-        self._old_values = list(new_list)
-        self.valuesChanged.emit(self.target_item, self.property_name, new_list, old_list)
-
-    # pass-throughs
-    def setDisplayUnit(self, unit: str):
+    def setDisplayUnit(self, unit: str) -> None:
         self._display_unit = unit
-        for f in self._rows:
+        for f in self._fields:
             if hasattr(f, "setDisplayUnit"):
                 f.setDisplayUnit(unit)
 
-    def setDecimalPlaces(self, places: int):
-        self.decimal_places = places
-        for f in self._rows:
+    def setDecimalPlaces(self, places: int) -> None:
+        self._decimal_places = int(places)
+        for f in self._fields:
             if hasattr(f, "setDecimalPlaces"):
-                f.setDecimalPlaces(places)
+                f.setDecimalPlaces(self._decimal_places)
 
-    def setDpi(self, dpi: int):
-        self._dpi = dpi
-        for f in self._rows:
+    def setDpi(self, dpi: int) -> None:
+        self._dpi = int(dpi)
+        for f in self._fields:
             if hasattr(f, "setDpi"):
-                f.setDpi(dpi)
+                f.setDpi(self._dpi)
+
+    # ---------- Internals ----------
+
+    @Slot(object, str, object, object)
+    def _on_child_changed(self, _child_target: Any, _child_prop: str, _new: _US, _old: _US) -> None:
+        """
+        Any child changed → aggregate all child values and emit single valueChanged
+        with the real (composite) property name, ignoring the child's fake prop.
+        """
+        old_list = list(self._old_values)
+        new_list = self.values()
+
+        # write through to target if configured
+        if self.target_item is not None and self.property_name:
+            setattr(self.target_item, self.property_name, new_list)
+
+        self._old_values = list(new_list)
+        self.valueChanged.emit(self.target_item, self.property_name or "", new_list, old_list)

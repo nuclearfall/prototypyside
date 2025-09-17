@@ -27,7 +27,7 @@ BASE_NAMES = {
     "pg": "Page",
     "ls": "Layout Slot",
 }
-
+pc = ProtoClass
 class ProtoRegistry(QObject):
     object_registered = Signal(str)  # pid
     object_deregistered = Signal(str)
@@ -129,23 +129,26 @@ class ProtoRegistry(QObject):
         Explicit suffix (e.g. 'foo(7)') is honored if free.
         """
         root, n = self._split_suffix(name)
-        per_proto = self._name_map.setdefault(proto, {})  # dict[str, int], values = max used index
-        current = per_proto.get(root, 0)
+        name_map = self._name_map.setdefault(proto, {})  # dict[str, int], values = max used index
 
+        # When dealing with a template, it's name is mapped in the root registry.
+        if proto in [pc.CT, pc.LT]:
+            name_map = self.root._name_map.setdefault(proto, {})
+        current = name_map.get(root, 0)
         if n is None:
             # No explicit suffix: allocate next
             if current == 0:
-                per_proto[root] = 1
+                name_map[root] = 1
                 return root
-            per_proto[root] = current + 1
-            return f"{root}({per_proto[root]})"
+            name_map[root] = current + 1
+            return f"{root}({name_map[root]})"
         else:
             # Explicit suffix requested
             if n > current:
-                per_proto[root] = n
+                name_map[root] = n
                 return root if n == 1 else f"{root}({n})"
-            per_proto[root] = current + 1
-            return f"{root}({per_proto[root]})"
+            name_map[root] = current + 1
+            return f"{root}({name_map[root]})"
 
     def validate_name(
         self,
@@ -258,7 +261,7 @@ class ProtoRegistry(QObject):
         return obj
 
 
-    def clone(self, obj: Any, register: bool = True):
+    def clone(self, obj: Any, register: bool = True, new_registry=False):
 
         # 1) Serialize source
         data = self._factory.to_dict(obj)
@@ -305,8 +308,9 @@ class ProtoRegistry(QObject):
             clone.setGrid()
             clone.updateGrid()
         # 8) Register the clone
+        registry = new_registry if new_registry else self
         if register:
-            self.register(clone)
+            registry.register(clone)
 
         return clone
 
@@ -371,6 +375,9 @@ class RootRegistry(ProtoRegistry):
         self._template = None
         self._children = []
 
+    def new(self):
+        return ProtoRegistry(root=self, settings=self.settings, parent=self)
+
     def new_with_template(self, proto: ProtoClass, **kwargs):
         new = ProtoRegistry(root=self, settings=self.settings)
         pid = ProtoClass.make_pid(proto)
@@ -385,7 +392,7 @@ class RootRegistry(ProtoRegistry):
         new = ProtoRegistry(root=self, settings=self.settings)
         template = new.from_dict(data)
         new._template = template
-        self.add_child(child)
+        self.add_child(new)
         self.register(template)
         return new, template
 

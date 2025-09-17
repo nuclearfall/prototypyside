@@ -8,10 +8,11 @@ from PySide6.QtCore import QObject, QRectF, QPointF, Qt
 # --- NEW: Import QTextDocument for reliable height calculation ---
 from PySide6.QtGui import QPainter, QTextOption, QTextLayout, QFontMetricsF, QTextDocument, QTextCursor, QTextCharFormat, QBrush
 from PySide6.QtWidgets import QGraphicsObject
-
+from prototypyside.config import HMAP, VMAP, HMAP_REV, VMAP_REV
 from prototypyside.utils.units.unit_str import UnitStr
 from prototypyside.utils.units.unit_str_geometry import UnitStrGeometry
 from prototypyside.utils.units.unit_str_font import UnitStrFont
+
 
 class VAlignOffset:
     _MAP = {
@@ -70,56 +71,86 @@ class TextRenderResult:
     overset_rect: QRectF      # the natural (laid-out) rect; height may exceed frame
     has_overflow: bool
 
-class ProtoTextRenderer(QObject):
+
+class ProtoTextRenderer(QGraphicsObject):
+    """
+    Paints and (optionally) lets an external overlay edit the SAME QTextDocument.
+    - Persistent QTextDocument lives here.
+    - `content` is plain-text (use toHtml/toPlainText directly on .document if needed).
+    - Horizontal alignment, wrap, padding, color, max_lines are respected.
+    """
     def __init__(
         self,
         dpi: float,
         ldpi: float,
+        unit: str,
         font: UnitStrFont,
+        geometry: UnitStrGeometry,
         h_align: Qt.AlignmentFlag = Qt.AlignLeft,
         v_align: Qt.AlignmentFlag = Qt.AlignTop,
+        padding: UnitStr = None,
         wrap_mode: QTextOption.WrapMode = QTextOption.WrapAtWordBoundaryOrAnywhere,
-        has_overflow: bool = False,
         max_lines: Optional[int] = None,
-        color: Optional[QColor] = None
+        content: str = None,
+        color: Optional[QColor] = Qt.black,
+        context: Optional[bool] = None
     ) -> None:
         super().__init__()
         self.dpi = float(dpi)
         self.ldpi = float(ldpi)
+        self.geometry = geometry
         self._font: UnitStrFont = font
-        self._frame = QRectF(0, 0, 0, 0)
-        self.text: str = ""
-        self.h_align = h_align
-        self.v_align = v_align
-        self.wrap_mode = wrap_mode
-        self.clip_overflow = None
-        self.max_lines = max_lines
+        self._padding: UnitStr = padding or UnitStr("0 pt", dpi=self.dpi)
+        self.context = context
+        # Persistent document
+        self._doc = QTextDocument(content)
+        self._opts = QTextOption()
+        self._opts.setWrapMode(wrap_mode)
+        self._opts.setAlignment(h_align)
+        self._doc.setDefaultTextOption(self._opts)
+        self._doc.toPlainText()
         self._color: Optional[QColor] = color
-        self.overset_rect = None
-        self._has_overflow = has_overflow
+        self._max_lines = max_lines
+        self._v_align = v_align
+        self._h_align = h_align
+        self._wrap_mode = wrap_mode
+
         self._is_expanded = False
+        self._has_overflow = False
+        self.clip_overflow = None
+        self.overset_rect: Optional[QRectF] = None
 
-    # --- properties ---------------------------------------------------------
+        # Internal dirty flags
+        self._typography_dirty = True
+        self._options_dirty = True
+        self._color_dirty = True
 
-    @property
-    def is_expanded(self):
-        return self._is_expanded
-        
-    @is_expanded.setter
-    def is_expanded(self, state):
-        self._is_expanded = state
-    
-    @property
-    def has_overflow(self):
-        return self._has_overflow
+        # Plain-text content (mirrors the doc; property below writes to _doc)
+        self._content_cache = ""  # for fast change checks
 
-    @has_overflow.setter
-    def has_overflow(self, state: bool) -> None:
-        self._has_overflow = bool(state)
+    # ------------------ public API ------------------
 
     @property
-    def can_expand(self):
-        return self.has_overflow and not self.is_expanded
+    def document(self) -> QTextDocument:
+        """Expose the SAME document used for rendering; attach this to your editor."""
+        return self._doc
+
+    @property
+    def content(self) -> str:
+        """Plain-text content of the document."""
+        return self._doc.toPlainText()
+
+    @content.setter
+    def content(self, text: str) -> None:
+        text = text or ""
+        if text != self._doc.toPlainText():
+            self._doc.setPlainText(text)
+            self._content_cache = text
+            # content change may affect layout height
+            # (no need to mark typography/options dirty)
+        # If color is active, reapply so new text uses it.
+        if self._color is not None:
+            self._color_dirty = True
 
     @property
     def font(self) -> UnitStrFont:
@@ -128,9 +159,122 @@ class ProtoTextRenderer(QObject):
     @font.setter
     def font(self, value: UnitStrFont) -> None:
         self._font = value
+        self._typography_dirty = True
+
+    @property
+    def padding(self) -> UnitStr:
+        return self._padding
+
+    @padding.setter
+    def padding(self, val: UnitStr) -> None:
+        self._padding = val
+        self._typography_dirty = True  # affects document margin
+
+    @property
+    def padding_px(self) -> float:
+        return self._padding.to("px", dpi=self.dpi)
+
+    @property
+    def wrap_mode(self) -> QTextOption.WrapMode:
+        return self._wrap_mode
+
+    @wrap_mode.setter
+    def wrap_mode(self, mode: QTextOption.WrapMode) -> None:
+        if mode != self._wrap_mode:
+            self._wrap_mode = mode
+            self._options_dirty = True
+
+    @property
+    def h_align(self) -> Qt.AlignmentFlag:
+        return self._h_align
+
+    @h_align.setter
+    def h_align(self, align: Qt.AlignmentFlag) -> None:
+        if align != self._h_align:
+            self._h_align = align
+            self._options_dirty = True
+
+    @property
+    def v_align(self) -> Qt.AlignmentFlag:
+        return self._v_align
+
+    @v_align.setter
+    def v_align(self, align: Qt.AlignmentFlag) -> None:
+        self._v_align = align  # used at paint time only
+
+    @property
+    def color(self) -> Optional[QColor]:
+        return self._color
+
+    @color.setter
+    def color(self, c: Optional[QColor]) -> None:
+        self._color = c
+        self._color_dirty = True
+
+    @property
+    def max_lines(self) -> Optional[int]:
+        return self._max_lines
+
+    @max_lines.setter
+    def max_lines(self, n: Optional[int]) -> None:
+        self._max_lines = n
+
+    @property
+    def has_overflow(self) -> bool:
+        if self.frame:
+            frame = self.frame
+            frame_w = max(0.0, float(frame.width()))
+            frame_h = max(0.0, float(frame.height()))
+
+            # --- Natural laid-out height (may exceed frame) ---
+            natural_h = float(self.doc.size().height())
+
+            # --- Overflow detection is against the element-sized frame ---
+            return (natural_h > frame_h) or self.is_expanded
+
+    # @has_overflow.setter
+    # def has_overflow(self, state: bool) -> None:
+    #     self._has_overflow = bool(state)
+
+    @property
+    def is_expanded(self) -> bool:
+        return self._is_expanded
+
+    @is_expanded.setter
+    def is_expanded(self, state: bool) -> None:
+        self._is_expanded = bool(state)
+
+    @property
+    def can_expand(self):
+        return self.has_overflow and not self.is_expanded
+
+    @property
+    def text_option(self) -> QTextOption:
+        """Optional: expose for toolbars to mirror wrap/alignment."""
+        return self._opts
+
+    # ------------------ internal helpers ------------------
+
+    def _apply_options_if_needed(self):
+        if not self._options_dirty:
+            return
+        self._opts.setWrapMode(self._wrap_mode)
+        self._opts.setAlignment(self._h_align)
+        self._doc.setDefaultTextOption(self._opts)
+        self._options_dirty = False
+
+    def _apply_color_if_needed(self):
+        if not self._color_dirty or self._color is None:
+            return
+        cursor = QTextCursor(self._doc)
+        cursor.select(QTextCursor.Document)
+        fmt = QTextCharFormat()
+        fmt.setForeground(QBrush(self._color))
+        cursor.mergeCharFormat(fmt)
+        self._color_dirty = False
 
     # --- core ---------------------------------------------------------------
-    def render(self, painter: QPainter, frame: QRectF) -> TextRenderResult:
+    def render(self, painter) -> TextRenderResult:
         """
         Layout & paint plain text into `frame` (local coords). Returns geometry info:
           - If not expanded, we CLIP to `frame` and cap drawing height to frame_h.
@@ -138,15 +282,28 @@ class ProtoTextRenderer(QObject):
           - overset_rect always reports the natural laid-out height at the frame's x,y.
         """
         # --- Build document & font (use your px path) ---
+        self.frame = frame = self.geometry.to(self.unit, dpi=self.dpi).rect
         painter.save()
-        doc = QTextDocument()
-        qfont = self.font.scale(ldpi=self.ldpi, dpi=self.dpi).px.qfont
-        doc.setDefaultFont(qfont)
-        doc.setPlainText(self.text or "")
+        self.doc = QTextDocument()
 
+        # Decide the “working unit” from context. GUI → px, EXPORT → pt.
+        use_px = bool(getattr(self.context, "is_gui", True))
+
+        # Build QFont in the SAME units as the painter coordinates
+        if use_px:
+            qfont = self.font.px.qfont
+            doc_margin = float(self.padding.to("px", dpi=self.dpi))
+        else:
+            qfont = self.font.pt.qfont
+            # points are absolute; dpi only matters for UnitStr conversions
+            doc_margin = float(self.padding.to("pt", dpi=self.dpi))
+
+        self.doc.setDefaultFont(qfont)
+        self.doc.setPlainText(self.content or "")
+        self.doc.setDocumentMargin(doc_margin)
         # --- Color (plain text) ---
         if self._color is not None:
-            cursor = QTextCursor(doc)
+            cursor = QTextCursor(self.doc)
             cursor.select(QTextCursor.Document)
             fmt = QTextCharFormat()
             fmt.setForeground(QBrush(self._color))
@@ -155,29 +312,25 @@ class ProtoTextRenderer(QObject):
         # --- Text options: wrap + horizontal alignment ---
         opt = QTextOption()
         opt.setWrapMode(self.wrap_mode)  # MUST be QTextOption.WrapMode
-        if self.h_align & Qt.AlignHCenter:
-            opt.setAlignment(Qt.AlignHCenter)
-        elif self.h_align & Qt.AlignRight:
-            opt.setAlignment(Qt.AlignRight)
-        else:
-            opt.setAlignment(Qt.AlignLeft)
-        doc.setDefaultTextOption(opt)
+        opt.setAlignment(self.h_align)
+        self.doc.setDefaultTextOption(opt)
 
         # --- Layout to the frame width ---
         frame_w = max(0.0, float(frame.width()))
         frame_h = max(0.0, float(frame.height()))
-        doc.setTextWidth(frame_w)
+        self.doc.setTextWidth(frame_w)
 
-        # --- Natural laid-out height (may exceed frame) ---
-        natural_h = float(doc.size().height())
+        # Already in the painter’s units (px in GUI, pt in EXPORT)
+        natural_h = float(self.doc.size().height())
 
-        # --- Optional line cap against natural height ---
+        # Optional cap by line count (lineSpacing() is in the same coordinate system)
         if self.max_lines and self.max_lines > 0:
             fm = QFontMetricsF(qfont)
             line_h = float(fm.lineSpacing())
             natural_h_capped = min(natural_h, self.max_lines * line_h)
         else:
             natural_h_capped = natural_h
+
 
         # --- Decide painted height & clipping based on is_expanded ---
         if self.is_expanded:
@@ -189,20 +342,19 @@ class ProtoTextRenderer(QObject):
             painted_h = min(natural_h_capped, frame_h)
             do_clip = True
 
-        # --- Overflow detection is against the element-sized frame ---
-        self.has_overflow = natural_h > frame_h
-
         # --- Vertical alignment inside the *frame* (not overset origin) ---
-        v_off = VAlignOffset.offset(self.v_align, frame.height(), painted_h, clamp=False)
+        # v_off = VAlignOffset.offset(self.v_align, frame.height(), painted_h, clamp=False)
 
         # --- Drawing rect (x managed by QTextOption; y offset here) ---
-        paint_rect = QRectF(frame.x(), frame.y() + v_off, frame_w, painted_h)
-
+        paint_rect = QRectF(0, 0, frame_w, painted_h)
+        painter.setClipRect(QRectF(0, 0, frame_w, frame_h))
+        self.overset_rect = QRectF(0, 0, frame_w, natural_h)
+        # paint_rect = frame
+        # paint_rect = frame
+        # paint_rect = QRectF(0, 0, frame_w, painted_h)
         # --- Paint ---
         # If caller explicitly set clip_overflow, honor it too (but is_expanded wins)
-        if do_clip or (self.clip_overflow and not self.is_expanded):
-            painter.setClipRect(frame)
-        doc.drawContents(painter, paint_rect)
+        self.doc.drawContents(painter, frame)
         painter.restore()
 
         # --- Report overset (natural) rect aligned at the frame's origin ---
@@ -213,40 +365,3 @@ class ProtoTextRenderer(QObject):
             overset_rect=self.overset_rect,
             has_overflow=self._has_overflow,
         )
-
-    def measure(self, frame: QRectF) -> Tuple[QRectF, bool, float]:
-        """
-        Layout text for `frame` width only (no painting) and return:
-          (overset_rect, has_overflow, natural_height)
-        Uses current font/text/wrap/h_align.
-        """
-        doc = QTextDocument()
-        qfont = self.font.scale(ldpi=self.ldpi, dpi=self.dpi).px.qfont
-        doc.setDefaultFont(qfont)
-        doc.setPlainText(self.text or "")
-
-        opt = QTextOption()
-        opt.setWrapMode(self.wrap_mode)
-        if self.h_align & Qt.AlignHCenter:
-            opt.setAlignment(Qt.AlignHCenter)
-        elif self.h_align & Qt.AlignRight:
-            opt.setAlignment(Qt.AlignRight)
-        else:
-            opt.setAlignment(Qt.AlignLeft)
-        doc.setDefaultTextOption(opt)
-
-        frame_w = max(0.0, float(frame.width()))
-        frame_h = max(0.0, float(frame.height()))
-        doc.setTextWidth(frame_w)
-        natural_h = float(doc.size().height())
-
-        has_overflow = natural_h > frame_h
-        overset = QRectF(frame.x(), frame.y(), frame_w, natural_h)
-
-        # keep these members consistent with render()
-        self.overset_rect = overset
-        self._has_overflow = has_overflow
-        return overset, has_overflow, natural_h
-
-
-

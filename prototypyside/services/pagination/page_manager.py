@@ -183,7 +183,7 @@ PRINT_POLICIES = {
 #         layout_template.updateGrid()
 
 #         angle = self._page_angle(layout_template, page_index)
-#         rect_px = layout_template.geometry.to("px", dpi=self.settings.dpi).rect
+#         rect_px = layout_template.geometry.to(self.unit, dpi=self.settings.dpi).rect
 
 #         root = QGraphicsItemGroup()
 #         root.setRotation(angle)
@@ -211,7 +211,7 @@ PRINT_POLICIES = {
 #         layout_template.updateGrid()
 
 #         angle = self._page_angle(layout_template, page_index)
-#         rect_px = layout_template.geometry.to("px", dpi=self.settings.dpi).rect
+#         rect_px = layout_template.geometry.to(self.unit, dpi=self.settings.dpi).rect
 
 #         root = QGraphicsItemGroup()
 #         root.setRotation(angle)
@@ -264,7 +264,7 @@ PRINT_POLICIES = {
 # #     # ---- compute a Page descriptor ----------------------------------------
 # #     def build_page(self, template, page_index: int) -> Page:
 # #         dpi = self._settings.dpi
-# #         page_rect = template.geometry.to("px", dpi=dpi).rect  # QRectF
+# #         page_rect = template.geometry.to(self.unit, dpi=dpi).rect  # QRectF
 # #         angle = self.page_rotation_deg(template.is_landscape, template.duplex_print, page_index)
 
 # #         # Per-slot final angles

@@ -9,7 +9,7 @@ from PySide6.QtCore import Slot, Qt, QSizeF, QRectF, QPointF, Signal
 from PySide6.QtGui import QColor, QPen, QPainter, QBrush, QPixmap, QTransform
 
 from prototypyside.views.layout_view import LayoutView
-from prototypyside.config import MEASURE_INCREMENT, LIGHTEST_GRAY, DARKEST_GRAY
+from prototypyside.views.overlays.incremental_grid import IncrementalGrid
 
 if TYPE_CHECKING:
     from prototypyside.views.overlays.incremental_grid import IncrementalGrid
@@ -28,15 +28,17 @@ class LayoutScene(QGraphicsScene):
         self,
         settings,
         *,
-        grid: "IncrementalGrid",
         template: "LayoutTemplate",
         parent=None,
     ):
         super().__init__(parent)
         self.settings     = settings
         self._dpi = self.settings.dpi
+        self.unit = self.settings.unit
         self.template  = template  
-        self.inc_grid = grid
+        self.inc_grid = IncrementalGrid(self.settings, template=self.template,
+                             snap_enabled=True, enforce_enabled=True,
+                             default_snap_level=4)
         self.sync_scene_rect()
 
     @property     
@@ -51,7 +53,7 @@ class LayoutScene(QGraphicsScene):
 
     def sync_scene_rect(self):
         """Make the scene rect exactly match the template’s bounding rect."""
-        r = self.template.geometry.to("px", dpi=self._dpi).rect
+        r = self.template.geometry.to(self.unit, dpi=self._dpi).rect
         self.setSceneRect(r)
         self.inc_grid.prepareGeometryChange()
         self.inc_grid.update()

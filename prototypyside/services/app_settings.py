@@ -1,6 +1,7 @@
 from PySide6.QtCore import QObject, Signal, Property
 from PySide6.QtWidgets import QApplication,QGraphicsScene
-
+from PySide6.QtGui import QFont
+from prototypyside.utils.units.unit_str_font import UnitStrFont
 
 
 # @dataclass
@@ -16,33 +17,32 @@ class AppSettings(QObject):
     print_unit_and_dpi_changed = Signal(str)
     dpi_changed = Signal(int)
 
-    def __init__(self, display_unit="in", print_unit="in", display_dpi=300, print_dpi=600):
+    def __init__(self, display_unit="in", print_unit="pt", display_dpi=300, print_dpi=300):
         super().__init__()
         self._display_unit = display_unit
         self._print_dpi = print_dpi
         self._print_unit = print_unit
         self._display_dpi = display_dpi
         self._dpi = self._display_dpi
-        scene = QGraphicsScene()
+        self._unit = "px"
+        self.default_font = UnitStrFont(QFont("Arial", 12))
         screen = QApplication.primaryScreen()
-        # Works from a QGraphicsItem / QGraphicsObject
-        view = scene.views()[0] if (scene and scene.views()) else None
+        logical = screen.logicalDotsPerInch()
+        physical = screen.physicalDotsPerInch()
+        dpr = screen.devicePixelRatio()
 
-        screen = (view.window().windowHandle().screen() if view and view.window() and view.window().windowHandle()
-                  else (view.screen() if view else QApplication.primaryScreen()))
-
-        logical = float(screen.logicalDotsPerInchY())           # often 72 on macOS
-        dpr = (float(view.devicePixelRatioF()) if view else float(screen.devicePixelRatio()))
-        self._ldpi = logical * dpr   
+        # Effective DPI (scaled) if you want to treat 72 as base
+        effective = logical * dpr
+        self._ldpi = effective
 
     @Property(str)
     def unit(self):
-        return self._display_unit
+        return self._unit
 
     @unit.setter
     def unit(self, unit):       
-        if self._display_unit != unit:
-            self._display_unit = unit
+        if self._unit != unit:
+            self._unit = unit
             self.unit_changed.emit(unit)
 
     @Property(int)
@@ -89,3 +89,11 @@ class AppSettings(QObject):
         if self._print_unit != unit:
             self._print_unit = unit
             self.unit_changed.emit(unit) 
+
+    @property 
+    def ldpi(self):
+        return self._ldpi
+
+    @ldpi.setter
+    def ldpi(self, value):
+        self._ldpi = value if value != self._ldpi else self._ldpi

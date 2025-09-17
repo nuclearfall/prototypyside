@@ -156,42 +156,61 @@ class MergeManager:
         key = pid or str(Path(path))
         self._map[key] = csv_data
 
-    def from_component(self, comp: Any) -> Optional[CSVData]:
-        # Prefer PID if present and registered
-        pid = getattr(comp, "pid", None)
-        if pid and pid in self._map:
-            return self._map[pid]
+    def lookup(self, comp: Any) -> Optional[CSVData]:
+        if hasattr(comp, "csv_path"):
+            key = str(comp.csv_path)
+            # Direct match
+            csvdata_obj = self._map.get(key)
+            if csvdata_obj:
+                return csvdata_obj
 
-        # Fallback to csv_path → normalize to str(Path)
-        csv_path = getattr(comp, "csv_path", None)
-        if csv_path:
-            key = str(Path(csv_path))
-            return self._map.get(key)
-
+            # Try path equivalence
+            path = ValidPath.file(comp.csv_path, must_exist=True)
+            if path:
+                for csvdata_obj in self._map.values():
+                    if Path(csvdata_obj.path) == path:
+                        return csvdata_obj
         return None
 
-    def load_next_page(self, page: Any) -> None:
+    def count_all_rows(self, layout) -> int:
         """
-        Assumes `page.items` is an iterable of slots.
-        Each slot is expected to have `.content` (component/instance)
-        and the content is expected to implement `set_csv_content(dict)`.
-        Fails silently per policy.
+        Return the total number of CSV rows across all components present in the layout's slots.
+        Uses self.lookup(component) to obtain CSVData for each component.
         """
+        items = getattr(layout, "items", None)
+        if not items:
+            return 0
 
-        if not hasattr(page, "items") or not getattr(page, "items"):
-            raise ValueError(f"Page has no slots. Page is of type {type(page)} it must be a LayoutTemplate")
-
-        for slot in page.items:
-            sc = getattr(slot, "content", None)
-            if not pc.isproto(sc, pc.CC):
+        total = 0
+        for slot in items:
+            if not slot:
                 continue
-            csv_data = self.from_component(sc)
+            comp = getattr(slot, "content", None)
+            if not comp:
+                continue
+            csv_data = self.lookup(comp)  # must be an instance method
             if not csv_data:
                 continue
-            if not csv_data.has_next():
-                continue
-            row = csv_data.next_row()  # only @-cols by design
+            # Expecting CSVData to expose row_count (or len(rows))
+            total += getattr(csv_data, "row_count", len(getattr(csv_data, "rows", [])))
+        return total
 
-            if hasattr(sc, "set_csv_content") and callable(sc.set_csv_content):
-                sc.set_csv_content(row)
+    def set_csv_content_for_next_page(self, layout_page):
+        """
+        Populate the slots in a cloned layout page with the next rows of CSV.
+        If there is no CSV for a slot's component, the slot is left as-is.
+        Assumes an internal cursor per component or a global cursor managed by this manager.
+        """
+        for slot in layout_page.items:
+            if not slot.content:
+                continue
+            comp = slot.content
+            csv_data = self.lookup(comp)
+            if csv_data and csv_data.has_next():
+                # No CSV attached to this component; leave content untouched
+                row = csv_data.next_row()  # replace with your actual "get and advance" API
+                updated_comp = comp.set_csv_content(row)
+                # set_csv_content returns self; assignment is optional but harmless
+                slot.content = updated_comp
+        return layout_page
 

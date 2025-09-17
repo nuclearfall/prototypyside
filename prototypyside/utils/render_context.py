@@ -1,4 +1,5 @@
 from enum import Enum, auto
+
 # Render enumerations
 class RenderMode(Enum):
     GUI = auto()
@@ -38,3 +39,11 @@ class RenderContext:
     @property
     def is_layout_tab(self):
         return self.tab_mode == TabMode.LAYOUT
+
+    @property
+    def is_raster(self):
+        return self.route == RenderRoute.RASTER
+
+    @property
+    def is_composite(self):
+        return self.route == RenderRoute.COMPOSITE

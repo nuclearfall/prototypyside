@@ -16,6 +16,7 @@ from prototypyside.views.component_view import ComponentView
 from prototypyside.views.toolbars.font_toolbar import FontToolbar
 from prototypyside.views.palettes.element_palette import ElementPalette
 from prototypyside.views.panels.property_panel import PropertyPanel
+from prototypyside.views.panels.component_property_panel import ComponentPropertyPanel
 from prototypyside.views.panels.layers_panel import LayersListWidget
 from prototypyside.views.palettes.palettes import ComponentListWidget
 from prototypyside.utils.units.unit_str import UnitStr
@@ -23,7 +24,6 @@ from prototypyside.widgets.unit_str_field import UnitStrField
 from prototypyside.widgets.unit_str_geometry_field import UnitStrGeometryField
 from prototypyside.utils.units.unit_str_geometry import UnitStrGeometry
 from prototypyside.utils.units.unit_str_helpers import geometry_with_px_pos
-from prototypyside.views.overlays.incremental_grid import IncrementalGrid
 from prototypyside.services.proto_class import ProtoClass
 from prototypyside.models.component_element import ComponentElement
 
@@ -78,7 +78,7 @@ class ComponentTab(QWidget):
         self._old_by_item = {}  # {item: UnitStrGeometry}
         self._new_by_item = {}  # {item: UnitStrGeometry}
         self._connected_items = []
-        self.selected_item: Optional[object] = None
+        # self.selected_item: Optional[object] = None
         for item in self.template.items:
             self._connect_item_signals(item)
         self.setup_ui()
@@ -102,23 +102,24 @@ class ComponentTab(QWidget):
         #toolbar_container.addWidget(self.measure_bar)
         # The QGraphicsView will be the dominant part of the tab
 
-
         self.build_scene()
         main_layout.addWidget(self.view)
         # Initialize the property panel and layers panel (their widgets will be placed in docks in QMainWindow)
-        self.setup_property_editor()
+        self.create_right_dock()
         self.setup_element_palette()
         self.setup_layers_panel()
+        self.create_left_dock()
         #self._setup_shortcuts()
 
     def build_scene(self):
         # create grid
         rect = self.template.geometry.to("px", dpi=self._dpi).rect
-        self.inc_grid = IncrementalGrid(self.settings, snap_enabled=self._snap_grid, parent=self.template)
-        self.scene = ComponentScene(self.settings, template=self.template, grid=self.inc_grid)
+        self.scene = ComponentScene(self.settings, template=self.template)
+
         if not self.template.scene():
             self.scene.addItem(self.template)
         self.scene.setSceneRect(rect)
+        self.inc_grid = self.scene.inc_grid
         # print(f"Scene rect in pixels is {self.template.geometry.to("px", dpi=self.settings.dpi).rect}")
         self.view = ComponentView(self.scene)
         self.view.setRenderHints(QPainter.Antialiasing | QPainter.TextAntialiasing | QPainter.SmoothPixmapTransform)
@@ -187,8 +188,10 @@ class ComponentTab(QWidget):
         # --- NEW: Scene -> Tab (Step 6 → 7) ---
         self.scene.create_item_with_dims.connect(self.add_item_with_dims)
 
-    def setup_property_editor(self):
+    def create_right_dock(self):
         # This will be a widget that the QMainWindow will place in a DockWidget
+        self.right_dock = QWidget()
+        layout = QVBoxLayout()
         self.property_panel = PropertyPanel(None, display_unit=self.unit, parent=self, dpi=self.settings.dpi)
         self.property_panel.property_changed.connect(self.on_property_changed)
         self.property_panel.batch_property_changed.connect(self.on_batch_property_changed)
@@ -196,6 +199,15 @@ class ComponentTab(QWidget):
         self.remove_item_btn = QPushButton("Remove Selected Element")
         self.remove_item_btn.setMaximumWidth(200)
         self.remove_item_btn.clicked.connect(self.remove_selected_item)
+        self.comp_prop_panel = ComponentPropertyPanel(
+            target=self.template, 
+            display_unit=self.settings.display_unit,
+            dpi=self.settings.dpi)
+        self.comp_prop_panel.property_changed.connect(self.on_property_changed)
+        self.right_dock.setLayout(layout)
+        layout.addWidget(self.comp_prop_panel)
+        layout.addWidget(self.remove_item_btn)
+        layout.addWidget(self.property_panel)
 
     def setup_layers_panel(self):
         self.layers_list = LayersListWidget(self)
@@ -203,9 +215,15 @@ class ComponentTab(QWidget):
         self.layers_list.item_z_changed_requested.connect(self.reorder_item_z_from_list_event)
         self.layers_list.itemClicked.connect(self.on_layers_list_item_clicked)
 
+    def create_left_dock(self):
+        self.left_dock = QWidget()
+        layout = QVBoxLayout()
+        layout.addWidget(self.palette)
+        layout.addWidget(self.layers_list)
+        self.left_dock.setLayout(layout)      
+
     def create_toolbar(self):
         self.toolbar = QToolBar()
-
         self.measure_bar = QWidget()
         self.measure_bar.setObjectName("MeasurementToolbar")
         measure_layout = QHBoxLayout()
@@ -214,7 +232,7 @@ class ComponentTab(QWidget):
         self.unit_label = QLabel("Unit:")
         self.unit_selector = QComboBox()
         self.unit_selector.addItems(["in", "cm", "mm", "pt", "px"])
-        self.unit_selector.setCurrentText(self._unit)
+        self.unit_selector.setCurrentText(self.settings.display_unit)
         self.unit_selector.currentTextChanged.connect(self.on_unit_change)
 
         # Snap to Grid
@@ -226,11 +244,6 @@ class ComponentTab(QWidget):
         self.grid_checkbox = QCheckBox("Show Grid")
         self.grid_checkbox.setChecked(True)
         self.grid_checkbox.stateChanged.connect(self.toggle_grid)
-
-        self.template_dims_field = UnitStrGeometryField(self.template, "geometry", labels=["Width", "Height"], display_unit=self.settings.display_unit, 
-                decimal_places=2, stack_cls=QHBoxLayout, dpi=self._dpi)
-        self.template_dims_field.valueChanged.connect(self.on_property_changed)
-        self.template_dims_field.setMaximumWidth(250)
  
         self.bleed_label = QLabel("Bleed")
         self.bleed_checkbox = QCheckBox("Add Bleed")
@@ -240,14 +253,6 @@ class ComponentTab(QWidget):
         self.bleed_field.valueChanged.connect(self.on_property_changed)
         self.bleed_field.setMaximumWidth(60)   
         self.bleed_field.setEnabled(self.bleed_checkbox.isChecked())
-        self.border_label = QLabel("Border")
-        self.border_width_field = UnitStrField(self.template, "border_width", display_unit=self.unit, dpi=self._dpi)
-        self.border_width_field.valueChanged.connect(self.on_property_changed)
-        self.border_width_field.setMaximumWidth(60)
-        self.corners_label = QLabel("Corner Radius")
-        self.corners_field = UnitStrField(self.template, "corner_radius", display_unit=self.unit, dpi=self._dpi)
-        self.corners_field.valueChanged.connect(self.on_property_changed)
-        self.corners_field.setMaximumWidth(60)
 
 
         for widget in [
@@ -257,12 +262,9 @@ class ComponentTab(QWidget):
             self.snap_checkbox, 
             self.grid_checkbox,
             vsep(),
-            self.template_dims_field,
             self.bleed_label,
             self.bleed_checkbox,
             self.bleed_field,
-            self.corners_label,
-            self.corners_field,
         ]:
             # widget.setMinimumHeight(30)
             measure_layout.addWidget(widget)
@@ -274,7 +276,6 @@ class ComponentTab(QWidget):
         # self.toolbar.setMinimumHeight(max(self.toolbar.minimumHeight(), 28))
         self.toolbar.setIconSize(self.toolbar.iconSize()) 
         self.toolbar.setIconSize(self.toolbar.iconSize())  # forces a re-layout
-
         self.layout().addWidget(self.toolbar)
 
     @property
@@ -295,21 +296,23 @@ class ComponentTab(QWidget):
 
     @Slot(str)
     def on_unit_change(self, unit: str):
-        self.settings.unit = unit
-        self.template_dims_field.on_unit_change(unit)
+        self.settings.display_unit = unit
+        # self.template_dims_field.on_unit_change(unit)
         self.measure_bar.update()
-        self.corners_field.on_unit_change(unit)
+        # self.corners_field.on_unit_change(unit)
         self.bleed_field.on_unit_change(unit)
         self.property_panel.on_unit_change(unit)
+        self.comp_prop_panel.on_unit_change(unit)
 
     # called from menu/toolbar checkboxes:
     def toggle_grid(self, checked: bool):
-        self._show_grid = checked
-        self.inc_grid.setVisible(self._show_grid)
+        self._show_grid = bool(checked)
+        # Make sure you have access to the scene instance from the tab.
+        # If the tab stores it as self.scene, do:
+        self.scene.set_grid_visible(self._show_grid)
 
     def toggle_snap(self, checked: bool):
-        self._snap_grid = checked
-        self.grid_snap_changed.emit(checked)
+        self.scene.set_snap_enabled(bool(checked))
 
     def toggle_bleed(self, checked: bool):
         new = bool(checked)
@@ -383,13 +386,12 @@ class ComponentTab(QWidget):
             if hasattr(it, "element_changed"):
                 it.element_changed.emit()
 
-    # --- Add these helpers somewhere in your class ---
+    # Assumes: elem_types (tuple/type set for your element classes)
+    # and pc.isproto(item, elem_types) filters only your real elements.
+
     def get_primary_selected_item(self):
-        """Convenience: first selected or None (for legacy single-target UIs)."""
         items = self.get_selected_items()
         return items[0] if items else None
-
-    # --- ComponentTab ---
 
     def get_selected_items(self) -> list:
         """Return currently selected ComponentElements in the scene."""
@@ -397,23 +399,24 @@ class ComponentTab(QWidget):
 
     @Slot()
     def on_selection_changed(self):
-        """Entry point from QGraphicsScene.selectionChanged."""
-        items = self.get_selected_items()
-        self._handle_new_selection(items)
+        """Connected to QGraphicsScene.selectionChanged."""
+        print(f"Selected items are: {self.scene.selectedItems()}")
+        self._handle_new_selection(self.scene.selectedItems(), source="scene")
 
     def _handle_new_selection(self, items, *, source: str = "scene"):
         """
         Centralized selection handler.
-        - items: list[QGraphicsItem]; we keep only ComponentElements.
-        - Updates PropertyPanel with full list (InDesign-style).
-        - Mirrors selection to Layers.
-        - Enforces handle policy once.
+        - Filters to ComponentElements
+        - Updates property panel
+        - Mirrors to layers
+        - Applies handle policy
         """
-        # 1) Normalize & de-dup check
-        sel = [it for it in (items or []) if pc.isproto(it, elem_types)]
-        current_ids = frozenset(map(id, sel))
-        if hasattr(self, "_last_selection_ids") and current_ids == getattr(self, "_last_selection_ids", frozenset()):
-            # Keep panel fresh even if selection didn't change structurally
+        # 0) Normalize to just our elements
+        sel = [it for it in items if pc.isproto(it, elem_types)]
+
+        # 1) Idempotence guard: same structural selection?
+        current_ids = tuple(sorted(map(id, sel)))
+        if getattr(self, "_last_selection_ids", None) == current_ids:
             if sel:
                 self.property_panel.refresh()
             else:
@@ -422,9 +425,9 @@ class ComponentTab(QWidget):
             return
         self._last_selection_ids = current_ids
 
-        # 2) Update PropertyPanel (multi-target)
+        # 2) Property panel (multi-target)
         if sel:
-            self.property_panel.set_targets(sel)       # full list (shows common/mixed)
+            self.property_panel.set_targets(sel)
             self.property_panel.set_panel_enabled(True)
             self.remove_item_btn.setEnabled(True)
         else:
@@ -432,8 +435,11 @@ class ComponentTab(QWidget):
             self.property_panel.set_panel_enabled(False)
             self.remove_item_btn.setEnabled(False)
 
-        self._wire_panel_live_updates(sel)
-        # 3) Mirror into Layers without loops
+        # Wire live updates for current targets (noop if you don’t need it)
+        if hasattr(self, "_wire_panel_live_updates"):
+            self._wire_panel_live_updates(sel)
+
+        # 3) Mirror into Layers (without loops)
         if hasattr(self, "layers_list"):
             try:
                 self.layers_list.blockSignals(True)
@@ -441,90 +447,84 @@ class ComponentTab(QWidget):
             finally:
                 self.layers_list.blockSignals(False)
 
-        # 5) Status line (optional)
+        # 4) Optional status line
         if hasattr(self, "show_status_message"):
             if not sel:
                 self.show_status_message("No selection.", "info")
             elif len(sel) == 1:
-                self.show_status_message(f"Selected: {sel[0].name}", "info")
+                name = getattr(sel[0], "name", "Item")
+                self.show_status_message(f"Selected: {name}", "info")
             else:
                 self.show_status_message(f"{len(sel)} items selected.", "info")
 
-        # 6) Handle visibility policy (single → one shows; multi → all show)
+        # 5) Handle visibility policy
         self._apply_handle_policy(sel)
+
+    def _apply_handle_policy(self, selected_items: list):
+        """
+        - none selected: none show handles
+        - exactly one: that one shows handles
+        - multiple: all selected show handles
+        """
+        sel_set = set(selected_items or [])
+        for it in self.scene.items():
+            if pc.isproto(it, elem_types):
+                it.outline.show_handles(it in sel_set)
 
     def set_selection(self, items):
         """
-        items may be:
+        Programmatic selection setter.
           - None or []: no selection
-          - a single item
-          - a list of items
+          - single item or iterable
         """
-        # Normalize to list
+        # Normalize
         if items is None:
             items = []
         elif not isinstance(items, (list, tuple, set)):
             items = [items]
 
-        if not items:
-            self._clear_targets()
-            self._disable_panel()
-            return
+        sel = [it for it in items if pc.isproto(it, elem_types)]
 
-        # Exactly one
-        self._set_target(items[0])
-        self._enable_panel()
-
-    @Slot(QListWidgetItem)
-    def on_layers_list_item_clicked(self, list_item):
-        """Compatibility: single-click selects exactly one item."""
-        elem = list_item.data(Qt.UserRole)
-        if not elem:
-            return
+        # Mutate scene selection atomically
         self.scene.blockSignals(True)
         try:
             self.scene.clearSelection()
-            elem.setSelected(True)
+            for it in sel:
+                it.setSelected(True)
         finally:
             self.scene.blockSignals(False)
-        self.on_selection_changed()  # propagate changes
+
+        # Drive the same pipeline as user interaction
+        self._handle_new_selection(sel, source="programmatic")
+
+    @Slot(QListWidgetItem)
+    def on_layers_list_item_clicked(self, list_item):
+        """Single-click selects exactly one item."""
+        elem = list_item.data(Qt.UserRole)
+        if elem:
+            self.set_selection(elem)
 
     @Slot(list)
     def on_layers_list_selection_changed(self, elements):
         """Mirror layers panel multi-selection into the scene."""
-        elems_set = set(elements)
-        self.scene.blockSignals(True)
-        try:
-            # Clear all, then reselect the chosen ones
-            for it in self.scene.items():
-                if hasattr(it, "setSelected"):
-                    it.setSelected(False)
-            for e in elems_set:
-                e.setSelected(True)
-        finally:
-            self.scene.blockSignals(False)
-        self.on_selection_changed()
-
-
-    # --- Fix and generalize your layers selection sync ---
+        self.set_selection(elements)
 
     def _update_layers_selection(self, selected_elements: list):
         """Sync layers list selection with a list of selected scene items."""
-        sel_set = set(selected_elements)
+        sel_set = set(selected_elements or [])
         self.layers_list.blockSignals(True)
         try:
             self.layers_list.clearSelection()
+            first = None
             for i in range(self.layers_list.count()):
                 row = self.layers_list.item(i)
                 elem = row.data(Qt.UserRole)
-                row.setSelected(elem in sel_set)
-                # scroll first selected into view (optional)
-            # Optional: ensure top-most selected is visible
-            for i in range(self.layers_list.count()):
-                row = self.layers_list.item(i)
-                if row.isSelected():
-                    self.layers_list.scrollToItem(row)
-                    break
+                is_sel = elem in sel_set
+                row.setSelected(is_sel)
+                if is_sel and first is None:
+                    first = row
+            if first is not None:
+                self.layers_list.scrollToItem(first)
         finally:
             self.layers_list.blockSignals(False)
 
@@ -534,6 +534,7 @@ class ComponentTab(QWidget):
             self.layers_list.clearSelection()
         finally:
             self.layers_list.blockSignals(False)
+
 
 
     # --- Z-order helpers and actions (multi-select aware) ---
@@ -664,6 +665,7 @@ class ComponentTab(QWidget):
         item = self.registry.get_last()
         # Select last-created element
         item.setSelected(True)
+        self.property_panel.set_targets([item])
         self._connect_item_signals(item)
 
     @Slot(ProtoClass, object)
@@ -679,6 +681,7 @@ class ComponentTab(QWidget):
         self.undo_stack.push(command)
         item = self.registry.get_last()
         item.setSelected(True)
+        self.property_panel.set_targets([item])
         self._connect_item_signals(item)
 
     @Slot(object, object)
@@ -727,13 +730,17 @@ class ComponentTab(QWidget):
            - none selected: none show handles
         """
         selected_set = set(selected_items or [])
-        # Iterate only over real elements in the scene
+
         for it in self.scene.items():
-            if hasattr(it, "show_handles") and hasattr(it, "hide_handles"):
-                if it in selected_set:
-                    it.show_handles()
-                else:
-                    it.hide_handles()
+            if pc.isproto(it, elem_types):
+                if not selected_set:  # none selected
+                    handle_state = False
+                elif len(selected_set) == 1:
+                    handle_state = it in selected_set
+                else:  # multiple selected
+                    handle_state = it in selected_set
+
+                it.outline.show_handles(handle_state)
 
     @Slot()
     def remove_selected_item(self):
@@ -801,18 +808,6 @@ class ComponentTab(QWidget):
         except (RuntimeError, TypeError):
             pass
 
-    @Slot()
-    def set_component_background_image(self):
-        path, _ = QFileDialog.getOpenFileName(
-            self, "Select Background Image", "", "Image Files (*.png *.jpg *.jpeg *.bmp *.gif)")
-        if path:
-            if self.template.set_background_image(path):
-                self.show_status_message("Game Component background image set successfully.", "success")
-            else:
-                self.show_status_message("Background Error: Could not set background image. File may be invalid.", "error")
-        else:
-            self.show_status_message("Background image selection cancelled.", "info")
-
     def eventFilter(self, obj, ev):
         et = ev.type()
         if et == QEvent.GraphicsSceneMousePress:
@@ -839,7 +834,6 @@ class ComponentTab(QWidget):
         it = self.sender()
         self._new_by_item[it] = new_geom
         self._panel_on_item_geometry(new_geom)
-
 
     def _end_gesture(self):
         if not self._gesture_active:

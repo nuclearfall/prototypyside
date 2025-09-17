@@ -49,13 +49,13 @@ class PrintLines(QGraphicsItem):
         """Expand the parent’s rect by the bleed on all sides"""
         pr = self.parentItem().boundingRect()
         dpi = getattr(self.parentItem(), "dpi", 300)
-        bleed_px = float(self.bleed_size.to("px", dpi=dpi))
+        bleed_px = float(self.bleed_size.to(self.unit, dpi=dpi))
         return pr.adjusted(-bleed_px, -bleed_px, bleed_px, bleed_px)
 
     def paint(self, painter: QPainter, option, widget=None):
         pr = self.parentItem().boundingRect()
         dpi = getattr(self.parentItem(), "dpi", 300)
-        bpx = float(self.bleed_size.to("px", dpi=dpi))
+        bpx = float(self.bleed_size.to(self.unit, dpi=dpi))
 
         if self._hovered:
             painter.setBrush(QBrush(self.hover_background))

@@ -275,6 +275,75 @@ class CloneComponentTemplateToSlotCommand(QUndoCommand):
         if self.clone_pid:
             self.registry.deregister(self.clone_pid)
 
+class ClearSlotsCommand(QUndoCommand):
+    """
+    Clear (set content=None) for the provided LayoutSlots only.
+    - Slots whose content is a cloned ComponentTemplate are deregistered on redo
+      and reinserted on undo so the clone lifecycle remains correct.
+    """
+    def __init__(self, registry, slots, description="Clear Selected Slots"):
+        super().__init__(description)
+        self.registry = registry
+        # Keep stable order + exact prior contents for perfect undo fidelity
+        self._pairs = [(slot, getattr(slot, "content", None)) for slot in slots]
+
+    def redo(self):
+        for slot, content in self._pairs:
+            if content is not None:
+                # Park the clone so redo/undo works like your other commands
+                pid = getattr(content, "pid", None)
+                if pid:
+                    self.registry.deregister(pid)
+            slot.content = None
+
+    def undo(self):
+        for slot, content in self._pairs:
+            if content is not None:
+                pid = getattr(content, "pid", None)
+                if pid:
+                    self.registry.reinsert(pid)
+            slot.content = content
+
+from PySide6.QtGui import QUndoCommand
+
+class ClearSelectedSlotsCommand(QUndoCommand):
+    """
+    Clear (slot.content = None) for a set of LayoutSlots, optionally filtered
+    to those whose content.pid == filter_pid.
+
+    - registry: for deregister()/reinsert() of per-slot clones
+    - slots: iterable of LayoutSlot objects
+    - filter_pid: if provided, only clear slots whose current content pid matches
+    """
+    def __init__(self, registry, slots, filter_pid: str | None = None, description="Clear Selected Slots"):
+        super().__init__(description)
+        self.registry = registry
+        self.filter_pid = filter_pid
+
+        # Capture exact prior content for perfect undo
+        pairs = []
+        for s in slots:
+            c = s.content
+            pairs.append((s, c))
+        self._pairs = pairs  # only the ones we will actually clear
+
+    def redo(self):
+        for slot, content in self._pairs:
+            if hasattr(content, "pid"):
+                pid = getattr(content, "pid", None)
+                if pid:
+                    self.registry.deregister(pid)  # park clone in orphans
+                    slot.content = None
+            slot.update()
+
+    def undo(self):
+        for slot, content in self._pairs:
+            pid = getattr(content, "pid", None)
+            if pid:
+                self.registry.reinsert(pid)     # pull clone back from orphans
+            slot.content = content
+            slot.update()
+
 class CloneComponentToEmptySlotsCommand(QUndoCommand):
     """
     Fill all empty LayoutSlots in a LayoutTemplate with clones of a ComponentTemplate.
@@ -316,7 +385,70 @@ class CloneComponentToEmptySlotsCommand(QUndoCommand):
         for slot, old in zip(self.layout.items, self._orig_contents):
             slot.content = old
 
+class AssignTemplateToSelectedSlotsCommand(QUndoCommand):
+    """
+    Assign `template_pid` to a set of LayoutSlots.
+    - Skips any slot that already contains a clone of `template_pid`.
+    - Replaces other content (deregistering the old clone), then registers a new clone.
+    - Undo restores original content precisely (reinsert old clone if it existed).
+    Requirements:
+      - registry.get(pid) -> template object
+      - template.clone() -> new component instance (with fresh pid)
+      - registry.register(obj) / registry.deregister(pid) / registry.reinsert(pid)
+    """
+    def __init__(self, registry, tpid: str, slots, description="Add to Selected Slots"):
+        super().__init__(description)
+        self.registry = registry
+        self.tpid = tpid
 
+        # Build worklist: only slots that are not already populated by this template
+        self._items = []
+        for s in slots:
+            content = getattr(s, "content", None)
+            # If already same template, skip
+            if content is not None and getattr(content, "tpid", None) == tpid:
+                continue
+            # Record prior content (for undo) and placeholder for new clone pid
+            self._items.append({
+                "slot": s,
+                "old": content,
+                "new_pid": None,
+            })
+
+
+    def redo(self):
+        for it in self._items:
+            slot = it["slot"]
+            old  = it["old"]
+
+            # Remove old content if any
+            if old is not None:
+                old_pid = getattr(old, "pid", None)
+                if old_pid:
+                    self.registry.deregister(old_pid)
+
+            # Make/register a fresh clone of the desired template
+            template = self.registry.global_get(self.tpid)
+            clone = self.registry.clone(template)
+            it["new_pid"] = getattr(clone, "pid", None)
+            slot.content = clone
+
+    def undo(self):
+        for it in self._items:
+            slot = it["slot"]
+            old  = it["old"]
+            new_pid = it["new_pid"]
+
+            # Remove new clone
+            if new_pid:
+                self.registry.deregister(new_pid)
+
+            # Restore old content (reinsert if it had a pid)
+            if old is not None:
+                old_pid = getattr(old, "pid", None)
+                if old_pid:
+                    self.registry.reinsert(old_pid)
+            slot.content = old
 
 class ChangePropertiesCommand(QUndoCommand):
     def __init__(self, item, props, new_values, old_values,

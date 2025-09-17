@@ -6,9 +6,10 @@ from PySide6.QtCore import Qt
 from PySide6.QtGui import QColor, QBrush
 
 from prototypyside.models.component_template import ComponentTemplate
+from prototypyside.services.proto_class import ProtoClass
 # If you also want to support LayoutTemplate, you can import it and treat similarly.
 
-
+pc = ProtoClass
 
 class ImportPanel(QWidget):
     """
@@ -49,7 +50,7 @@ class ImportPanel(QWidget):
         self.update_for_template(template)
 
     def update_for_template(self, template):
-        if not template or not isinstance(template, ComponentTemplate):
+        if not template or not pc.isproto(template, pc.CT):
             self.csv_list.clear()
             self.fields_list.clear()
             self.csv_list.addItem("No template selected")
@@ -62,7 +63,7 @@ class ImportPanel(QWidget):
         self.fields_list.clear()
         
         # Use the new, correct method to get data
-        data = self.merge_manager.from_component(template)
+        data = self.merge_manager.lookup(template)
         
         if data:
             self.csv_list.addItem(Path(getattr(data, "path", "")).name)
@@ -110,7 +111,7 @@ class ImportPanel(QWidget):
     def _connect_template_signals(self) -> None:
         """Listen to template/item changes so the panel stays current."""
         t = self._current_template
-        if not isinstance(t, ComponentTemplate):
+        if not pc.isproto(t, pc.CT):
             return
 
         # If your template emits a change signal, hook it

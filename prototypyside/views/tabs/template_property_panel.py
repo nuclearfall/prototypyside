@@ -1,8 +1,8 @@
-# file: property_panel.py
+# file: template_property_panel.py
 from typing import Optional, Any, List, Tuple, Union
 from PySide6.QtWidgets import (
     QWidget, QFormLayout, QLabel, QLineEdit, QComboBox, QCheckBox,
-    QVBoxLayout, QHBoxLayout, QFrame, QTextEdit, QPushButton, QFileDialog, QColorDialog, 
+    QVBoxLayout, QFrame, QTextEdit, QPushButton, QFileDialog, QColorDialog, 
     QStackedWidget, QTextEdit, QSizePolicy)
 from PySide6.QtCore import Qt, Signal, Slot
 from PySide6.QtGui import QColor, QFont, QTextOption, QKeyEvent
@@ -15,7 +15,7 @@ from prototypyside.utils.units.unit_str_geometry import UnitStrGeometry
 from prototypyside.models.text_element import TextElement
 from prototypyside.models.image_element import ImageElement
 from prototypyside.models.vector_element import VectorElement
-from prototypyside.widgets.color_picker import ColorPickerWidget
+from prototypyside.widgets.border_color_pick import ColorPickerWidget
 from prototypyside.widgets.rotation_field import RotationField
 from prototypyside.views.toolbars.font_toolbar import FontToolbar
 
@@ -50,6 +50,7 @@ class FocusLineEdit(QLineEdit):
 #             self._target_item = target_item
 #             self._original_value = getattr(target_item, content_key, "")
 #             self.setText(self._original_value)
+
 class FocusTextEdit(QTextEdit):
     editingFinished = Signal(object, str, object, object)
     resized = Signal()  # <— add this
@@ -104,19 +105,17 @@ class FocusTextEdit(QTextEdit):
 
 # --- Main Property Panel Widget ---
 
-class PropertyPanel(QWidget):
+class ComponentPropertyPanel(QWidget):
     """
-    A panel to display and edit properties of a selected ComponentElement.
+    A panel to display and edit properties of the ComponentTemplate.
     """
     # Emits (target_object, property_name, old_value, new_value)
     property_changed = Signal(object, str, object, object)
-    batch_property_changed = Signal(list, str, object, list)
 
     def __init__(self, target, display_unit:str, dpi: int = 300, parent: Optional[QWidget] = None):
         super().__init__(parent)
-        self._targets: List[object] = []
-        if target is not None:
-            self._targets = target if isinstance(target, list) else [target]
+        self._target = target
+
         self._display_unit = display_unit
         self._connected_item = None
         self.dpi = dpi
@@ -124,7 +123,6 @@ class PropertyPanel(QWidget):
         # Main layout
         self.main_layout = QVBoxLayout(self)
         self.main_layout.setContentsMargins(0, 0, 0, 0)
-        self._content_text_max_height_px = 100
         self.setLayout(self.main_layout)
 
         # A frame to hold the properties
@@ -135,56 +133,32 @@ class PropertyPanel(QWidget):
         self.main_layout.addWidget(self.main_frame)
 
         # --- Create all possible widgets ---
-        self.name_edit = FocusLineEdit()
-
-        # Content widgets in a stacked layout
-        self.content_stack = QStackedWidget()
-        self.content_text_edit = FocusTextEdit()
-
-        self.content_path_button = QPushButton("Select Image...") # For image path
-        self.content_path_button.setMaximumHeight(32)
-        self.content_stack.addWidget(self.content_text_edit)
-        self.content_stack.addWidget(self.content_path_button)
-
-        # self.content_stack.setMinimumHeight(self._content_text_max_height_px)
-        # self.content_stack.setMaximumHeight(self._content_text_max_height_px)
-        self.content_text_edit.setFixedHeight(80)
-        self.geometry_field = UnitStrGeometryField(target, "geometry", labels=["Width", "Height", "X", "Y"], display_unit=display_unit, dpi=self.dpi)
+        self.geometry_field = UnitStrGeometryField(target, "geometry", labels=["Width", "Height"], display_unit=display_unit, dpi=self.dpi)
         self.rotation_field = RotationField()
-        hbox = QHBoxLayout()
-        self.color_picker = ColorPickerWidget()
-        self.bg_color_picker = ColorPickerWidget()
-        self.border_color_picker = ColorPickerWidget()
-        hbox.addWidget(QLabel("Color"))
-        hbox.addWidget(self.color_picker)
-        hbox.addWidget(QLabel("Background"))
-        hbox.addWidget(self.bg_color_picker)
-        hbox.addWidget(QLabel("Border"))
-        hbox.addWidget(self.border_color_picker)
+        self.border_color_pick = ColorPickerWidget()
+        self.bg_color_pick = ColorPickerWidget()
+        self.border_border_color_pick = ColorPickerWidget()
         self.border_width_field = UnitStrField(property_name="border_width", display_unit=display_unit, dpi=self.dpi)
-        self.corner_radius_field = UnitStrField(property_name="corner_radius", display_unit=display_unit, dpi=self.dpi)     
-        self.font_toolbar = FontToolbar()
-
-        # Conditional widgets
-
-        self.keep_aspect_checkbox = QCheckBox("Keep Aspect Ratio")
+        self.corner_radius_field = UnitStrField(property_name="corner_radius", display_unit=display_unit, dpi=self.dpi)
+        self.bg_image_button = QPushButton("Select Image...") # For image path
+        self.bg_image_button.setMaximumHeight(32)     
 
         # Add widgets to layout
         self.form_layout.addRow("Name:", self.name_edit)
-        self.form_layout.addRow("Content:", self.content_stack)
+        # self.form_layout.addRow("Content:", self.content_stack)
         self.form_layout.addRow("Geometry:", self.geometry_field)
-        self.form_layout.addRow("Rotation", self.rotation_field)
-        self.form_layout.addRow("", hbox)
+        # self.form_layout.addRow("Rotation", self.rotation_field)
+        self.form_layout.addRow("Color:", self.border_color_pick)
+        self.form_layout.addRow("Background Color:", self.bg_color_pick)
+        self.form_layout.addRow("Border Color:", self.border_border_color_pick)
         self.form_layout.addRow("Border Width:", self.border_width_field)
         self.form_layout.addRow("Corner Radius", self.corner_radius_field)
-        self.form_layout.addRow(self.font_toolbar)
-        self.form_layout.addRow(self.keep_aspect_checkbox)
+        self.form_layout.addRow("Background Image", self.bg_image_button)
 
-        self.keep_aspect_checkbox.setTristate(True)
-
+        # self.ep_aspect_checkbox.setTristate(True)
+        self.name_edit.setDisabled(True)
         self._connect_signals()
         self.clear_target()
-
 
     def _connect_signals(self):
         # Text: NAME (unique per item; usually we disable in multi)
@@ -192,13 +166,7 @@ class PropertyPanel(QWidget):
             lambda value: self._handle_panel_edit("name", value)
         )
 
-        # Content text (TextElement). We’ll re-route through _handle_panel_edit
-        self.content_text_edit.editingFinished.connect(
-            lambda tgt, key, new, old: self._handle_panel_edit(key, new)
-        )
-        # self.content_text_edit.resized.connect(self._autosize_content_text_edit)
-
-        self.content_path_button.clicked.connect(self._choose_image_path)
+        self.bg_image_button.clicked.connect(self._choose_image_path)
 
         # Geometry / numbers (we’ll translate these into batch/single)
         self.geometry_field.valueChanged.connect(
@@ -216,23 +184,18 @@ class PropertyPanel(QWidget):
         self.rotation_field.angleChanged.connect(self._preview_rotation_only)
 
         # Colors
-        self.color_picker.color_changed.connect(lambda c: self._handle_panel_edit("color", c))
-        self.bg_color_picker.color_changed.connect(lambda c: self._handle_panel_edit("bg_color", c))
-        self.border_color_picker.color_changed.connect(lambda c: self._handle_panel_edit("border_color", c))
+        self.border_color_pick.color_changed.connect(lambda c: self._handle_panel_edit("color", c))
+        self.bg_color_pick.color_changed.connect(lambda c: self._handle_panel_edit("bg_color", c))
+        self.border_border_color_pick.color_changed.connect(lambda c: self._handle_panel_edit("border_color", c))
 
-        # Keep aspect (tri-state)
-        self.keep_aspect_checkbox.stateChanged.connect(self._on_keep_aspect_state)
-
-        # Font toolbar (Text-only)
-        self.font_toolbar.fontChanged.connect(lambda tgt, prop, new, old: self._handle_panel_edit(prop, new))
-        self.font_toolbar.hAlignChanged.connect(lambda tgt, prop, new, old: self._handle_panel_edit(prop, new))
-        self.font_toolbar.vAlignChanged.connect(lambda tgt, prop, new, old: self._handle_panel_edit(prop, new))
+        # # Keep aspect (tri-state)
+        # self.keep_aspect_checkbox.stateChanged.connect(self._on_keep_aspect_state)
 
     # ---------------- Multi-select helpers ----------------
     def on_external_property_changed(self, item, prop: str, new_value):
         """
         Update only the relevant editors from an external change without emitting
-        property_changed/batch_property_changed.
+        property_changed.
         """
         try:
             self.blockSignals(True)
@@ -254,92 +217,38 @@ class PropertyPanel(QWidget):
         finally:
             self.blockSignals(False)
 
-    def set_targets(self, items: List[object]):
-        """Bind to multiple items at once."""
-        self.set_target(items)  # alias
-
-    def _is_multi(self) -> bool:
-        return len(self._targets) > 1
-
-    def _targets_of_type(self, cls) -> List[object]:
-        return [t for t in self._targets if isinstance(t, cls)]
-
-    def _all_same(self, prop: str, eligible: Optional[List[object]] = None) -> Tuple[bool, Any]:
-        """Return (all_same, common_value or None)."""
-        items = eligible if eligible is not None else self._targets
-        if not items:
-            return False, None
-        vals = []
-        for it in items:
-            if not hasattr(it, prop):
-                return False, None
-            vals.append(getattr(it, prop))
-        first = vals[0]
-        for v in vals[1:]:
-            if v != first:
-                return False, None
-        return True, first
-
-    def _mixed_label(self) -> str:
-        return "—"  # InDesign-style mixed indicator (you can choose "" if preferred)
-
-    def _emit_single_or_batch(self, prop_name: str, new_value: Any):
-        """Emit property_changed for single target or batch_property_changed for multi."""
-        if not self._targets:
-            return
-        if not self._is_multi():
-            tgt = self._targets[0]
-            old_value = getattr(tgt, prop_name, None)
-            if old_value != new_value:
-                self.property_changed.emit(tgt, prop_name, new_value, old_value)
-            return
-
-        # Multi: collect olds, then emit batch
-        olds = [getattr(t, prop_name, None) for t in self._targets]
-        # Avoid no-op batches when every old equals new
-        if all(o == new_value for o in olds):
-            return
-        self.batch_property_changed.emit(self._targets, prop_name, new_value, olds)
+    def _emit_property_change(self, prop_name: str, new_value: Any):
+        """Emit property_changed for template."""
+        tgt = self._target
+        old_value = getattr(tgt, prop_name, None)
+        if old_value != new_value:
+            self.property_changed.emit(tgt, prop_name, new_value, old_value)
+        return
 
     def _populate_fields(self):
         """
         Populate UI from current selection (single or multi),
         showing common values or mixed indicators.
         """
-        items = self._targets
-        if not items:
+        item = self._target
+        if not item:
             return
 
-        # Common type subsets
-        text_items = self._targets_of_type(TextElement)
-        image_items = self._targets_of_type(ImageElement)
-        vector_items = self._targets_of_type(VectorElement)
-
         # Name: typically unique — disable on multi to avoid unintended rename
-        if self._is_multi():
-            self.name_edit.setPlaceholderText(self._mixed_label())
-            self.name_edit.setText("")
-        else:
-            el = items[0]
-            self.name_edit.setText(getattr(el, "name", "") or "")
+        self.name_edit.setText(item, "name", "")
 
         # Geometry: show if all have same geometry; else show mixed and disable editor
-        same_geom, common_geom = self._all_same("geometry")
-        if same_geom and common_geom is not None:
-            self.geometry_field.setTarget(items[0], "geometry", display_unit=self._display_unit)
+        self.geometry_field.setTarget(item, "geometry", display_unit=self._display_unit)
         else:
             # neutral/mixed state
             self.geometry_field.setTarget(None, None)         
             # clear binding; user input applies to all
             # self.geometry_field.setPlaceholderText(self._mixed_label())
 
-        # Rotation
-        same_rot, common_rot = self._all_same("rotation")
-        if same_rot and common_rot is not None:
-            self.rotation_field.setAngle(float(common_rot), emit_signal=False)
-        else:
-            self.rotation_field.setAngle(0.0, emit_signal=False)  # neutral display
-            # keep enabled so user can set unified rotation
+        # self.rotation_field.setAngle(float(common_rot), emit_signal=False)
+        # else:
+        #     self.rotation_field.setAngle(0.0, emit_signal=False)  # neutral display
+        #     # keep enabled so user can set unified rotation
 
         # Colors
         def put_color(widget, prop):
@@ -349,9 +258,9 @@ class PropertyPanel(QWidget):
             else:
                 widget.set_color(None)  # show "no color"/mixed
 
-        put_color(self.color_picker, "color")
-        put_color(self.bg_color_picker, "bg_color")
-        put_color(self.border_color_picker, "border_color")
+        put_color(self.border_color_pick, "color")
+        put_color(self.bg_color_pick, "bg_color")
+        put_color(self.border_border_color_pick, "border_color")
 
         # Border width / corner radius
         def put_unit_field(field, prop):
@@ -365,66 +274,27 @@ class PropertyPanel(QWidget):
         put_unit_field(self.border_width_field, "border_width")
         put_unit_field(self.corner_radius_field, "corner_radius")
 
-        # Keep Aspect (only if all selected support it)
-        keep_aspectables = [it for it in items if hasattr(it, "keep_aspect")]
-        if keep_aspectables and len(keep_aspectables) == len(items):
-            same, val = self._all_same("keep_aspect", keep_aspectables)
-            self.keep_aspect_checkbox.setVisible(True)
-            if same:
-                self.keep_aspect_checkbox.setCheckState(Qt.Checked if bool(val) else Qt.Unchecked)
-            else:
-                self.keep_aspect_checkbox.setCheckState(Qt.PartiallyChecked)
-        else:
-            self.keep_aspect_checkbox.setVisible(False)
+        # # Keep Aspect (only if all selected support it)
+        # keep_aspectables = [it for it in items if hasattr(it, "keep_aspect")]
+        # if keep_aspectables and len(keep_aspectables) == len(items):
+        #     same, val = self._all_same("keep_aspect", keep_aspectables)
+        #     self.keep_aspect_checkbox.setVisible(True)
+        #     if same:
+        #         self.keep_aspect_checkbox.setCheckState(Qt.Checked if bool(val) else Qt.Unchecked)
+        #     else:
+        #         self.keep_aspect_checkbox.setCheckState(Qt.PartiallyChecked)
+        # else:
+        #     self.keep_aspect_checkbox.setVisible(False)
 
-        # Content & font toolbar
-        show_text_editor = len(text_items) == len(items) and len(items) > 0
-        show_image_button = len(image_items) == len(items) and len(items) > 0
-        show_vector_button = len(vector_items) == len(items) and len(items) > 0
-
-        # Mutually exclusive stacks
-        if show_text_editor:
-
-            self.font_toolbar.setVisible(True)
-            # Force a sync from the element’s actual font (handles late init/order)
-            same_text, cv = self._all_same("content", text_items)
-            self.content_stack.setCurrentWidget(self.content_text_edit)
-            self.content_stack.setMaximumHeight(self._content_text_max_height_px)
-            if same_text:
-                self.content_text_edit.setTarget(text_items[0], "content")
-                self.content_text_edit.setText(cv or "")
-            else:
-                self.content_text_edit.setTarget(text_items[0], "content")
-                self.content_text_edit.setText("")  # neutral
-                self.content_text_edit.setPlaceholderText(self._mixed_label())
-
-            # Font toolbar (only for text)
-            self.font_toolbar.setVisible(True)
-            if self._is_multi():
-                # If mixed, disbind toolbar and let applied changes be batch
-                self.font_toolbar.setTarget(text_items[0])
-            else:
-                self.font_toolbar.setTarget(text_items[0])
-
-        elif show_image_button or show_vector_button:
-            self.content_stack.setCurrentWidget(self.content_path_button)
-            self.content_stack.setMaximumHeight(20)
-            self.font_toolbar.setVisible(False)
-        else:
-            # Heterogeneous selection that doesn't share a content concept
-            self.form_layout.labelForField(self.content_stack).hide()
-            self.content_stack.hide()
-            self.font_toolbar.setVisible(False)
-
-    # -------------- single/multi edit routing --------------
+ # -------------- single/multi edit routing --------------
 
     def _handle_panel_edit(self, prop_name: str, new_value: Any):
         """Central router for edits coming from widgets."""
-        if not self._targets:
+        if not self._target:
             return
-        self._emit_single_or_batch(prop_name, new_value)
+        self._emit_property_change(prop_name, new_value)
 
-    # --- existing slots adapted to route through _emit_single_or_batch ---
+    # --- existing slots adapted to route through _emit_property_change ---
 
     @Slot()
     def _choose_image_path(self):
@@ -433,36 +303,34 @@ class PropertyPanel(QWidget):
             self, "Select File", "", "Images (*.png *.jpg *.bmp *.gif);;SVG Files (*.svg)"
         )
         if file_path:
-            self._emit_single_or_batch("content", file_path)
+            self._emit_property_change("content", file_path)
 
-    @Slot()
-    def _on_rotation_finished(self):
-        if not self._targets:
-            return
-        new_value = float(self.rotation_field.angle())
-        self._emit_single_or_batch("rotation", new_value)
+    # @Slot()
+    # def _on_rotation_finished(self):
+    #     new_value = float(self.rotation_field.angle())
+    #     self._emit_property_change("rotation", new_value)
 
-    @Slot(float)
-    def _preview_rotation_only(self, v):
-        # Preview only, do not emit (same as your original)
-        if not self._targets:
-            return
-        try:
-            for t in self._targets:
-                if hasattr(t, "rotation"):
-                    t.rotation = float(v)
-                    if hasattr(t, "element_changed"):
-                        t.element_changed.emit()
-        except Exception:
-            pass
+    # @Slot(float)
+    # def _preview_rotation_only(self, v):
+    #     # Preview only, do not emit (same as your original)
+    #     if not self._targets:
+    #         return
+    #     try:
+    #         for t in self._targets:
+    #             if hasattr(t, "rotation"):
+    #                 t.rotation = float(v)
+    #                 if hasattr(t, "element_changed"):
+    #                     t.element_changed.emit()
+    #     except Exception:
+    #         pass
 
-    @Slot(int)
-    def _on_keep_aspect_state(self, state: int):
-        if not self._targets:
-            return
-        if state == Qt.PartiallyChecked:
-            return  # user hasn’t committed a concrete state yet
-        self._emit_single_or_batch("keep_aspect", state == Qt.Checked)
+    # @Slot(int)
+    # def _on_keep_aspect_state(self, state: int):
+    #     if not self._targets:
+    #         return
+    #     if state == Qt.PartiallyChecked:
+    #         return  # user hasn’t committed a concrete state yet
+    #     self._emit_property_change("keep_aspect", state == Qt.Checked)
 
     # ---------------- bind / clear ----------------
 
@@ -472,26 +340,21 @@ class PropertyPanel(QWidget):
     def set_target(self, item: Optional[Union[object, List[object]]]):
         """Accept single object, list of objects, or None."""
         # Normalize
-        targets: List[object] = []
+        target = item
         if item is None:
-            targets = []
-        elif isinstance(item, list):
-            targets = item
-        else:
-            targets = [item]
+            target = None
 
         # If same set, just refresh visuals
-        if set(getattr(self, "_targets", [])) == set(targets):
-            self._populate_fields() if targets else self._reset_common_fields()
-            self.set_panel_enabled(bool(targets))
+        self._populate_fields() if target else self._reset_fields()
+            self.set_panel_enabled(bool(target))
             return
 
         self._block_all(True)
         self._disconnect_from_item()  # legacy single-item connection
-        self._targets = targets
+        self._target = target
 
         if not targets:
-            self._reset_common_fields()
+            self._reset_fields()
             self.set_panel_enabled(False)
             self._block_all(False)
             return
@@ -516,77 +379,25 @@ class PropertyPanel(QWidget):
             except Exception:
                 pass
 
-    def _reset_common_fields(self):
+    def _reset_fields(self):
         # Safely clear text/fields that may not accept None gracefully
         self.name_edit.clear()
-        try:
-            self.content_text_edit.setText("")
-        except Exception:
-            pass
-        # If your editors support unbinding, do it explicitly
-        try:
-            self.content_text_edit.setTarget(None, None)
-        except Exception:
-            pass
-        try:
-            self.geometry_field.clear()
-        except Exception:
-            pass
+        self.geometry_field.clear()
+        self.border_color_pick.set_color(None)
+        self.bg_color_pick.set_color(None)
+        self.border_border_color_pick.set_color(None)
 
-        # Colors to a neutral state (use whatever your app considers "no color")
-        try:
-            self.color_picker.set_color(None)
-            self.bg_color_picker.set_color(None)
-            self.border_color_picker.set_color(None)
-        except Exception:
-            pass
-
-        # Border/geometry numeric fields—clear or set to defaults
-        try:
-            self.border_width_field.clear()
-            # self.border_width_field.clear() # <- This line is redundant
-        except Exception:
-            pass
-        try:
-            self.corner_radius_field.clear()
-            # self.corner_radius_field.clear() # <- This line is redundant
-        except Exception:
-            pass
+        self.border_width_field.clear()
+        self.corner_radius_field.clear()
 
         # Rotation back to 0, but do NOT emit change
-        try:
-            self.rotation_field.setAngle(0.0, emit_signal=False)
-        except Exception:
-            pass
+        # try:
+        #     self.rotation_field.setAngle(0.0, emit_signal=False)
+        # except Exception:
+        #     pass
 
-        # Hide/clear optional toolbars & toggles
-        try:
-            self.font_toolbar.setVisible(False)
-            # If your font_toolbar has unbind/clear, do it:
-            if hasattr(self.font_toolbar, "setTarget"):
-                self.font_toolbar.setTarget(None)
-            if hasattr(self.font_toolbar, "clear"):
-                self.font_toolbar.clear()
-        except Exception:
-            pass
-
-        try:
-            self.keep_aspect_checkbox.setVisible(False)
-            self.keep_aspect_checkbox.setChecked(False)
-        except Exception:
-            pass
-
-        # Restore content stack to a neutral state
-        try:
-            # Show the stack label again (since set_target may have hidden it)
-            lbl = self.form_layout.labelForField(self.content_stack)
-            if lbl:
-                lbl.show()
-            # Choose a default page; disabling is more important than which page
-            self.content_stack.setCurrentIndex(0)
-            self.content_stack.show()
-        except Exception:
-            pass
+        self.keep_aspect_checkbox.setVisible(False)
+        self.keep_aspect_checkbox.setChecked(False)
 
     # ---------- internal helpers ----------
     def _connect_to_item(self, item):
@@ -599,7 +410,7 @@ class PropertyPanel(QWidget):
             return
 
         # Connect the item's changed signal directly to our update slot
-        if hasattr(item, "item_changed"):
+        if hasattr(item, "template_changed"):
             item.item_changed.connect(self.refresh, Qt.UniqueConnection)
             self._connected_item = item
 
@@ -630,11 +441,33 @@ class PropertyPanel(QWidget):
           so the user can enter a unified value (applies to all).
         """
         self._display_unit = display_unit
-        if not self._targets:
+        if not self._target:
             return
-        self.geometry_field.on_unit_change(display_unit)
-        self.border_width_field.on_unit_change(display_unit)
-        self.corner_radius_field.on_unit_change(display_unit)
+
+        # Geometry
+        same_geom, common_geom = self._all_same("geometry")
+        if same_geom and common_geom is not None:
+            self.geometry_field.setTarget(self._target, "geometry", display_unit=self._display_unit)
+        else:
+            self.geometry_field.setTarget(None, None)
+            self.geometry_field.setPlaceholderText(self._mixed_label())
+
+        # Border width
+        same_bw, _ = self._all_same("border_width")
+        if same_bw:
+            self.border_width_field.setTarget(self._target "border_width", display_unit=self._display_unit)
+        else:
+            self.border_width_field.setTarget(None, None)
+            self.border_width_field.setPlaceholderText(self._mixed_label())
+
+        # Corner radius
+        same_cr, _ = self._all_same("corner_radius")
+        if same_cr:
+            self.corner_radius_field.setTarget(self._target, "corner_radius", display_unit=self._display_unit)
+        else:
+            self.corner_radius_field.setTarget(None, None)
+            self.corner_radius_field.setPlaceholderText(self._mixed_label())
+
 
     # --- Keep only ONE refresh; make it multi-aware and lightweight ---
     @Slot()
@@ -644,11 +477,11 @@ class PropertyPanel(QWidget):
         (Call this when any selected item emits its change signal, or when the
         selection changes.)
         """
-        if self._targets:
+        if self._target:
             self._populate_fields()
         else:
             # Nothing selected; reset
-            self._reset_common_fields()
+            self._reset_fields()
             self.set_panel_enabled(False)
 
     def _update_display(self, geom: Optional[UnitStrGeometry]):
@@ -669,8 +502,7 @@ class PropertyPanel(QWidget):
 
         put("width",  getattr(geom, "width",  None))
         put("height", getattr(geom, "height", None))
-        put("x",      getattr(geom, "pos_x",  None))
-        put("y",      getattr(geom, "pos_y",  None))
+
 
     def _clear_fields(self):
         self._fields.clear()

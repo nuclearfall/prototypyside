@@ -23,6 +23,7 @@ from PySide6.QtGui import (
 from PySide6.QtWidgets import QGraphicsItem, QGraphicsObject, QTextEdit, QGraphicsProxyWidget
 from prototypyside.utils.units.unit_str import UnitStr
 from prototypyside.utils.units.unit_str_geometry import UnitStrGeometry
+
 from prototypyside.utils.units.unit_str_helpers import geometry_with_px_rect, geometry_with_px_pos
 from prototypyside.services.proto_class import ProtoClass
 from prototypyside.models.component_element import ComponentElement
@@ -49,8 +50,7 @@ class TextElement(ComponentElement):
             pid: str, 
             registry: "ProtoRegistry", 
             geometry: UnitStrGeometry,
-            name: Optional[str] = None,  
-            font: Optional[UnitStrFont] = None, 
+            name: Optional[str] = None,   
             parent: Optional[QGraphicsObject] = None
     ):
         super().__init__(
@@ -61,21 +61,29 @@ class TextElement(ComponentElement):
             name=name, 
             parent=parent)
 
-        self._font: UnitStrFont = font or UnitStrFont(QFont("Arial", 14))
+        self._font = registry.settings.default_font
+        print(self._font) # Correctly prints the font
         self._h_align = Qt.AlignLeft
         self._v_align = Qt.AlignTop
         self._content = "This is a sample text that is intentionally made long enough to demonstrate the overset behavior you would typically see in design software like Adobe InDesign. When this text cannot fit within the defined boundaries of the text frame, a small red plus icon will appear, indicating that there is more text than is currently visible."
         self.wrap_mode = QTextOption.WordWrap
-        
+
+        self._padding = UnitStr("10 pt", dpi=self.dpi)
         self._renderer = ProtoTextRenderer(
             dpi=self.dpi,
+            unit=self.unit,
             ldpi=self.ldpi,
-            font=self.font,
+            font=self._font,
+            geometry=self._geometry,
             h_align=self._h_align,
             v_align=self._v_align,
+            padding=self.padding,
             wrap_mode=self.wrap_mode,
-            color=Qt.black
+            color=Qt.black,
+            content=self._content,
+            context=self._context
         )
+        self._renderer.setParentItem(self)
         self._full_text_view = False
 
         # Attach the decoupled outline/handle overlay
@@ -86,13 +94,22 @@ class TextElement(ComponentElement):
         self.setSelected(True)
 
     @property
+    def padding(self) -> UnitStr:
+        return self._padding
+
+    @padding.setter
+    def padding(self, val: UnitStr) -> None:
+        self._renderer.padding = val
+        self._padding = val
+    
+    @property
     def renderer(self):
         return self._renderer
 
     def boundingRect(self) -> QRectF:
         if getattr(self, "_display_outline", False) and hasattr(self._outline, "united_rect"):
             return self._outline.united_rect()
-        return self.geometry.to("px", dpi=self.dpi).rect
+        return self.geometry.to(self.unit, dpi=self.dpi).rect
 
     @property
     def font(self) -> UnitStrFont:
@@ -101,7 +118,7 @@ class TextElement(ComponentElement):
     @font.setter
     def font(self, value: UnitStrFont) -> None:
         self.prepareGeometryChange()
-        self._font = value
+        self._font = UnitStrFont(value)
         self._renderer.font = value
         self.item_changed.emit()
         ### TODO: must have a signal to emit this.
@@ -110,29 +127,21 @@ class TextElement(ComponentElement):
         self.update()
 
     @property
-    def h_align(self) -> Qt.Alignment:
-        return self._h_align
+    def content(self) -> Optional[str]:
+        return self._content
 
-    @h_align.setter
-    def h_align(self, value: Qt.Alignment):
-        if self._h_align != value:
-            self._h_align = value
-            self._renderer.h_align = self._h_align
-            self.item_changed.emit()
-            self.update()
+    @content.setter
+    def content(self, content: str):
+        self._content = content
+        self._renderer.content = content
+        self._outline.content = content 
+        self.item_changed.emit()
+        self.update()
 
     @property
-    def v_align(self) -> Qt.Alignment:
-        return self._v_align
-
-    @v_align.setter
-    def v_align(self, value: Qt.Alignment):
-        if self._v_align != value:
-            self._v_align = value
-            self._renderer.v_align = self._v_align
-            self.item_changed.emit()
-            self.update()
-
+    def outline(self):
+        return self._outline
+    
     def clone(self):
         super().clone(self)
 
@@ -155,124 +164,27 @@ class TextElement(ComponentElement):
                 setattr(inst, f"_{attr}", from_fn(raw))
         return inst
 
-    def render_with_context(self, painter: QPainter, context: RenderContext):
-        """Render text with the given context"""
-        rect_local = self.geometry.to("px", dpi=self.dpi).rect
-        
-        if context.vector_priority and context.is_export:
-            self._paint_text_vector(painter, rect_local)
-        else:
-            self._paint_text_raster(painter, rect_local)
-            
-        # if self.display_outline and context.is_gui:
-        #     self._outline.paint(painter, None, None)
-
-    def _paint_text_raster(self, painter: QPainter, rect_local: QRectF):
-        # Configure renderer from current element state
+    def paint(self, painter: QPainter, option, widget=None):
+        painter.save()
+        font = self.font
         r = self._renderer
+        r.geometry = self.geometry
+        r.unit = self.unit
+        r.dpi       = self.dpi
         r.text      = self._content or ""
-        r.font      = self._font
+        r.font      = font
         r.h_align   = self._h_align
         r.v_align   = self._v_align
         r.wrap_mode = self.wrap_mode
         if hasattr(self, "_color"):
             r._color = self._color
-
+        r.context = self.context
         # Expand/full-text state is already chosen by _effective_text_rect_px
         # but ProtoTextRenderer may also need the boolean to alter layout strategy:
-        r.is_expanded = self._use_overset_now()
-
         # Draw in LOCAL coords (0,0,w,h)
-        r.render(painter, rect_local)
-
-    def _paint_text_vector(self, painter: QPainter, rect_local: QRectF):
-        """
-        Simple vectorization using addText baseline; replace with your UnitStrFont/QTextLayout glyph-run path if needed.
-        """
-        painter.save()
-        font: QFont = getattr(self, "_font", QFont())
-        painter.setFont(font)
-
-        text = self._content or ""
-        baseline = rect_local.top() + font.pointSizeF()
-        path = QPainterPath()
-        path.addText(rect_local.left(), baseline, font, text)
-
-        painter.setPen(Qt.NoPen)
-        painter.setBrush(getattr(self, "_color", Qt.black))
-        painter.drawPath(path)
-        painter.restore()
-
-    def paint(self, painter: QPainter, option, widget=None):
-        painter.save()
-        rect_local = self.boundingRect()
-        self.renderer.render(painter, rect_local)
-        parent_tpl = self.parentItem()
-        vector_priority = getattr(parent_tpl, "render_route", RenderRoute.COMPOSITE) == RenderRoute.VECTOR_PRIORITY
-        if vector_priority:
-            self._paint_text_vector(painter, rect_local)
+        if r.is_expanded:
+            r.render(painter, r.overset_rect)
         else:
-            self._paint_text_raster(painter, rect_local)
-
-        # Check the render route of the parent template
-        parent_template = self.parentItem()
-        if parent_template.render_mode == RenderMode.EXPORT:
-            if parent_template.render_route == RenderRoute.VECTOR_PRIORITY:
-                # Vectorize the text
-                self._paint_text_vector(painter, rect_local)
-            else:
-                self._paint_text_raster(painter, rect_local)
-        else:
-            self._paint_text_raster(painter, rect_local)
-
-        painter.restore()
-
-    def toggle_overset(self) -> bool:
-        """
-        GUI: if outline is visible and says expanded, honor it unconditionally.
-        Export: honor _full_text_view (you can still expand even if no overflow).
-        """
-        self._full_text_view = not self._full_text_view
-   
-    def render_content(self, painter: QPainter, context: RenderContext, rect: QRectF):
-        """
-        Render text content based on the rendering context
-        """
-        if context.vector_priority and context.is_export:
-            self._paint_text_vector(painter, rect)
-        else:
-            self._paint_text_raster(painter, rect)
-    
-    def _paint_text_raster(self, painter: QPainter, rect: QRectF):
-        """
-        Render text using raster method (QTextDocument)
-        """
-        # Configure renderer
-        r = self._renderer
-        r.text = self._content or ""
-        r.font = self._font
-        r.h_align = self._h_align
-        r.v_align = self._v_align
-        r.wrap_mode = self.wrap_mode
-        r._color = self._color
-        
-        # Render text
-        r.render(painter, rect)
-    
-    def _paint_text_vector(self, painter: QPainter, rect: QRectF):
-        """
-        Render text as vector paths (for vector priority export)
-        """
-        painter.save()
-        font = self._font.scale(ldpi=self.ldpi, dpi=self.dpi).px.qfont
-        painter.setFont(font)
-        
-        text = self._content or ""
-        baseline = rect.top() + font.pointSizeF()
-        path = QPainterPath()
-        path.addText(rect.left(), baseline, font, text)
-
-        painter.setPen(Qt.NoPen)
-        painter.setBrush(self._color)
-        painter.drawPath(path)
+            print(f"Renderer receiving geometry: {self.geometry}")
+            r.render(painter)
         painter.restore()

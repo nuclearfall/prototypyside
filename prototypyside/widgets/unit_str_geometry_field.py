@@ -264,8 +264,8 @@ class UnitStrGeometryField(QWidget):
 
         try:
             # Pull ProtoClass.USs from the UnitFields directly
-            w_us = self._fields["width"].value()
-            h_us = self._fields["height"].value()
+            w_us = max(self._fields["width"].value(), UnitStr("1px", dpi=tgt_dpi))
+            h_us = max(self._fields["height"].value(), UnitStr("1px", dpi=tgt_dpi))
             if "x" in self._fields and "y" in self._fields:
                 x_us = self._fields["x"].value()
                 y_us = self._fields["y"].value()

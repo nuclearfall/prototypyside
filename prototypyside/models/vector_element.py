@@ -69,11 +69,11 @@ class VectorElement(ComponentElement):
         Paints a vector image inside the bounding rect, respecting aspect ratio and logical 
         units. Always draws the border *after* the content so it sits on top.
         """
-        rect = self.geometry.to("px", dpi=self.dpi).rect
+        rect = self.geometry.to(self.unit, dpi=self.dpi).rect
         
         # Set up clipping if corner radius is > 0 (regardless of border width)
-        if hasattr(self, 'corner_radius') and self.corner_radius.to("px", dpi=self.dpi) > 0:
-            cr = self.corner_radius.to("px", dpi=self.dpi)
+        if hasattr(self, 'corner_radius') and self.corner_radius.to(self.unit, dpi=self.dpi) > 0:
+            cr = self.corner_radius.to(self.unit, dpi=self.dpi)
             path = QPainterPath()
             path.addRoundedRect(rect, cr, cr)
             painter.setClipPath(path)
@@ -86,7 +86,7 @@ class VectorElement(ComponentElement):
             painter.setPen(QPen(Qt.darkGray))
             # font = painter.font()
             ustr_font = UnitStrFont(family="Arial", size=9, italic=True)
-            font = ustr_font.scale(ldpi=self.ldpi, dpi=self.dpi).px.qfont
+            font = ustr_font.scale(ldpi=self.ldpi, dpi=self.dpi).to(self.unit, dpi=self.dpi).qfont
             #font.setPixelSize(int(font.pointSize()*self._dpi/self.ldpi))
             #font.setPointSize(10)
             # font.setItalic(True)
@@ -123,7 +123,7 @@ class VectorElement(ComponentElement):
             self.content = path
 
     def paint(self, painter: QPainter, option, widget=None):
-        rect_px = self.geometry.to("px", dpi=self.dpi).rect
+        rect_px = self.geometry.to(self.unit, dpi=self.dpi).rect
         painter.save()
         # draw your vector paths in local coords, e.g.:
         # painter.drawPath(self._path) or similar, no translation by rect.x/y

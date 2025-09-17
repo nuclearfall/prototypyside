@@ -4,8 +4,10 @@ from PySide6.QtWidgets import QLineEdit, QWidget, QLabel, QGridLayout
 from PySide6.QtCore import Signal, Slot
 from typing import Optional, Any, List
 
-from prototypyside.utils.units.unit_str import  UnitStr
+from prototypyside.utils.units.unit_str import UnitStr
+from prototypyside.services.proto_class import ProtoClass
 
+pc = ProtoClass
 
 class UnitStrField(QLineEdit):
     """
@@ -47,8 +49,8 @@ class UnitStrField(QLineEdit):
             self._old_value = self.target_item.geometry
             self._dpi = self.target_item._geometry.dpi
         self._old_value: Optional[UnitStr] = None
-
-        if target_item and property_name:
+        # UnitStringsField is dependent on the target not having the property
+        if target_item:
             self.setTarget(target_item, property_name, display_unit = self.display_unit)
 
         self.editingFinished.connect(self._on_editing_finished)
@@ -72,15 +74,16 @@ class UnitStrField(QLineEdit):
         if disable and hasattr(self, "setEnabled"):
             self.setEnabled(False)
 
-    def setTarget(self, target_item: Any, property_name: str, display_unit: str):
+    def setTarget(self, target_item: Any, property_name: str=None, display_unit: str=None, value=None):
         """Sets or resets the target object and property for the field."""
         self.target_item = target_item
-        self.property_name = property_name
-        self.display_unit = display_unit
+        self.property_name = property_name or self.property_name
+        self.display_unit = display_unit or self.display_unit
         if self.target_item and self.property_name:
-            initial_value = getattr(self.target_item, self.property_name, None)
-            if isinstance(initial_value, UnitStr):
-                self._dpi = initial_value.dpi
+            intial_value = value
+            if not value:
+                initial_value = getattr(self.target_item, self.property_name, None)
+            if pc.isproto(initial_value, pc.US):
                 self._old_value = initial_value
                 self.setTextFromValue(initial_value)
             else:
@@ -126,6 +129,26 @@ class UnitStrField(QLineEdit):
         # Create the UnitStr. If the user-provided text has no unit,
         # the 'unit' parameter (set to self.display_unit) will be used.
         return UnitStr(current_text, unit=unit, dpi=self._dpi)
+
+    def setValue(self, value: UnitStr):
+        """
+        Programmatically set the field's UnitStr value and update the display,
+        without emitting valueChanged. Also updates _old_value so the first edit
+        compares against this value.
+        """
+        # Optional safety: ignore non-UnitStr
+        if not isinstance(value, UnitStr):
+            self.clear()
+            self._old_value = None
+            return
+
+        # Avoid signal storms when used inside composites
+        old = self.blockSignals(True)
+        try:
+            self._old_value = value
+            self.setTextFromValue(value)  # already formats to display_unit
+        finally:
+            self.blockSignals(old)
 
     @Slot()
     def _on_editing_finished(self):

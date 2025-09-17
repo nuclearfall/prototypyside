@@ -1,4 +1,4 @@
-# component_graphics_scene.py
+# component_scene.py
 from __future__ import annotations
 from typing import Optional, TYPE_CHECKING
 
@@ -9,6 +9,7 @@ from PySide6.QtWidgets import (
     QGraphicsSceneDragDropEvent, QGraphicsRectItem
 )
 
+from prototypyside.views.overlays.incremental_grid import IncrementalGrid
 from prototypyside.models.component_element import ComponentElement
 from prototypyside.services.undo_commands import ChangePropertyCommand
 from prototypyside.utils.graphics_item_helpers import is_movable
@@ -23,7 +24,7 @@ if TYPE_CHECKING:
     from prototypyside.views.overlays.print_lines import PrintLines
 
 pc = ProtoClass
-any_el_type = (pc.CE, pc.TE, pc.IE, pc.VE)
+any_el_type = [pc.CE, pc.TE, pc.IE, pc.VE]
 
 # -------------------------------------------------------------------------
 # Scene
@@ -43,7 +44,6 @@ class ComponentScene(QGraphicsScene):
         self,
         settings,
         *,
-        grid: "IncrementalGrid",
         template: "ComponentTemplate",
         parent=None,
     ):
@@ -53,19 +53,17 @@ class ComponentScene(QGraphicsScene):
         self.dpi = settings.dpi
         self.unit = "px"
         self.template  = template          # QGraphicsObject, z = −100
-
-
-        self.inc_grid = grid
+        self.rect = template.geometry.to(self.unit, dpi=settings.dpi).rect
         self.template.template_changed.connect(self._on_template_rect_changed)
+
         self.sync_scene_rect()
+
         # internal drag / resize bookkeeping
         self._dup_active: bool = False
         self._dup_source: ComponentElement | None = None
         self._dup_preview: ComponentElement | None = None
         self._dup_offset: QPointF | None = None
-        # self._dragging_item       = None
-        # self._dragging_start_pos  = None
-        # self._drag_offset         = None
+
         self._creation_state: str = 'idle'
         self._creation_prefix: str | None = None
         self._creation_start: QPointF | None = None
@@ -73,12 +71,40 @@ class ComponentScene(QGraphicsScene):
         self.setBackgroundBrush(Qt.lightGray)
         self.alt_drag_original_item = None
         self._dup_geom = None
+        self._snap_enabled = True
+        self.inc_grid = IncrementalGrid(self.settings, template=self.template,
+                             snap_enabled=True, enforce_enabled=True,
+                             default_snap_level=4, scene=self)
+
+        self.addItem(self.inc_grid)
+        self.inc_grid.setVisible(True)
+        self.inc_grid.setSnapEnabled(True)
+        self.inc_grid.setEnforcementEnabled(True)
+        self.inc_grid.setZValue(0)
 
     # ---------- Public API ----------
+    def set_snap_enabled(self, state: bool):
+        self._snap_enabled = bool(state)
+        # if you also want the grid's central enforcement, keep this too:
+        self.inc_grid.setEnforcementEnabled(state)
+
+    def is_snap_enabled(self) -> bool:
+        return getattr(self, "_snap_enabled", True)
+
     def select_exclusive(self, item: QGraphicsItem | None):
         self.clearSelection()
         if item is not None:
             item.setSelected(True)
+
+    def set_grid_visible(self, on: bool):
+        self.inc_grid.setVisible(bool(on))
+        # force a quick repaint in case you flip rapidly
+        self.update()
+
+    def set_grid_debug_overlay(self, on: bool):
+        self.inc_grid.setZValue(10_000 if on else -50)
+        self.inc_grid.set_contrast_mode("debug" if on else "normal")
+        self.update()
 
     @Slot(str)
     def arm_element_creation(self, prefix: str):
@@ -95,22 +121,21 @@ class ComponentScene(QGraphicsScene):
         """External cancellation hook (tab changes, tool change, etc.)."""
         self._cancel_creation_internal()
 
-    # @Slot(object, object, object)
-    # def on_item_resize_finished(self, item, new_geometry, old_geometry):
-    #     """Creates an undo command when an item signals that its resize is complete."""
-    #     self.item_resized.emit(item, "geometry", new_geometry, old_geometry)
-
     # Public helper for FSM / tools
     def snap_to_grid(self, pos: QPointF, level: int = 4) -> QPointF:
-        return self.inc_grid.snap_to_grid(pos, level)
+        # Delegate to the grid if present; otherwise return pos as-is
+        if self.is_snap_enabled():
+            return self.inc_grid.snap_to_grid(pos, level)
+        else:
+            return pos
 
     # ─────────────────────────── helpers / utils ──────────────────────────
     def sync_scene_rect(self):
         """Make the scene rect exactly match the template’s and real content bounds."""
         # Start with the template's own bounding rect (which should already
         # account for include_bleed if your template's boundingRect does).
-        rect = self.template.boundingRect()
-
+        self.rect = self.template.geometry.to(self.unit, dpi=self.settings.dpi).rect
+        rect = self.rect
         # Collect only content items (skip grid, overlays, helpers, hidden items)
         for item in self.items():
             if not item.isVisible():
@@ -142,20 +167,19 @@ class ComponentScene(QGraphicsScene):
     def mousePressEvent(self, event: QGraphicsSceneMouseEvent):
         pos = event.scenePos()
         item = self.itemAt(pos, QTransform())
+        # Alt-drag duplication (only when pressed over a ComponentElement)
+        is_component = pc.isproto(item, any_el_type)
+        if item and (event.modifiers() & Qt.AltModifier) and is_component:
+            print(f"Component of type {type(item)} located.")
+            self.select_exclusive(item)
+            self._begin_alt_dup(item, pos)
+            self.alt_drag_original_item = item
+            event.accept()
+            return
 
         # Shift-click toggle keeps existing behavior
         if item and (event.modifiers() & Qt.ShiftModifier):
             item.setSelected(not item.isSelected())
-            event.accept()
-            return
-
-        # Alt-drag duplication (only when pressed over a ComponentElement)
-        is_component = pc.isproto(item, any_el_type)
-        if (event.modifiers() & Qt.AltModifier) and is_component:
-            if hasattr(self, "select_exclusive"):
-                self.select_exclusive(item)
-            self._begin_alt_dup(item, pos)
-            self.alt_drag_original_item = item
             event.accept()
             return
 

@@ -24,7 +24,8 @@ class ProtoClass(Enum):
     IE   = ("ie",  "prototypyside.models.image_element.ImageElement")
     TE   = ("te",  "prototypyside.models.text_element.TextElement")
     VE   = ("ve",  "prototypyside.models.vector_element.VectorElement")
-
+    EO   = ("eo",  "prototypyside.views.overlays.ElementOutline")
+    
     CT   = ("ct",  "prototypyside.models.component_template.ComponentTemplate")
     CC   = ("cc",  "prototypyside.models.component.Component")
     LT   = ("lt",  "prototypyside.models.layout_template.LayoutTemplate")
