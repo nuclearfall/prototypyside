@@ -6,12 +6,12 @@ from PySide6.QtCore import Qt, QRectF, Signal
 from PySide6.QtWidgets import QGraphicsTextItem, QGraphicsScene
 
 if TYPE_CHECKING:
-    from prototypyside.views.proto_text_renderer import ProtoTextRenderer
+    from prototypyside.views.proto_text import ProtoText
 
 class TextOverlay(QGraphicsTextItem):
     """
     An in-scene editor surface that edits the SAME QTextDocument
-    provided by ProtoTextRenderer. It does not own the document; it
+    provided by ProtoText. It does not own the document; it
     only provides UI for caret/selection/IME.
 
     Usage:
@@ -34,7 +34,7 @@ class TextOverlay(QGraphicsTextItem):
     def __init__(
         self,
         element: object,
-        renderer: "ProtoTextRenderer",
+        renderer: "ProtoText",
         *,
         z_bump: float = 1000.0,
         parent: Optional[QGraphicsTextItem] = None
@@ -73,7 +73,7 @@ class TextOverlay(QGraphicsTextItem):
         cls,
         scene: QGraphicsScene,
         element: object,
-        renderer: "ProtoTextRenderer",
+        renderer: "ProtoText",
         content_rect: QRectF,
         *,
         focus_reason: Qt.FocusReason = Qt.MouseFocusReason

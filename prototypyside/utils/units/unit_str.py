@@ -1,9 +1,9 @@
-# unit_str.py  (drop-in replacement with "raw px@source" + "unit px@target" support)
+# unit_str.py
 
 from __future__ import annotations
 
 import re
-from decimal import Decimal, getcontext, ROUND_HALF_UP
+from decimal import Decimal, getcontext, ROUND_HALF_UP, ROUND_HALF_EVEN
 from typing import Union, Optional
 
 # ----- Decimal context
@@ -36,6 +36,9 @@ ROUNDING_INCREMENT = {
 _Q_IN  = Decimal("1E-9")   # internal grid (inches)
 _Q_OUT = Decimal("1E-6")   # output grid (target units)
 
+
+def pixels_per_unit(unit: str, dpi: float) -> float:
+    return UnitStr("1", unit=unit, dpi=dpi).to("px", dpi=dpi)
 
 def _normalize_unit_token(u: str | None) -> str | None:
     if not u:
@@ -80,6 +83,15 @@ class UnitStr:
         *,
         dpi: Optional[int] = None,
     ):
+        if isinstance(raw, UnitStr):
+            explicit_dpi = int(dpi) if dpi is not None else None
+            self._raw   = raw._raw
+            self._value = raw._value          # Decimal inches
+            self._unit  = raw._unit           # preserve display unit
+            self._dpi   = explicit_dpi if explicit_dpi is not None else raw._dpi
+            return
+
+        # safe to stringify non-UnitStr
         self._raw = str(raw)
         explicit_dpi = int(dpi) if dpi is not None else None
         self._cache: dict[tuple[str, int], float] = {}
@@ -176,7 +188,7 @@ class UnitStr:
         else:
             raise ValueError(f"Unsupported unit: {final_unit!r}")
 
-        self._unit = internal_unit
+        self._unit = final_unit or "in"   # <-- keep the display unit the caller used
         self._dpi  = target_dpi
 
     # --------- convenience constructors
@@ -188,14 +200,39 @@ class UnitStr:
     @property
     def dpi(self) -> int:
         return self._dpi
+    @classmethod
+    def ppu(cls, unit, dpi):
+        pixels_per_unit(unit, dpi)
 
     @property
-    def value(self) -> Decimal:
-        return self._value  # inches
+    def inches(self) -> Decimal:
+        return self._value  # Decimal inches (canonical, immutable)
+
+    @property
+    def value(self) -> float:
+        # numeric in current unit: use self.unit and (for px) self._dpi embedded in this instance
+        if self.unit == "px":
+            # value is stored canonically in inches; compute px by this instance's dpi
+            return float((self._value * Decimal(self._dpi)).quantize(_Q_OUT))
+        # non-px units
+        return float((self._value * INCHES_TO_UNITS.get(self.unit, Decimal(1))).quantize(_Q_OUT))
 
     @property
     def unit(self) -> str:
-        return self._unit   # 'in'
+        return self._unit
+
+    @unit.setter
+    def unit(self, unit_blob: str) -> None:
+        u, dpi_from_unit = _parse_unit_maybe_at(unit_blob)
+        if not u:
+            raise ValueError("Unit must be specified")
+        # update target/display dpi if the new unit encodes px@<dpi>
+        if u == "px" and dpi_from_unit is not None:
+            if dpi_from_unit <= 0:
+                raise ValueError(f"DPI must be > 0, got {dpi_from_unit}")
+            self._dpi = int(dpi_from_unit)
+        self._unit = u
+        self._cache.clear()
 
     # convenience aliases
     @property
@@ -210,12 +247,17 @@ class UnitStr:
     def px(self)   -> float: return self.to("px")
 
     # --------- conversion
-    def to(self, target: str, dpi: Optional[int] = None) -> float:
+    def to(self, target: str, dpi: Optional[int] = None) -> "UnitStr":
+        """
+        Return a NEW UnitStr expressed in the target unit (supports 'px@<dpi>').
+        No in-place mutation. Internal inches remain canonical.
+        """
         target_unit, dpi_from_unit = _parse_unit_maybe_at(target)
-        target = target_unit or "in"
-        dpi_from_call = int(dpi) if dpi is not None else None
+        tgt = target_unit or "in"
 
-        if target == "px":
+        # Decide effective DPI for px outputs
+        if tgt == "px":
+            dpi_from_call = int(dpi) if dpi is not None else None
             effective_dpi = (
                 dpi_from_call
                 if dpi_from_call is not None
@@ -223,36 +265,32 @@ class UnitStr:
             )
             if effective_dpi <= 0:
                 raise ValueError("DPI must be > 0 for pixel conversion")
-        else:
-            effective_dpi = self._dpi
-
-        key = (target, effective_dpi)
-        if key in self._cache:
-            return self._cache[key]
-
-        if target == "px":
-            out = (self._value * Decimal(effective_dpi)).quantize(_Q_OUT)
-        elif target in INCHES_TO_UNITS:
-            out = (self._value * INCHES_TO_UNITS[target]).quantize(_Q_OUT)
+            # compute numeric in px and return a fresh UnitStr with px@dpi
+            out_px = (self._value * Decimal(effective_dpi)).quantize(_Q_OUT)
+            return UnitStr(f"{out_px} px@{effective_dpi}", dpi=self._dpi)
+        elif tgt in INCHES_TO_UNITS:
+            out = (self._value * INCHES_TO_UNITS[tgt]).quantize(_Q_OUT)
+            return UnitStr(f"{out} {tgt}", dpi=self._dpi)
         else:
             raise ValueError(f"Cannot convert to unsupported unit: {target!r}")
 
-        f = float(out)
-        self._cache[key] = f
-        return f
-
     def fmt(self, fmt: str = "g", unit: str | None = None, dpi: int | None = None) -> str:
         u_blob = unit or self.unit
-        val = self.to(u_blob, dpi=dpi)
+        u_obj = self.to(u_blob, dpi=dpi)     # UnitStr
         u, _ = _parse_unit_maybe_at(u_blob)
         u = u or "in"
-        return f"{format(val, fmt)} {u}"
+        return f"{format(u_obj.value, fmt)} {u}"  # <-- numeric, not object
 
     @property
     def round(self) -> "UnitStr":
         inc = ROUNDING_INCREMENT.get(self.unit, Decimal("0.01"))
         rounded_in = (self.value / inc).to_integral_value(rounding=ROUND_HALF_UP) * inc
         return UnitStr(f"{rounded_in} in", dpi=self._dpi)
+
+    def number(self, unit: Optional[str] = None, dpi: Optional[int] = None) -> float:
+        """Return the numeric as float in the requested (or current) unit."""
+        u = self.to(unit or self.unit, dpi=dpi)
+        return float(u.value)  # see note on .value below
 
     def to_dict(self) -> dict:
         return {u: self.to(u) for u in ("in", "mm", "cm", "pt", "px")}
@@ -276,38 +314,104 @@ class UnitStr:
     def _as_decimal_inches(self) -> Decimal:
         return self._value
 
-    def __add__(self, other):
+    # --- helpers (optional but neat) --------------------------------------------
+    def _new_from_inches(self, inches: Decimal) -> "UnitStr":
+        # snap to your grid
+        z = inches.quantize(_Q_IN)
+        # collapse -0 to +0 to avoid weird “-0E-9” cases
+        if z == 0:
+            z = Decimal("0")
+        # construct directly as inches (no string formatting)
+        return UnitStr(z, unit="in", dpi=self._dpi)
+
+    def _coerce_unitstr(self, other) -> "UnitStr | None":
         if isinstance(other, UnitStr):
-            return UnitStr(f"{(self._as_decimal_inches() + other._as_decimal_inches()).quantize(_Q_IN)} in", dpi=self._dpi)
+            return other
+        if isinstance(other, str):
+            return UnitStr(other, dpi=self._dpi)
+        return None
+
+    # --- arithmetic in inches ---------------------------------------------------
+    def __add__(self, other):
+        o = self._coerce_unitstr(other)
+        if o is not None:
+            return self._new_from_inches(self._as_decimal_inches() + o._as_decimal_inches())
         if isinstance(other, (int, float, Decimal)):
-            return UnitStr(f"{(self._as_decimal_inches() + Decimal(str(other))).quantize(_Q_IN)} in", dpi=self._dpi)
+            return self._new_from_inches(self._as_decimal_inches() + Decimal(str(other)))
         return NotImplemented
 
-    def __radd__(self, other): return self.__add__(other)
+    def __radd__(self, other):
+        return self.__add__(other)
 
     def __sub__(self, other):
-        if isinstance(other, UnitStr):
-            return UnitStr(f"{(self._as_decimal_inches() - other._as_decimal_inches()).quantize(_Q_IN)} in", dpi=self._dpi)
+        o = self._coerce_unitstr(other)
+        if o is not None:
+            return self._new_from_inches(self._as_decimal_inches() - o._as_decimal_inches())
         if isinstance(other, (int, float, Decimal)):
-            return UnitStr(f"{(self._as_decimal_inches() - Decimal(str(other))).quantize(_Q_IN)} in", dpi=self._dpi)
+            return self._new_from_inches(self._as_decimal_inches() - Decimal(str(other)))
         return NotImplemented
 
     def __rsub__(self, other):
+        o = self._coerce_unitstr(other)
+        if o is not None:
+            return self._new_from_inches(o._as_decimal_inches() - self._as_decimal_inches())
         if isinstance(other, (int, float, Decimal)):
-            return UnitStr(f"{(Decimal(str(other)) - self._as_decimal_inches()).quantize(_Q_IN)} in", dpi=self._dpi)
+            return self._new_from_inches(Decimal(str(other)) - self._as_decimal_inches())
         return NotImplemented
 
     def __mul__(self, other):
         if isinstance(other, (int, float, Decimal)):
-            return UnitStr(f"{(self._as_decimal_inches() * Decimal(str(other))).quantize(_Q_IN)} in", dpi=self._dpi)
+            factor = Decimal(str(other))
+            return self._new_from_inches(self._as_decimal_inches() * factor)
         if isinstance(other, UnitStr):
-            return (self._as_decimal_inches() * other._as_decimal_inches())  # sq in (Decimal)
+            # area (sq in) as Decimal
+            return self._as_decimal_inches() * other._as_decimal_inches()
         return NotImplemented
 
     def __rmul__(self, other):
+        return self.__mul__(other)
+
+    def __truediv__(self, other):
         if isinstance(other, (int, float, Decimal)):
-            return UnitStr(f"{(Decimal(str(other)) * self._as_decimal_inches()).quantize(_Q_IN)} in", dpi=self._dpi)
+            divisor = Decimal(str(other))
+            return self._new_from_inches(self._as_decimal_inches() / divisor)
+        if isinstance(other, UnitStr):
+            # unitless ratio
+            return self._as_decimal_inches() / other._as_decimal_inches()
         return NotImplemented
+
+    def __rtruediv__(self, other):
+        if isinstance(other, (int, float, Decimal)):
+            dividend = Decimal(str(other))
+            # result is *inches* when number / UnitStr (unusual, but symmetric)
+            return self._new_from_inches(dividend / self._as_decimal_inches())
+        return NotImplemented
+
+    def __floordiv__(self, other):
+        if isinstance(other, (int, float, Decimal)):
+            divisor = Decimal(str(other))
+            # floor in inches, then return UnitStr
+            q = (self._as_decimal_inches() / divisor).to_integral_value(rounding=ROUND_HALF_EVEN)
+            return self._new_from_inches(q)
+        if isinstance(other, UnitStr):
+            return (self._as_decimal_inches() // other._as_decimal_inches())
+        return NotImplemented
+
+    def __rfloordiv__(self, other):
+        if isinstance(other, (int, float, Decimal)):
+            dividend = Decimal(str(other))
+            q = (dividend / self._as_decimal_inches()).to_integral_value(rounding=ROUND_HALF_EVEN)
+            return self._new_from_inches(q)
+        return NotImplemented
+        
+    def __neg__(self):
+        return self._new_from_inches(-self._as_decimal_inches())
+
+    def __pos__(self):
+        return self._new_from_inches(+self._as_decimal_inches())
+
+    def __abs__(self):
+        return self._new_from_inches(self._as_decimal_inches().copy_abs())
 
     # --------- comparisons with tolerance
     def _cmp_key(self) -> Decimal:
@@ -327,9 +431,21 @@ class UnitStr:
             return self._cmp_key() < Decimal(str(other)) - _Q_IN
         return NotImplemented
 
-    # --------- debug
+    def __le__(self, other) -> bool:
+        if isinstance(other, UnitStr):
+            return self._cmp_key() < other._cmp_key() - _Q_IN
+        if isinstance(other, (int, float, Decimal)):
+            return self._cmp_key() < Decimal(str(other)) - _Q_IN
+        return NotImplemented
+
     def __str__(self) -> str:
-        return self.fmt(unit="in")
+        return self.fmt(unit=self.unit)
 
     def __repr__(self) -> str:
-        return f"UnitStr('{self._raw}', dpi={self._dpi}) -> {self.value.normalize()}in"
+        try:
+            cur = self.fmt(unit=self.unit)
+        except Exception:
+            suffix = f"@{self._dpi}" if self._unit == "px" else ""
+            cur = f"{self.value}{self.unit}{suffix}"
+        return f"UnitStr('{self._raw}', dpi={self._dpi}) -> {cur} | {self.inches}in"
+

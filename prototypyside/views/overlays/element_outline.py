@@ -72,18 +72,24 @@ class _ResizeHandle(QGraphicsObject):
         self.setAcceptedMouseButtons(Qt.LeftButton)
         self.setAcceptHoverEvents(True)
         self.setCursor(_cursor_for_anchor(anchor))
+        self.setCacheMode(QGraphicsItem.DeviceCoordinateCache)
 
     # Small and cheap; no need for complex painting.
     def boundingRect(self) -> QRectF:
         s = self._size
         return QRectF(-s/2.0, -s/2.0, s, s)
 
-    def paint(self, painter: QPainter, opt, widget=None):
+    def render(self, ctx, painter: QPainter):
         # Keep it lightweight; outline decides visibility.
         painter.save()
         painter.setPen(QPen(QColor(0, 175, 236, 255)))
         painter.setBrush(QColor(0, 175, 236, 255))
         painter.drawRect(self.boundingRect())
+        painter.restore()
+
+    def paint(self, painter, option=None, widget=None):
+        painter.save()
+        self.render(self.outline.element.ctx, painter)
         painter.restore()
 
     def mousePressEvent(self, e):
@@ -113,16 +119,25 @@ class _ResizeHandle(QGraphicsObject):
 
 class ElementOutline(QGraphicsObject):
     """
-    Draws the element outline and manages resize handles.
+    Sets element outline and manages resize handles.
     IMPORTANT: uses self.element as the referenced element (matches your codebase).
     """
 
-    def __init__(self, element, parent=None):
+    def __init__(
+        self,
+        element,
+        pen_color: QColor = QColor(0, 175, 236, 255),
+        pen_width_px: float = 1.2,
+        parent=None
+    ):
         super().__init__(parent)
         self.element = element  # <— keep existing name
         self._handles = {}
-        self.setParentItem(self.element)
+        self.pen_color = pen_color
+        self.pen_width_px = pen_width_px
+        # self.setParentItem(self.element)
         # Outline should not be pickable; element remains the primary selection.
+        self.setCacheMode(QGraphicsItem.DeviceCoordinateCache)
         self.setAcceptedMouseButtons(Qt.LeftButton)
         self.setAcceptHoverEvents(True)
         self.setZValue(self.element.zValue() + 1.0)
@@ -149,33 +164,20 @@ class ElementOutline(QGraphicsObject):
 
     def show_handles(self, show: bool):
         for h in self._handles.values():
-            h.setVisible(show)
-        self.update()  # refresh outline paint (selection cues, etc.)
+            h.setVisible(True)
+        # self.update()  # refresh outline paint (selection cues, etc.)
 
     # ---------- Geometry plumbing ----------
-
-    def _base_local_rect(self) -> QRectF:
-        """
-        Element’s local draw rect. By convention in your app:
-        geometry.px.rect is always (0,0,w,h). We do not read scene pos here.
-        """
-        gpx = self.element.geometry.px  # UnitStrGeometry px view (your invariant)
-        return QRectF(0, 0, gpx.size.width(), gpx.size.height())
-
     def _current_draw_rect(self) -> QRectF:
         """
         What the outline should draw around *right now*.
         For text, TextElementOutline overrides this to include expanded bounds.
         """
-        return self._base_local_rect()
+        return self.element.geometry.px.rect
 
     def _on_geometry_changed(self, *args):
         # Layout handles around the current draw rect; cheap early-out.
         r = self._current_draw_rect()
-        if r.isEmpty():
-            self.show_handles(False)
-            self.update()
-            return
 
         # Position 8 handles at corners and mids.
         cx = (r.left() + r.right()) * 0.5
@@ -198,9 +200,8 @@ class ElementOutline(QGraphicsObject):
         self.update()
 
     def update_visibility_policy(self):
-        # sel = getattr(self.element, "isSelected", None)
-        # is_selected = bool(sel()) if callable(sel) else False
-        self.show_handles(bool(self.element.isSelected()))
+        is_selected = getattr(self.element, "isSelected", None)
+        self.show_handles(is_selected)
 
     # ---------- Handles ----------
 
@@ -294,137 +295,144 @@ class ElementOutline(QGraphicsObject):
         pad = 12.0
         return r.adjusted(-pad, -pad, pad, pad)
 
-    def paint(self, p: QPainter, option: QStyleOptionGraphicsItem, widget=None):
+    def render(self, ctx, painter: QPainter):
         # Base outline paint: TextElementOutline overrides as needed.
-        r = self._current_draw_rect()
-        if r.isEmpty():
-            return
-        ctx = self.element._context
-        if ctx.is_component_tab and ctx.is_gui:
-            p.save()
-            pen = QPen(QColor(0, 195, 255, 160), 1.0)
-            p.setPen(pen)
-            p.setBrush(Qt.NoBrush)
-            p.drawRect(r)
-            p.restore()
+        if ctx.is_gui and ctx.is_component_tab:
+            selection_state = self.element.isSelected()
+            self.show_handles(selection_state)
+            if selection_state:
+                self.show_handles(True)
+            r = self._current_draw_rect()
+            painter.save()
+            pen = QPen(self.pen_color, self.pen_width_px)
+            painter.setPen(pen)
+            painter.setBrush(Qt.NoBrush)
+            painter.drawRect(r)
+            painter.restore()
+
+    def paint(self, painter:QPainter, option=None, widget=None):
+        painter.save()
+        self.render(self.element.ctx, painter)
+        painter.restore()
 
     def _on_selection_changed(self, *args):
         self.update_visibility_policy()
 
 
-class TextOutline(ElementOutline):
-    # NEW: bubble editor lifecycle to the outside so your controller/tab can push undo
-    textEditStarted   = Signal(object)                 # (element)
-    textEditCommitted = Signal(object, str, str)       # (element, new_html, old_html)
-    textEditCanceled  = Signal(object)                 # (element)
+# class TextOutline(ElementOutline):
+#     # NEW: bubble editor lifecycle to the outside so your controller/tab can push undo
+#     textEditStarted   = Signal(object)                 # (element)
+#     textEditCommitted = Signal(object, str, str)       # (element, new_html, old_html)
+#     textEditCanceled  = Signal(object)                 # (element)
 
-    def __init__(
-        self,
-        element,
-        pen_color: QColor = QColor(0, 175, 236, 255),
-        pen_width_px: float = 1.2,
-        parent=None
-    ):
-        super().__init__(element=element, parent=parent)
-        self.element = element
-        self.pen_color = pen_color
-        self.pen_width_px = pen_width_px
+#     def __init__(
+#         self,
+#         element,
+#         pen_color: QColor = QColor(0, 175, 236, 255),
+#         pen_width_px: float = 1.2,
+#         parent=None
+#     ):
+#         super().__init__(
+#             element=element, 
+#             pen_color=pen_color, 
+#             pen_width_px=pen_width_px, 
+#             parent=parent
+#         )
 
-    # ---------------------------------------------------------------------
-    # Existing properties (unchanged)
-    @property
-    def renderer(self):
-        return self.element._renderer
+#     # ---------------------------------------------------------------------
+#     # Existing properties (unchanged)
+#     # @property
+#     # def renderer(self):
+#     #     return self.element._renderer
 
-    @property
-    def has_overflow(self) -> bool:
-        return self.element.renderer.has_overflow
+#     # @property
+#     # def has_overflow(self) -> bool:
+#     #     return self.element.renderer.has_overflow
 
-    @property
-    def is_expanded(self):
-        return self.element.renderer.is_expanded
+#     # @property
+#     # def is_expanded(self):
+#     #     return self.element.renderer.is_expanded
 
-    @is_expanded.setter
-    def is_expanded(self, state: bool):
-        self.element.renderer.is_expanded = state
-        self.expandedChanged.emit(state)
-        self.update()
+#     # @is_expanded.setter
+#     # def is_expanded(self, state: bool):
+#     #     self.element.renderer.is_expanded = state
+#     #     self.expandedChanged.emit(state)
+#     #     self.update()
 
-    # ---------- Utilities ----------
-    def base_rect(self) -> QRectF:
-        return self.element.geometry.to(self.element.unit, dpi=self.element.dpi).rect
+#     # ---------- Utilities ----------
+#     def base_rect(self) -> QRectF:
+#         return self.element.geometry.to(self.element.unit, dpi=self.element.dpi).rect
 
-    def frame_rect(self) -> QRectF:
-        if not self.element.renderer.has_overflow or self.element.renderer.can_expand:
-            return self.base_rect()
-        if self.is_expanded:
-            return self.element.renderer.overset_rect
-        return self.base_rect()
+#     def frame_rect(self) -> QRectF:
+#         if not self.element.renderer.has_overflow or self.element.renderer.can_expand:
+#             return self.base_rect()
+#         if self.is_expanded:
+#             return self.element.renderer.overset_rect
+#         return self.base_rect()
 
-    def boundingRect(self) -> QRectF:
-        return self.united_rect()
+#     def boundingRect(self) -> QRectF:
+#         return self.united_rect()
 
-    @property
-    def can_expand(self) -> bool:
-        return self.element.renderer.has_overflow and not self.element.renderer.is_expanded
+#     @property
+#     def can_expand(self) -> bool:
+#         return self.element.renderer.has_overflow and not self.element.renderer.is_expanded
 
-    def _button_size_px(self) -> float:
-        return float(UnitStr("4 pt").to(self.element.unit, dpi=self.element.dpi))
+#     def _button_size_px(self) -> float:
+#         return float(UnitStr("4 pt").to(self.element.unit, dpi=self.element.dpi))
 
-    def hit_and_united_rect(self) -> tuple[QRectF | None, QRectF]:
-        base = self.frame_rect()
-        hit = None
-        if self.element.renderer.has_overflow:
-            size_px = 18.0
-            x = base.right() - size_px
-            y = base.top() + (2 * size_px)
-            hit = QRectF(x, y, size_px, size_px)
-        return hit, base.united(hit) if hit else base
+#     def hit_and_united_rect(self) -> tuple[QRectF | None, QRectF]:
+#         base = self.frame_rect()
+#         hit = None
+#         if self.element.renderer.has_overflow:
+#             size_px = 18.0
+#             x = base.right() - size_px
+#             y = base.top() + (2 * size_px)
+#             hit = QRectF(x, y, size_px, size_px)
+#         return hit, base.united(hit) if hit else base
 
-    def hit_rect(self) -> QRectF | None:
-        hit, _ = self.hit_and_united_rect()
-        return hit
+#     def hit_rect(self) -> QRectF | None:
+#         hit, _ = self.hit_and_united_rect()
+#         return hit
 
-    def united_rect(self) -> QRectF:
-        _, united = self.hit_and_united_rect()
-        return united
+#     def united_rect(self) -> QRectF:
+#         _, united = self.hit_and_united_rect()
+#         return united
 
-    def paint(self, painter: QPainter, option, widget=None):
-        ctx = self.element._context
-        if ctx.is_component_tab and ctx.is_gui:
-            painter.save()
-            hit = self.hit_rect()
-            pen = QPen(self.pen_color, self.pen_width_px)
-            painter.setPen(pen)
+#     def render(self, ctx, painter: QPainter):
+#         if ctx.is_component_tab and ctx.is_gui:
+#             painter.save()
+#             hit = self.hit_rect()
+#             pen = QPen(self.pen_color, self.pen_width_px)
+#             painter.setPen(pen)
 
-            if hit and self.has_overflow:
-                painter.save()
-                box_pen = QPen(pen)
-                box_pen.setCosmetic(True)
-                painter.setPen(box_pen)
-                painter.setBrush(Qt.NoBrush)
-                painter.drawRect(hit)
+#             if hit:
+#                 painter.save()
+#                 box_pen = QPen(pen)
+#                 box_pen.setCosmetic(True)
+#                 painter.setPen(box_pen)
+#                 painter.setBrush(Qt.NoBrush)
+#                 painter.drawRect(hit)
 
-                pad = 0.1 * hit.width()
-                inner = hit.adjusted(pad, pad, -pad, -pad)
-                cx, cy = inner.center().x(), inner.center().y()
-                painter.drawLine(inner.left(), cy, inner.right(), cy)
-                if not self.element.renderer.is_expanded:
-                    painter.drawLine(cx, inner.top(), cx, inner.bottom())
-                painter.restore()
+#                 pad = 0.1 * hit.width()
+#                 inner = hit.adjusted(pad, pad, -pad, -pad)
+#                 cx, cy = inner.center().x(), inner.center().y()
+#                 painter.drawLine(inner.left(), cy, inner.right(), cy)
+#                 if not self.element.renderer.is_expanded:
+#                     painter.drawLine(cx, inner.top(), cx, inner.bottom())
+#                 painter.restore()
 
-            painter.restore()
+#             painter.restore()
 
-    # ---------------------------------------------------------------------
-    # Mouse events
+#     # ---------------------------------------------------------------------
+#     # Mouse events
 
-    def mousePressEvent(self, e: QGraphicsSceneMouseEvent):
-        hr = self.hit_rect()
-        if hr is not None and not hr.isNull() and hr.contains(e.pos()):
-            self.prepareGeometryChange()
-            self.element.renderer.is_expanded = not self.element.renderer.is_expanded
-            self.update()
-            self.element.update()
-            e.accept()
-            return
-        e.ignore()
+#     def mousePressEvent(self, e: QGraphicsSceneMouseEvent):
+#         hr = self.hit_rect()
+#         if hr is not None and not hr.isNull() and hr.contains(e.pos()):
+#             self.prepareGeometryChange()
+#             self.element.renderer.is_expanded = not self.element.renderer.is_expanded
+#             self.update()
+#             self.element.update()
+#             e.accept()
+#             return
+#         e.ignore()

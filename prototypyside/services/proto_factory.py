@@ -54,7 +54,7 @@ class ProtoFactory:
         raise TypeError(f"Unsupported proto type: {type(proto)!r}")
 
     @classmethod
-    def create(cls, proto: ProtoLike, *, pid: str | None, registry, **kwargs) -> Any:
+    def create(cls, proto: ProtoLike, *, pid: str | None, registry, ctx, **kwargs) -> Any:
         """
         Construct a new object of the given proto.
         - If your models still require prefixed PIDs, pass `pid` explicitly.
@@ -62,7 +62,7 @@ class ProtoFactory:
         """
         kls = proto.resolve()
         if registry is not None:
-            return kls(proto=proto, pid=pid, registry=registry, **kwargs)
+            return kls(proto=proto, pid=pid, registry=registry, ctx=ctx, **kwargs)
 
     # ---------- Serialization methods ---------- #
     @classmethod

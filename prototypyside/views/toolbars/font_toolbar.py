@@ -1,9 +1,9 @@
-# /mnt/data/font_toolbar_reimpl.py
+# font_toolbar.py
 from __future__ import annotations
 
 from typing import Optional
 
-from PySide6.QtCore import Qt, Signal, Slot
+from PySide6.QtCore import Qt, Signal, Slot, QTimer
 from PySide6.QtGui import QFont, QIcon
 from PySide6.QtWidgets import (
     QButtonGroup,
@@ -136,6 +136,14 @@ class FontToolbar(QWidget):
         self.underline_btn.toggled.connect(self._on_any_change)
         self.h_group.buttonToggled.connect(self._on_halign_change)
         self.v_group.buttonToggled.connect(self._on_valign_change)
+
+       # NEW: coalescing timer
+        self._emit_timer = QTimer(self)
+        self._emit_timer.setSingleShot(True)
+        self._emit_timer.setInterval(60)  # small debounce
+        self._emit_timer.timeout.connect(self._flush_font_emit)
+        self._pending = None  # (target, "font", new, old)
+
     # ---------- Public API ----------
 
     def setTarget(self, target: Optional[object]) -> None:
@@ -178,7 +186,7 @@ class FontToolbar(QWidget):
             self.family_box.setCurrentFont(QFont(usf.family))
 
             # Size: show points by default
-            pt_size = usf.size.to("pt", dpi=usf.dpi)
+            pt_size = usf.size.to("pt", dpi=usf.dpi).value
             # Avoid overly long float strings
             disp = f"{pt_size:.2f}".rstrip("0").rstrip(".")
             self.size_box.setEditText(disp)
@@ -248,26 +256,34 @@ class FontToolbar(QWidget):
         if new != old:
             self.vAlignChanged.emit(self._target, "v_align", new_align, old)
 
+
     @Slot()
     def _on_any_change(self) -> None:
-        if self._updating:
+        if self._updating or not self._target or not hasattr(self._target, "font"):
             return
-        if not self._target or not hasattr(self._target, "font"):
-            return
+
         old = getattr(self._target, "font")
         try:
             if not isinstance(old, UnitStrFont):
-                old = UnitStrFont(old)  # gracefully coerce QFont/str if needed
+                old = UnitStrFont(old)  # coerce if needed
         except Exception:
-            # cannot proceed without a valid base font object
             return
 
         new = self._build_usf_from_ui(old)
+        if new == old:
+            return
 
-        if new != old:
-            # update the target and emit the required signal
-            try:
-                setattr(self._target, "font", new)
-            finally:
-                # Always emit so undo/redo can reason even if assignment is intercepted
-                self.fontChanged.emit(self._target, "font", new, old)
+        # DO NOT set the target here
+        # setattr(self._target, "font", new)  # <- remove this
+
+        # Coalesce into one emit
+        self._pending = (self._target, "font", new, old)
+        self._emit_timer.start()  # restart if already running
+
+    def _flush_font_emit(self):
+        if not self._pending:
+            return
+        tgt, prop, new, old = self._pending
+        self._pending = None
+        # Now emit exactly once per burst
+        self.fontChanged.emit(tgt, "font", new, old)

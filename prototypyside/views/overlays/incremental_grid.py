@@ -70,8 +70,9 @@ class IncrementalGrid(QGraphicsItem):
         # Current all increments are in given and used as float values,
         # but given that we will use UnitStringsFields that won't be the
         # case. For now we'll convert increments to UnitStr values.
+        ctx = template.ctx
         self.unit_str_inc = {outkey: {inkey: \
-            UnitStr(inval, unit=outkey, dpi=template.dpi) \
+            UnitStr(inval, unit=outkey, dpi=ctx.dpi) \
             for inkey, inval in outval.items()} \
             for outkey, outval in DEFAULT_INCREMENTS.items()}
 
@@ -218,7 +219,7 @@ class IncrementalGrid(QGraphicsItem):
 
     def get_grid_spacing(self, level: int) -> float:
         inc = self._increments[self._settings.unit][level]
-        return UnitStr(inc, unit=self._settings.unit, dpi=self._settings.dpi).px
+        return UnitStr(inc, unit=self._settings.unit, dpi=self._settings.dpi).value
 
     def snap_to_grid(self, pos: QPointF, level: int | None = None) -> QPointF:
         if not self._snap_enabled:

@@ -6,7 +6,7 @@ from functools import partial
 from PySide6.QtWidgets import (
     QWidget, QVBoxLayout, QHBoxLayout, QPushButton, QComboBox, QCheckBox,
     QLineEdit, QLabel, QToolBar, QListWidgetItem, QMessageBox, QGraphicsView,
-    QWidgetAction, QSizePolicy, QFrame, QGraphicsObject
+    QWidgetAction, QSizePolicy, QFrame, QGraphicsObject, QScrollArea
 )
 from PySide6.QtCore import Qt, Signal, Slot, QPointF, QObject, QEvent 
 from PySide6.QtGui import QColor, QKeySequence, QShortcut, QUndoStack, QPainter
@@ -60,8 +60,8 @@ class ComponentTab(QWidget):
             display_unit=presets.display_unit, 
             print_unit=presets.print_unit
         )
-        self._dpi = self.settings.dpi           # <- REQUIRED: no fallback, no None
-        self._unit = self.settings.unit         # scene logical unit (e.g., "in")
+        self._dpi = self.settings.display_dpi           # <- REQUIRED: no fallback, no None
+        self._unit = self.settings.display_unit         # scene logical unit (e.g., "in")
         self._template = template
         self.undo_stack = QUndoStack()
         self.file_path = None
@@ -189,25 +189,49 @@ class ComponentTab(QWidget):
         self.scene.create_item_with_dims.connect(self.add_item_with_dims)
 
     def create_right_dock(self):
-        # This will be a widget that the QMainWindow will place in a DockWidget
-        self.right_dock = QWidget()
-        layout = QVBoxLayout()
-        self.property_panel = PropertyPanel(None, display_unit=self.unit, parent=self, dpi=self.settings.dpi)
+        # 1) Build the inner content
+        content = QWidget()
+        layout = QVBoxLayout(content)
+        layout.setContentsMargins(8, 8, 8, 8)
+        layout.setSpacing(8)
+
+        self.property_panel = PropertyPanel(
+            None, display_unit=self.unit, parent=self, dpi=self.settings.dpi
+        )
         self.property_panel.property_changed.connect(self.on_property_changed)
         self.property_panel.batch_property_changed.connect(self.on_batch_property_changed)
-        # self.property_panel.geometry_changed.connect(self.on_geometry_changed)
+
         self.remove_item_btn = QPushButton("Remove Selected Element")
         self.remove_item_btn.setMaximumWidth(200)
         self.remove_item_btn.clicked.connect(self.remove_selected_item)
+
         self.comp_prop_panel = ComponentPropertyPanel(
-            target=self.template, 
+            target=self.template,
             display_unit=self.settings.display_unit,
-            dpi=self.settings.dpi)
+            dpi=self.settings.dpi
+        )
         self.comp_prop_panel.property_changed.connect(self.on_property_changed)
-        self.right_dock.setLayout(layout)
+
+        # Encourage vertical shrink so the scroll area can scroll instead of overgrowing
+        self.comp_prop_panel.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
+        self.property_panel.setSizePolicy(QSizePolicy.Preferred, QSizePolicy.Maximum)
+
         layout.addWidget(self.comp_prop_panel)
         layout.addWidget(self.remove_item_btn)
         layout.addWidget(self.property_panel)
+        layout.addStretch(1)
+
+        # 2) Wrap in a scroll area — THIS is the widget main_window will put into right_stack
+        scroll = QScrollArea()
+        scroll.setWidget(content)
+        scroll.setWidgetResizable(True)
+        scroll.setFrameShape(QFrame.NoFrame)
+        scroll.setVerticalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+        scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarAsNeeded)
+
+        # Expose the scroll area as the page for main_window.right_stack
+        self.right_dock = scroll
+
 
     def setup_layers_panel(self):
         self.layers_list = LayersListWidget(self)
@@ -249,7 +273,7 @@ class ComponentTab(QWidget):
         self.bleed_checkbox = QCheckBox("Add Bleed")
         self.bleed_checkbox.setChecked(bool(getattr(self.template, "include_bleed", False)))
         self.bleed_checkbox.toggled.connect(self.toggle_bleed)
-        self.bleed_field = UnitStrField(self.template, "bleed", display_unit=self.unit, dpi=self._dpi)
+        self.bleed_field = UnitStrField(self.template, "bleed", display_unit=self.settings.display_unit, dpi=self.settings.display_dpi)
         self.bleed_field.valueChanged.connect(self.on_property_changed)
         self.bleed_field.setMaximumWidth(60)   
         self.bleed_field.setEnabled(self.bleed_checkbox.isChecked())
@@ -280,7 +304,7 @@ class ComponentTab(QWidget):
 
     @property
     def dpi(self):
-        return self._dpi
+        return self.settings.display_dpi
 
     @dpi.setter
     def dpi(self, value):

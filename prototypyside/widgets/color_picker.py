@@ -44,10 +44,10 @@ class ColorPickerWidget(QPushButton):
     def _open_color_dialog(self):
         """Opens the QColorDialog and handles the selection."""
         # Get the initial color from the current displayed color
-        initial_color = self._current_color if self._current_color.isValid() else QColor(0,0,0)
+        color = self._current_color if self._current_color.isValid() else QColor(0,0,0)
         
         # Open the color dialog
-        color = QColorDialog.getColor(initial_color, self.parentWidget()) # Use parent for better dialog placement
+        color = QColorDialog.getColor(color, self.parentWidget()) # Use parent for better dialog placement
 
         if color.isValid():
             self.set_color(color) # Update the widget's color

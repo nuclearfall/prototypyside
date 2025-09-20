@@ -41,6 +41,7 @@ class LayoutTemplate(QGraphicsObject):
         proto:ProtoClass,
         pid: str,
         registry: ProtoRegistry,
+        ctx,
         pagination_policy: Optional[dict] = None,  
         name: Optional[str] = None, 
         file_path: Optional[Path] = None,
@@ -50,7 +51,8 @@ class LayoutTemplate(QGraphicsObject):
         super().__init__(parent)
         self.proto = proto
         self._pid = pid
-        self._registry = registry      
+        self._registry = registry
+        self._ctx = ctx     
         self._name = name
         self._file_path = ValidPath.file(file_path, must_exist=True)
         self._items: list[LayoutSlot] = []
@@ -58,9 +60,7 @@ class LayoutTemplate(QGraphicsObject):
             self._name = self._file_path
             self._name = registry.validate_name(proto, name)
 
-        self._dpi = registry.settings.dpi
         self._ldpi = registry.settings.ldpi
-        self._unit = "px" or registry.settings.unit
         self._name = registry.validate_name(proto, name)
 
         self._polkey = pagination_policy or 'Letter: 3x3 Standard 2.5"x3.5" Cards'
@@ -68,24 +68,18 @@ class LayoutTemplate(QGraphicsObject):
         self._geometry = pol.get("geometry")
         self._rows = pol.get("rows", 3)
         self._columns = pol.get("columns", 3)
-        self._page_size = pol.get("page_size", UnitStrGeometry(width="8.5in", height="11in", dpi=self.dpi))
+        self._page_size = pol.get("page_size", UnitStrGeometry(width="8.5in", height="11in", dpi=self._ctx.dpi))
         self._orientation = pol.get("orientation", "portrait")
         self._is_landscape = False
-        self._context = RenderContext(
-            mode=RenderMode.GUI,
-            tab_mode=TabMode.LAYOUT,
-            route=RenderRoute.RASTER,  # Always raster for LayoutTab GUI
-            dpi=self.dpi
-        )
         self._duplex_print = pol.get("duplex_print", False)
         self._whitespace = pol.get(
             "whitespace", [
-                UnitStr("0.25in", dpi=self.dpi),  # top
-                UnitStr("0.25in", dpi=self.dpi),  # bottom
-                UnitStr("0.5in", dpi=self.dpi),   # left
-                UnitStr("0.5in", dpi=self.dpi),   # right
-                UnitStr("0.0in", dpi=self.dpi),   # spacing_x
-                UnitStr("0.0in", dpi=self.dpi)    # spacing_y
+                UnitStr("0.25in", dpi=self._ctx.dpi),  # top
+                UnitStr("0.25in", dpi=self._ctx.dpi),  # bottom
+                UnitStr("0.5in", dpi=self._ctx.dpi),   # left
+                UnitStr("0.5in", dpi=self._ctx.dpi),   # right
+                UnitStr("0.0in", dpi=self._ctx.dpi),   # spacing_x
+                UnitStr("0.0in", dpi=self._ctx.dpi)    # spacing_y
             ]
         )
         self.setGrid()
@@ -95,16 +89,16 @@ class LayoutTemplate(QGraphicsObject):
         self.setAcceptHoverEvents(True)
 
     def boundingRect(self) -> QRectF: 
-        return self._geometry.to(self.unit, dpi=self.dpi).rect
+        return self._geometry.to(self.ctx.unit, dpi=self.ctx.dpi).rect
 
     def setRect(self, new_rect: QRectF):
         self.prepareGeometryChange()
-        self.geometry = geometry_with_px_rect(self._geometry, new_rect, dpi=self.dpi)
+        self.geometry = geometry_with_px_rect(self._geometry, new_rect, dpi=self.ctx.dpi)
         self.update()
 
     def itemChange(self, change: QGraphicsItem.GraphicsItemChange, value):
         if change == QGraphicsItem.ItemPositionChange:
-            self._geometry = geometry_with_px_pos(self._geometry, value, dpi=self.dpi)
+            self._geometry = geometry_with_px_pos(self._geometry, value, dpi=self.ctx.dpi)
         return super().itemChange(change, value)
 
     # ———————————————— property setters/getters ——————————————————————————— #
@@ -119,13 +113,13 @@ class LayoutTemplate(QGraphicsObject):
             self._file_path = Path(path).expanduser().resolve() 
  
     @property
-    def context(self) -> RenderContext: return self._context
+    def ctx(self) -> RenderContext: return self._ctx
 
-    @context.setter
-    def context(self, new) -> None:
-        self._context = new
+    @ctx.setter
+    def ctx(self, new) -> None:
+        self._ctx = new
         for slot in self.items:
-            slot.context = new
+            slot.ctx = new
 
     @property
     def polkey(self):
@@ -178,30 +172,7 @@ class LayoutTemplate(QGraphicsObject):
             self._content = new
 
     @property
-    def dpi(self) -> int: return self._dpi
-
-    @dpi.setter
-    def dpi(self, new: int):
-        print(f"[LAYOUT_TEMPLATE] Attempting to set new dpi to {new}")
-        if self._dpi != new:
-            self._dpi = new
-            for item in self._items:
-                item.dpi = self._dpi
-            self.invalidate_cache()
-            self.update()
-
-    @property
-    def unit(self) -> str: return self._unit
-
-    @unit.setter
-    def unit(self, new: str):
-        if self._unit != new:
-            self._unit = new
-            for item in self._items:
-                item.unit = self._unit
-
-    @property
-    def geometry(self) -> UnitStrGeometry: return self._geometry.to(self.unit, dpi=self.dpi)
+    def geometry(self) -> UnitStrGeometry: return self._geometry.to(self.ctx.unit, dpi=self.ctx.dpi)
     
     @geometry.setter
     def geometry(self, new_geom: UnitStrGeometry):
@@ -213,7 +184,7 @@ class LayoutTemplate(QGraphicsObject):
         self.updateGrid()
         # block the itemChange override
         self.blockSignals(True)
-        super().setPos(self._geometry.to(self.unit, dpi=self.dpi).pos)
+        super().setPos(self._geometry.to(self.ctx.unit, dpi=self.ctx.dpi).pos)
         self.blockSignals(False)
    
     @property
@@ -357,8 +328,8 @@ class LayoutTemplate(QGraphicsObject):
         self.updateGrid()
 
             
-        page_size = self.geometry.to(self.unit, dpi=self.dpi).rect
-        page_size = self.geometry.to(self.unit, dpi=self.dpi).size
+        page_size = self.geometry.to(self.ctx.unit, dpi=self.ctx.dpi).rect
+        page_size = self.geometry.to(self.ctx.unit, dpi=self.ctx.dpi).size
         width = max(1, int(page_size.width()))
         height = max(1, int(page_size.height()))
 
@@ -372,40 +343,20 @@ class LayoutTemplate(QGraphicsObject):
             if slot.content:
                 slot_img = slot.image  # Cached slot image
                 if isinstance(slot_img, QImage):
-                    size = slot.geometry.to(self.unit, dpi=self._dpi).size 
-                    pos = slot.geometry.to(self.unit, dpi=self._dpi).pos
+                    size = slot.geometry.to(self.ctx.unit, dpi=self.ctx.dpi).size 
+                    pos = slot.geometry.to(self.ctx.unit, dpi=self.ctx.dpi).pos
                     target_rect = QRectF(pos, size)      
                     painter.drawImage(target_rect, slot_img)
         painter.end()
         return image
-
-    def render(self, painter, context) -> None:
-        """
-        Page-level render:
-        - Optional bleed/background first (if your template provides helpers)
-        - Iterates slots in z/stack order and delegates to each slot.render()
-        - Optional export-only marks (bleed/cut marks) last when context.mode == EXPORT
-        """
-        page_rect = self._geometry.to(self.unit, dpi=self.dpi).rect
-        # 0) Page bleed/background if your template supports it
-        if hasattr(self, "_include_bleed") and self._include_bleed and hasattr(self, "_paint_bleed"):
-            self._paint_bleed(painter)
-        self.updateGrid()
-        # If your template maintains a z-ordered list, rely on it.
-        for slot in getattr(self, "items", []):
-            if slot is None:
-                continue
-            painter.save()
-            slot.paint(painter, context)
-            painter.restore()
 
     def clear_slot_content(self):
         for item in self._items:
             item.content = None
         self.update()
 
-    def whitespace_in_units(self, unit="px"):
-        return [v.to(unit, dpi=self._dpi) for v in self._whitespace]
+    def whitespace_in_units(self):
+        return [v.to(self.ctx.unit, dpi=self.ctx.dpi).value for v in self._whitespace]
 
     def invalidate_cache(self):
         for slot in self._items:
@@ -424,7 +375,7 @@ class LayoutTemplate(QGraphicsObject):
         self._columns = target_cols
 
         # --- geometry for the target grid --------------------------------------
-        t, b, l, r, sx, sy = self.whitespace_in_units(unit=self.unit)
+        t, b, l, r, sx, sy = self.whitespace_in_units()
         page_in = self._geometry.inch
         w, h = page_in.size.width(), page_in.size.height()
 
@@ -436,7 +387,7 @@ class LayoutTemplate(QGraphicsObject):
         def cell_geom(rr, cc):
             x = l + cc * (sx + cell_w)
             y = t + rr * (sy + cell_h)
-            return UnitStrGeometry(width=cell_w, height=cell_h, x=x, y=y, unit=self.unit, dpi=self._dpi)
+            return UnitStrGeometry(width=cell_w, height=cell_h, x=x, y=y, unit=self.ctx.unit, dpi=self.ctx.dpi)
 
         # row-major list of desired (row, col, geom)
         targets = [(rr, cc, cell_geom(rr, cc))
@@ -480,7 +431,7 @@ class LayoutTemplate(QGraphicsObject):
             slot.row = rr
             slot.column = cc
             slot.geometry = geom
-            slot.setPos(geom.to(self.unit, dpi=self.dpi).pos)
+            slot.setPos(geom.to(self.ctx.unit, dpi=self.ctx.dpi).pos)
 
             # Add to scene only if not already in the same scene
             if scene and slot.scene() is not scene:
@@ -502,8 +453,8 @@ class LayoutTemplate(QGraphicsObject):
         self.template_changed.emit()
 
     def updateGrid(self) -> None:
-        top, bottom, left, right, spacing_x, spacing_y = self.whitespace_in_units(unit=self.unit)
-        page_rect_in = self.geometry.to(self.unit, dpi=self._dpi).rect
+        top, bottom, left, right, spacing_x, spacing_y = self.whitespace_in_units()
+        page_rect_in = self.geometry.to(self.ctx.unit, dpi=self.ctx.dpi).rect
         total_w, total_h = page_rect_in.width(), page_rect_in.height()
         avail_w = total_w - left - right - (self._columns - 1) * spacing_x
         avail_h = total_h - top  - bottom - (self._rows    - 1) * spacing_y
@@ -517,11 +468,11 @@ class LayoutTemplate(QGraphicsObject):
                     slot.addParentItem()
                 if not slot.scene():
                     scene.addItem(slot)
-                    scene.setPos(slot.geometry.to(self.unit, dpi=self.dpi).pos)
+                    scene.setPos(slot.geometry.to(self.ctx.unit, dpi=self.ctx.dpi).pos)
                 slot.update()
             self.first_pass = False
 
-        # print(f"On updateGrid call:\nTemplate {self.pid} has scene: {bool(self.scene())}\nTemplate dimensions:{self.geometry.to(self.unit, dpi=self.dpirect}\n")
+        # print(f"On updateGrid call:\nTemplate {self.pid} has scene: {bool(self.scene())}\nTemplate dimensions:{self.geometry.to(self.ctx.unit, dpi=self.ctx.dpirect}\n")
         # Update every slot’s geometry from flat list
 
         for r in range(self._rows):
@@ -529,10 +480,10 @@ class LayoutTemplate(QGraphicsObject):
                 slot = self._items[self._idx(r, c)]
                 x = left + c * (cell_w + spacing_x)
                 y = top  + r * (cell_h + spacing_y)
-                slot.geometry = UnitStrGeometry(width=cell_w, height=cell_h, x=x, y=y, unit=self.unit, dpi=self._dpi)
+                slot.geometry = UnitStrGeometry(width=cell_w, height=cell_h, x=x, y=y, unit=self.ctx.unit, dpi=self.ctx.dpi)
                 slot.row = r
                 slot.column = c
-                pos = slot.geometry.to(self.unit, dpi=self.dpi).pos
+                pos = slot.geometry.to(self.ctx.unit, dpi=self.ctx.dpi).pos
                 slot.setPos(pos)
 
                 # print(f" - Slot {slot.pid} has scene: {slot.scene()}\n   - slot grid location: {r, c}\n   - position set to {slot.pos()}")
@@ -547,15 +498,15 @@ class LayoutTemplate(QGraphicsObject):
         self.template_changed.emit()
 
     def get_whitespace(self):
-        return [m.to(self.unit, dpi=self.dpi) for m in self._whitespace]
+        return [m.to(self.ctx.unit, dpi=self.ctx.dpi) for m in self._whitespace]
         
     def get_item_position(self, row: int, col: int) -> tuple[float, float]:
         item = self._items[self._idx(row, col)]
-        pos = item.geometry.to(self.unit, dpi=self.dpi).pos
+        pos = item.geometry.to(self.ctx.unit, dpi=self.ctx.dpi).pos
         return (pos.x(), pos.y())
 
     def get_item_size(self, row, col):
-        return self._items[self._idx(row, col)].geometry.to(self.unit, dpi=self.dpi).size
+        return self._items[self._idx(row, col)].geometry.to(self.ctx.unit, dpi=self.ctx.dpi).size
 
 
     def get_item_at_position(self, scene_pos: QPointF) -> Optional["LayoutSlot"]:
@@ -567,8 +518,8 @@ class LayoutTemplate(QGraphicsObject):
         for row in range(self.rows):
             for col in range(self.columns):
                 item = self.slots[row][col]
-                rect = item.geometry.to(self.unit, dpi=self.dpi).rect
-                pos = item.geometry.to(self.unit, dpi=self.dpi).pos
+                rect = item.geometry.to(self.ctx.unit, dpi=self.ctx.dpi).rect
+                pos = item.geometry.to(self.ctx.unit, dpi=self.ctx.dpi).pos
                 x, y = pos.x(), pos.y()
                 w, h = rect.width(), rect.height()
                 item_rect = QRectF(x, y, w, h)
@@ -713,8 +664,8 @@ class LayoutTemplate(QGraphicsObject):
         widget : QWidget, optional
             The widget being painted on.
         """
-        context = self.context
-        rect = self.geometry.to(self.unit, dpi=self.dpi).rect
+        context = self.ctx
+        rect = self.geometry.to(self.ctx.unit, dpi=self.ctx.dpi).rect
         painter.setRenderHint(QPainter.Antialiasing)
 
         rows = self._rows
@@ -727,7 +678,7 @@ class LayoutTemplate(QGraphicsObject):
         painter.drawRect(rect)
         painter.restore()
 
-        if self.context.is_gui:
+        if self.ctx.is_gui:
             # ——— Grid lines ———
             top_margin, bottom_margin, left_margin, right_margin, spacing_x, spacing_y = self.whitespace_in_units()
 

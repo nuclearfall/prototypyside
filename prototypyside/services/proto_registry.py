@@ -37,6 +37,7 @@ class ProtoRegistry(QObject):
 
         self._factory = ProtoFactory()
         self._settings = settings
+        self._ctx = settings.ctx
         self._is_root = isinstance(self, RootRegistry)
         self.root = self if self._is_root else root
         self._template = None
@@ -188,9 +189,12 @@ class ProtoRegistry(QObject):
         if not isinstance(proto, ProtoClass):
             raise TypeError(f"create() expects a ProtoClass member, got {proto}")
         pid = ProtoClass.issue_pid(proto)
-        kwargs = {k:v for k, v in kwargs.items() if k != "name"}
+        ctx = kwargs.get("ctx", self.settings.ctx)
+        name = kwargs.get("name", None)
+        kwargs = {k:v for k, v in kwargs.items() if k not in ["proto", "name", "ctx", "pid"]}
         registry = self
-        obj = self._factory.create(proto=proto, pid=pid, registry=self, **kwargs)
+        obj = self._factory.create(proto=proto, pid=pid, 
+            registry=self, ctx=ctx, name=name, **kwargs)
 
         return obj
 

@@ -68,7 +68,7 @@ class AddSlotCommand(QUndoCommand):
 
     def redo(self):
         if item is None:
-            self.item = self.registry.create(ProtoClass.LS, parent=self.template)
+            self.item = self.registry.create(ProtoClass.LS)
         else:
             self.registry.reinsert(self.item)
 
@@ -87,6 +87,7 @@ class AddElementCommand(QUndoCommand):
             # Create a brand-new element. IMPORTANT: do NOT pass tpid for fresh elements.
             self.item = self.registry.create(
                 proto=self.proto,
+                ctx=self.registry.settings.ctx,
                 geometry=self.geometry,
                 parent=self.tab.template
             )

@@ -28,91 +28,210 @@ class ExportManager:
         self.merge_manager = merge_manager
 
     def paginate(self, layout, copies: int = 1):
-        """
-        Create cloned pages and populate them with CSV rows.
-        If there is NO CSV bound to any slot, clone exactly `copies` pages.
-        Otherwise, compute page_count from total rows and slots_per_page.
-        """
-        # registry = self.registry  # assuming this exists on the manager
         pages = []
         registry = layout.registry
-        # Build a RenderContext configured for export of a layout-composite route
-        
-        # how many rows across all slot components?
-        total_rows = self.merge_manager.count_all_rows(layout)
 
         slots_per_page = len(layout.items)
-        slot_count = max(copies*total_rows, slots_per_page*copies)
-        page_count = ceil(slot_count / slots_per_page)
+        total_rows = self.merge_manager.count_all_rows(layout)  # 0 if no CSV bound
+        has_csv = total_rows > 0
+
+        if has_csv:
+            # copies = repeat the whole run copies times
+            total_slots_needed = copies * total_rows
+            page_count = max(1, math.ceil(total_slots_needed / slots_per_page))
+        else:
+            # no CSV → clone exactly `copies` pages
+            page_count = max(1, copies)
 
         for _ in range(page_count):
             page = registry.clone(layout)
             page.display_mode = False
-            # page.unit = "pt"
-            page.context = RenderContext(
+            page.unit = "pt"
+            page.ctx = RenderContext(
                 route=RenderRoute.COMPOSITE,
                 tab_mode=TabMode.LAYOUT,
                 mode=RenderMode.EXPORT,
+                dpi=72,
+                unit="pt",
             )
-            self.merge_manager.set_csv_content_for_next_page(page)
+            if has_csv:
+                self.merge_manager.set_csv_content_for_next_page(page)
             pages.append(page)
 
         return pages
 
+    # def paginate(self, layout, copies: int = 1):
+    #     """
+    #     Create cloned pages and populate them with CSV rows.
+    #     If there is NO CSV bound to any slot, clone exactly `copies` pages.
+    #     Otherwise, compute page_count from total rows and slots_per_page.
+    #     """
+    #     # registry = self.registry  # assuming this exists on the manager
+    #     pages = []
+    #     registry = layout.registry
+    #     # Build a RenderContext configured for export of a layout-composite route
+        
+    #     # how many rows across all slot components?
+    #     total_rows = self.merge_manager.count_all_rows(layout)
+
+    #     slots_per_page = len(layout.items)
+    #     slot_count = max(copies*total_rows, slots_per_page*copies)
+    #     page_count = ceil(slot_count / slots_per_page)
+
+    #     for _ in range(page_count):
+    #         page = registry.clone(layout)
+    #         page.display_mode = False
+    #         # page.unit = "pt"
+    #         page.ctx = RenderContext(
+    #             route=RenderRoute.COMPOSITE,
+    #             tab_mode=TabMode.LAYOUT,
+    #             mode=RenderMode.EXPORT,
+    #         )
+    #         self.merge_manager.set_csv_content_for_next_page(page)
+    #         pages.append(page)
+
+    #     return pages
 
     def export_pdf(self, layout, pdf_path):
         pages = self.paginate(layout)
 
-        # Page geometry in POINTS
+        # Prepare a consistent export context (points @ 72dpi)
+        export_ctx = RenderContext(
+            route=RenderRoute.COMPOSITE,
+            tab_mode=TabMode.LAYOUT,
+            mode=RenderMode.EXPORT,
+            dpi=72,
+            unit="pt"
+        )
+
+        # Page geometry in points
         page_size_pt: QSizeF = layout.geometry.pt.size
         page_rect_pt: QRectF = layout.geometry.pt.rect
 
-        # QPdfWriter setup
         writer = QPdfWriter(pdf_path)
         writer.setPageSize(QPageSize(page_size_pt, QPageSize.Point))
         writer.setPageMargins(QMarginsF(0, 0, 0, 0), QPageLayout.Point)
-        writer.setResolution(72)
-        
+        writer.setResolution(72)  # 1pt = 1/72 in
+
         painter = QPainter(writer)
         painter.setRenderHint(QPainter.Antialiasing, True)
         painter.setRenderHint(QPainter.TextAntialiasing, True)
 
-        scene = QGraphicsScene()
-        scene.setSceneRect(page_rect_pt)  # scene units = points
-        
         for i, page in enumerate(pages):
+            # 1) Normalize units for all nested objects ONCE
             page.unit = "pt"
-            scene.clear()
-            
-            # Set export context for all items
-            export_context = RenderContext(
-                route=RenderRoute.COMPOSITE,
-                tab_mode=TabMode.LAYOUT,
-                mode=RenderMode.EXPORT,
-                dpi=self.print_dpi
-            )
-            
-            page.context = export_context
-            for slot in page.items:
-                if slot.content:
-                    slot.content.context = export_context
-                    # Ensure elements know they're in export mode
-                    for item in getattr(slot.content, "items", []):
-                        item.context = export_context
-                        item.update()
-            
-            scene.addItem(page)  
-            page.setGrid()
-            page.updateGrid()
-            
-            if i > 0:
+            page.ctx = export_ctx
+            self._normalize_positions_to_points(page, export_ctx)  # sets setPos() from geometry for layout/slots/components/elements
+
+            # 2) Draw this page
+            painter.save()
+            # ensure painter origin is top-left of page in points
+            # (QPdfWriter already uses points; no further scaling needed)
+            traverse_export(painter, page, export_ctx)
+            painter.restore()
+
+            if i < len(pages) - 1:
                 writer.newPage()
 
-            target = page_rect_pt
-            source = scene.sceneRect()
-            scene.render(painter, target, source)
-
         painter.end()
+
+    def _normalize_positions_to_points(self, page, ctx):
+        # Layout page is at (0,0) — ensure that:
+        page.setPos(0, 0)
+
+        # Slots
+        for slot in page.items:
+            gs = slot.geometry.to(ctx.unit, dpi=ctx.dpi)
+            slot.setPos(float(gs.rect.x()), float(gs.rect.y()))
+            # content placement policy: put component at (0,0) inside slot
+            if slot.content:
+                slot.content.setPos(0, 0)
+                slot.content.ctx = ctx
+                # Elements
+                for el in getattr(slot.content, "items", []):
+                    ge = el.geometry.to(ctx.unit, dpi=ctx.dpi)
+                    el.setPos(float(ge.rect.x()), float(ge.rect.y()))
+                    el.ctx = ctx
+
+
+    # def export_pdf(self, layout, pdf_path):
+    #     pages = self.paginate(layout)
+
+    #     # Page geometry in POINTS
+    #     page_size_pt: QSizeF = layout.geometry.pt.size
+    #     page_rect_pt: QRectF = layout.geometry.pt.rect
+
+    #     # QPdfWriter setup
+    #     writer = QPdfWriter(pdf_path)
+    #     writer.setPageSize(QPageSize(page_size_pt, QPageSize.Point))
+    #     writer.setPageMargins(QMarginsF(0, 0, 0, 0), QPageLayout.Point)
+    #     writer.setResolution(72)
+        
+    #     painter = QPainter(writer)
+    #     painter.setRenderHint(QPainter.Antialiasing, True)
+    #     painter.setRenderHint(QPainter.TextAntialiasing, True)
+
+    #     scene = QGraphicsScene()
+    #     scene.setSceneRect(page_rect_pt)  # scene units = points
+        
+    #     for i, page in enumerate(pages):
+    #         page.unit = "pt"
+    #         scene.clear()
+            
+    #         # Set export context for all items
+    #         export_context = RenderContext(
+    #             route=RenderRoute.COMPOSITE,
+    #             tab_mode=TabMode.LAYOUT,
+    #             mode=RenderMode.EXPORT,
+    #             dpi=self.print_dpi
+    #         )
+            
+    #         page.ctx = export_context
+    #         for slot in page.items:
+    #             if slot.content:
+    #                 slot.content.ctx = export_context
+    #                 # Ensure elements know they're in export mode
+    #                 for item in getattr(slot.content, "items", []):
+    #                     item.ctx = export_context
+    #                     item.update()
+            
+    #         scene.addItem(page)  
+    #         page.setGrid()
+    #         page.updateGrid()
+            
+    #         if i > 0:
+    #             writer.newPage()
+
+    #         target = page_rect_pt
+    #         source = scene.sceneRect()
+    #         scene.render(painter, target, source)
+
+    #     painter.end()
+
+def traverse_export(p: QPainter, item, ctx: RenderContext):
+    # 1) Translate to this item's scene position
+    p.save()
+    pos = item.pos()  # already in points for layout/items if you set them correctly
+    p.translate(pos.x(), pos.y())
+
+    # 2) Optional: apply local transform if your items use it (rotate/scale)
+    if hasattr(item, "transform") and isinstance(item.transform(), QTransform):
+        p.setWorldTransform(p.worldTransform() * item.transform(), combine=False)
+
+    # 3) Paint the item itself (LOCAL coords: (0,0) to geometry.size)
+    item.export_paint(p, ctx)
+
+    # 4) Recurse to children in z-order if needed
+    for child in getattr(item, "items", []):   # component -> elements
+        traverse_export(p, child, ctx)
+    for slot in getattr(item, "slots", []):    # layout -> slots
+        traverse_export(p, slot, ctx)
+    if getattr(item, "content", None) is not None:   # slot -> component
+        traverse_export(p, item.content, ctx)
+
+    p.restore()
+
+
 
         # def export_pdf(self, layout, pdf_path):
         #     pages = self.paginate(layout)

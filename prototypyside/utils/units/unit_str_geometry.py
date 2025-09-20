@@ -1,4 +1,4 @@
-# prototypyside/utils/unit_str_geometry.py
+# unit_str_geometry.py
 from __future__ import annotations
 
 from dataclasses import replace
@@ -9,7 +9,7 @@ from typing import Optional, Union, Tuple
 from PySide6.QtCore import QRectF, QPointF, QSizeF
 
 # IMPORTANT: this should point to your updated UnitStr with px@DPI semantics.
-from prototypyside.utils.units.unit_str import UnitStr
+from prototypyside.utils.units.unit_str import UnitStr, pixels_per_unit
 
 Number = Union[int, float, str, Decimal, UnitStr]
 
@@ -62,6 +62,7 @@ class UnitStrGeometry:
         rect_y: Number | None = None,
         width:  Number | None = None,
         height: Number | None = None,
+        geom: UnitStrGeometry | None = None,
         dpi:    int | None    = None,
         print_dpi: int        = 300,
         unit:   Optional[str] = None,
@@ -93,13 +94,21 @@ class UnitStrGeometry:
                 return UnitStr(v, dpi=self._dpi)
             # Bare numbers default to geometry.unit; strings may embed units like "px@72"
             return UnitStr(0 if v is None else v, unit=self._unit, dpi=self._dpi)
-
-        self._rect_x = U(rx)
-        self._rect_y = U(ry)
-        self._w      = U(rw)
-        self._h      = U(rh)
-        self._pos_x  = U(px)
-        self._pos_y  = U(py)
+        if geom:
+            u_geom = geom.to(unit, dpi)
+            self._rect_x = u_geom.rect_x
+            self._rect_y = u_geom.rect_y
+            self._w = u_geom.width
+            self._h = u_geom.height
+            self._pos_x = u_geom.pos_x
+            self._pos_y = u_geom.pos_y
+        else:
+            self._rect_x = U(rx)
+            self._rect_y = U(ry)
+            self._w      = U(rw)
+            self._h      = U(rh)
+            self._pos_x  = U(px)
+            self._pos_y  = U(py)
 
         # small per-instance conversion cache (unit,dpi)-> float tuples
         self._cache: dict[tuple[str, int, str], Tuple[float, ...]] = {}
@@ -139,8 +148,10 @@ class UnitStrGeometry:
 
     def _val(self, u: UnitStr, unit: Optional[str] = None, dpi: Optional[int] = None) -> float:
         """Convert a UnitStr scalar to a float in the requested unit/dpi (defaults to self._unit/self._dpi)."""
-        return u.to(unit or self._unit, dpi if dpi is not None else self._dpi)
+        return u.to(unit or self._unit, dpi if dpi is not None else self._dpi).value
 
+    def ppu(self, unit, dpi):
+        pixerls_per_unit(unit, dpi)
     # ---- Qt composite accessors (backward compatible) -----------------------
 
     @property
@@ -171,18 +182,24 @@ class UnitStrGeometry:
         )
 
     # ---- GUI-agnostic tuple accessors --------------------------------------
+    def ustr_tuple(self, unit: str | None = None, dpi: int | None = None) -> Tuple[float, float, float, float]:
+        unit = (unit or self._unit).lower().replace('"', "in")
+        dpi  = self._dpi if dpi is None else int(dpi)
+        geom = self.to(unit, dpi=dpi)
+        return [UnitStr(d, unit=unit, dpi=dpi) for d in [
+            geom._rect_x, geom._rect_y, geom._w, geom._h, geom._pos_x, geom._pos_y]]
 
     def rect_tuple(self, unit: str | None = None, dpi: int | None = None) -> Tuple[float, float, float, float]:
         unit = (unit or self._unit).lower().replace('"', "in")
         dpi  = self._dpi if dpi is None else int(dpi)
         key = ("rect", unit, dpi)
+        x = self._rect_x.to(unit, dpi).value
+        y = self._rect_y.to(unit, dpi).value
+        w = self._w.to(unit, dpi).value
+        h = self._h.to(unit, dpi).value
         if key in self._cache:
             x, y, w, h = self._cache[key]
             return x, y, w, h
-        x = self._rect_x.to(unit, dpi)
-        y = self._rect_y.to(unit, dpi)
-        w = self._w.to(unit, dpi)
-        h = self._h.to(unit, dpi)
         self._cache[key] = (x, y, w, h)
         return x, y, w, h
 
@@ -193,8 +210,8 @@ class UnitStrGeometry:
         if key in self._cache:
             x, y = self._cache[key]  # type: ignore[index]
             return x, y
-        x = self._pos_x.to(unit, dpi)
-        y = self._pos_y.to(unit, dpi)
+        x = self.pos_x.to(unit, dpi).value
+        y = self.pos_y.to(unit, dpi).value
         self._cache[key] = (x, y)
         return x, y
 
@@ -205,8 +222,8 @@ class UnitStrGeometry:
         if key in self._cache:
             w, h = self._cache[key]  # type: ignore[index]
             return w, h
-        w = self._w.to(unit, dpi)
-        h = self._h.to(unit, dpi)
+        w = self._w.to(unit, dpi).value
+        h = self._h.to(unit, dpi).value
         self._cache[key] = (w, h)
         return w, h
 
@@ -217,10 +234,10 @@ class UnitStrGeometry:
         if key in self._cache:
             x, y, w, h = self._cache[key]
             return x, y, w, h
-        x = self._pos_x.to(unit, dpi)
-        y = self._pos_y.to(unit, dpi)
-        w = self._w.to(unit, dpi)
-        h = self._h.to(unit, dpi)
+        x = self.pos_x.to(unit, dpi).value
+        y = self.pos_y.to(unit, dpi).value
+        w = self._w.to(unit, dpi).value
+        h = self._h.to(unit, dpi).value
         self._cache[key] = (x, y, w, h)
         return x, y, w, h
 
@@ -348,8 +365,8 @@ class UnitStrGeometry:
     def _cmp_tuple(self) -> Tuple[Decimal, Decimal, Decimal, Decimal, Decimal, Decimal, int]:
         # Compare using the canonical inch Decimals + dpi
         return (
-            self._rect_x.value, self._rect_y.value, self._w.value, self._h.value,
-            self._pos_x.value, self._pos_y.value, self._dpi,
+            self._rect_x.inches, self._rect_y.inches, self._w.inches, self._h.inches,
+            self._pos_x.inches, self._pos_y.inches, self._dpi,
         )
 
     def __eq__(self, other: object) -> bool:

@@ -224,9 +224,9 @@ class PropertyPanel(QWidget):
         self.keep_aspect_checkbox.stateChanged.connect(self._on_keep_aspect_state)
 
         # Font toolbar (Text-only)
-        self.font_toolbar.fontChanged.connect(lambda tgt, prop, new, old: self._handle_panel_edit(prop, new))
-        self.font_toolbar.hAlignChanged.connect(lambda tgt, prop, new, old: self._handle_panel_edit(prop, new))
-        self.font_toolbar.vAlignChanged.connect(lambda tgt, prop, new, old: self._handle_panel_edit(prop, new))
+        self.font_toolbar.fontChanged.connect(self.property_changed.emit)
+        self.font_toolbar.hAlignChanged.connect(self.property_changed.emit)
+        self.font_toolbar.vAlignChanged.connect(self.property_changed.emit)
 
     # ---------------- Multi-select helpers ----------------
     def on_external_property_changed(self, item, prop: str, new_value):
