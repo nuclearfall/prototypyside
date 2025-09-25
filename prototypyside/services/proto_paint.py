@@ -5,7 +5,7 @@ from typing import Tuple, Union
 from PySide6.QtCore import Qt, QRectF, QSize
 from PySide6.QtGui import (QPainter, QImage, QPixmap, QPen, 
     QTextOption, QTextLayout, QFontMetricsF, QTextDocument, 
-    QTextCursor, QTextCharFormat, QBrush)
+    QTextCursor, QTextCharFormat, QBrush, QImageReader)
 from prototypyside.services.proto_class import ProtoClass
 from prototypyside.services.shape_factory import ShapeFactory
 from prototypyside.utils.render_context import RenderContext
@@ -16,7 +16,7 @@ from prototypyside.utils.units.unit_str_geometry import UnitStrGeometry
 pc = ProtoClass
 elem_types = [pc.IE, pc.TE, pc.VE]
 image_types = [pc.IE, pc.VE, pc.CT, pc.CC]
-
+zero = UnitStr(0)
 Aspect = Qt.AspectRatioMode
 Xform  = Qt.TransformationMode
 ModeLike = Union[str, Aspect, Tuple[Aspect, Xform]]
@@ -106,6 +106,11 @@ SHAPES = {
 
 
 
+# imports you’ll likely need
+from PySide6.QtCore import QSize, QRect
+from PySide6.QtGui import (QImage, QPixmap, QImageReader, QPainter,
+                           Qt)
+
 class ProtoPaint:
     @classmethod
     def image_with_mode(
@@ -116,25 +121,65 @@ class ProtoPaint:
         aspect: ModeLike,
         transform: Union[str, Xform, None] = None
     ):
+        """
+        Returns a QImage (export) or QPixmap (GUI) already scaled to the px size
+        implied by `geom` at `ctx.dpi`, respecting aspect + transform.
+        For FILL (KeepAspectRatioByExpanding) we crop the overshoot to avoid
+        a second scale later.
+        """
         if not ValidPath.check(image_path, must_exist=True):
             return None
 
         try:
-            base = QImage(str(image_path)) if ctx.is_export else QPixmap(str(image_path))
-            if base.isNull():
-                return None
+            # 1) Load base
+            if ctx.is_export:
+                # Use reader for best fidelity + EXIF orientation
+                reader = QImageReader(str(image_path))
+                reader.setAutoTransform(True)
+                base_img = reader.read()
+                if base_img.isNull():
+                    return None
+                base = base_img  # QImage
+            else:
+                base_px = QPixmap(str(image_path))
+                if base_px.isNull():
+                    return None
+                base = base_px  # QPixmap
 
-            w_u, h_u = geom.size_tuple()
-            w_px = round(w_u.to("px", dpi=ctx.dpi).value)
-            h_px = round(h_u.to("px", dpi=ctx.dpi).value)
+            # 2) Resolve target size in px from your geometry at ctx.dpi
+            # replace the size_tuple/to(...).value block with this:
+            geom_px = geom.to("px", dpi=ctx.dpi)
+            w_px = max(1, round(float(geom_px.size.width())))
+            h_px = max(1, round(float(geom_px.size.height())))
             target_px_size = QSize(w_px, h_px)
 
+
+            # 3) Resolve aspect + transform
             aspect_mode, xform_mode = ImageScaleMode.resolve(aspect, transform)
+            # Stretch/Fit/Fill map to:
+            #  - IgnoreAspectRatio
+            #  - KeepAspectRatio
+            #  - KeepAspectRatioByExpanding
+
+            # 4) Scale
             scaled = base.scaled(target_px_size, aspect_mode, xform_mode)
+
+            # 5) If FILL expanded beyond at least one side, crop to exact box
+            if aspect_mode == Qt.KeepAspectRatioByExpanding:
+                sw, sh = scaled.width(), scaled.height()
+                if (sw, sh) != (w_px, h_px):
+                    # center-crop to target size
+                    cx = max(0, (sw - w_px) // 2)
+                    cy = max(0, (sh - h_px) // 2)
+                    crop_rect = QRect(cx, cy, w_px, h_px)
+                    # QImage.copy / QPixmap.copy both exist:
+                    scaled = scaled.copy(crop_rect)
+
             return scaled
         except Exception as e:
             print(f"Image load/scale failed: {e}")
             return None
+
 
     @classmethod
     def ensure_local(cls, geom: UnitStrGeometry, dpi: float) -> UnitStrGeometry:
@@ -313,45 +358,52 @@ class ProtoPaint:
         painter.restore()
 
     @classmethod
-    def paint_image_path(cls, image_path: Path, obj, ctx: RenderContext, painter: QPainter, wants_bleed: bool = False):
-        base_geom = cls.ctx_geom(obj.geometry, ctx)
-        shape = obj.shape
+    def paint_image(cls, obj, ctx: RenderContext, painter: QPainter):
+        # Resolve the geometry you intend to paint (bleed vs no-bleed, etc.)
+        wants_bleed = obj.bleed > zero and obj.include_bleed
+        base_geom = obj.geometry
+        final_geom = base_geom.outset(obj.bleed, obj.bleed) if wants_bleed else base_geom
 
-        extra = None
-        if shape == "rounded_rect":
-            extra = obj.corner_radius
-        if shape == "polygon" and obj.sides >= 1:
-            extra = obj.sides
+        # Dest rects in your two coordinate systems
+        geom_px = final_geom.to("px", dpi=ctx.dpi)  # GUI
+        geom_pt = final_geom.to("pt", dpi=ctx.dpi)  # PDF export (points)
 
-        if wants_bleed and obj.bleed > UnitStr(0.0):
-            final_geom = base_geom  # the bleed path will extend clip; image uses stretch
-            clip_path = cls.bleed_shape_path(shape, base_geom, ctx, bleed=obj.bleed, extra=extra, include_bleed=True)
-            aspect = "stretch"
-        else:
-            final_geom = base_geom
-            clip_path = cls.shape_path(shape, final_geom, ctx, extra=extra)
-            aspect = obj.aspect
+        # choose target rect based on ctx
+        target_rect = geom_pt.rect if ctx.is_export else geom_px.rect
 
-        scaled = cls.image_with_mode(
-            image_path,
-            final_geom,
-            ctx,
-            aspect,
-            obj.transform
-        )
-        if scaled is None:
+        # Choose the right aspect + transform for this element
+        # (assuming obj.aspect is one of "stretch"/"fit"/"fill" mapped by your ImageScaleMode
+        #  and obj.xform in {"fast","smooth"} or None)
+        aspect = obj.aspect
+        xform  = getattr(obj, "xform", None)
+
+        image_path = ValidPath.file(obj.content, must_exist=True)
+        if not image_path:
             return
 
-        target_rect = final_geom.to("px", dpi=ctx.dpi).rect
+        # Get the raster sized for the px target box at ctx.dpi
+        raster = cls.image_with_mode(image_path, final_geom, ctx, aspect, xform)
+        if raster is None:
+            return
 
+        # Hint: enable smoothing only when using Smooth transformation
+        # (it mainly affects downscales / non-integer transforms on draw)
+        _, xform_mode = ImageScaleMode.resolve(aspect, xform)
         painter.save()
-        painter.setClipPath(clip_path)
-        painter.setRenderHint(QPainter.SmoothPixmapTransform, True)
-        if isinstance(scaled, QPixmap):
-            painter.drawPixmap(target_rect, scaled)
-        else:
-            painter.drawImage(target_rect, scaled)
+
+        painter.setRenderHint(QPainter.SmoothPixmapTransform, xform_mode == Qt.SmoothTransformation)
+
+        target_rectF = target_rect if hasattr(target_rect, "toRectF") else target_rect
+
+        # src rect is the full raster
+        if isinstance(raster, QPixmap):
+            src_rectF = QRectF(0, 0, raster.width(), raster.height())
+            painter.drawPixmap(target_rectF, raster, src_rectF)
+        else:  # QImage
+            src_rectF = QRectF(0, 0, raster.width(), raster.height())
+            painter.drawImage(target_rectF, raster, src_rectF)
         painter.restore()
+
 
     @classmethod
     def paint_element_outline(cls, elem, ctx, painter):
@@ -424,8 +476,8 @@ class ProtoPaint:
         if not has_image and obj.bg_color.alpha() > 0:
             cls.paint_background_path(obj, ctx, painter)
 
-        if has_image and bw <= UnitStr(0.0):
-            cls.paint_image_path(Path(obj.content), obj, ctx, painter, wants_bleed=wants_bleed)
+        if obj.proto in image_types and has_image:
+            cls.paint_image(obj, ctx, painter)
 
         if ctx.is_gui and ctx.is_component_tab and not has_image:
             if obj.proto == pc.TE:

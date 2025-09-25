@@ -71,7 +71,7 @@ class ProtoPaintable(QGraphicsObject, RotatableMixin):
         self._ctx = ctx
         self._shape = "rect"
         self._geometry = geometry
-
+        self._aspect = "fit"
         self._include_bleed = False
         self._name = registry.validate_name(proto, name)
 
@@ -299,6 +299,17 @@ class ProtoPaintable(QGraphicsObject, RotatableMixin):
             if self._shape == "rounded_rect":
                 self.item_changed.emit()
                 self.update()
+
+    @property
+    def aspect(self):
+        return self._aspect
+
+    @aspect.setter
+    def aspect(self, new):
+        if new == self._aspect:
+            return
+        self._aspect = new 
+        self.update()
 
     @property
     def color(self) -> QColor:
