@@ -1,4 +1,11 @@
+from __future__ import annotations
+
 from enum import Enum, auto
+
+from typing import Optional, TYPE_CHECKING
+
+if TYPE_CHECKING:
+    from prototypyside.services.render_cache import RenderCache
 
 # Render enumerations
 class RenderMode(Enum):
@@ -16,13 +23,14 @@ class RenderRoute(Enum):
 
 class RenderContext:
     """Unified rendering context that encapsulates all rendering parameters"""
-    def __init__(self, dpi, unit, mode=RenderMode.GUI, tab_mode=TabMode.COMPONENT, 
-                 route=RenderRoute.COMPOSITE):
+    def __init__(self, dpi, unit, mode=RenderMode.GUI, tab_mode=TabMode.COMPONENT,
+                 route=RenderRoute.COMPOSITE, cache: Optional["RenderCache"] = None):
         self.mode = mode
         self.tab_mode = tab_mode
         self.route = route
         self._dpi = dpi
         self._unit = unit
+        self.cache: Optional["RenderCache"] = cache
         
     @property
     def is_gui(self):

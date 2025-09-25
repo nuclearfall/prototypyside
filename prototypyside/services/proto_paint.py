@@ -1,6 +1,9 @@
+import hashlib
+import json
+
 from dataclasses import dataclass
 from pathlib import Path
-from typing import Tuple, Union
+from typing import Callable, Optional, Tuple, Union
 
 from PySide6.QtCore import Qt, QRectF, QSize
 from PySide6.QtGui import (QPainter, QImage, QPixmap, QPen, 
@@ -113,13 +116,65 @@ from PySide6.QtGui import (QImage, QPixmap, QImageReader, QPainter,
 
 class ProtoPaint:
     @classmethod
+    def _target_size_px(cls, geom: UnitStrGeometry, ctx: RenderContext) -> Tuple[int, int]:
+        geom_px = geom.to("px", dpi=ctx.dpi)
+        w_px = max(1, round(float(geom_px.size.width())))
+        h_px = max(1, round(float(geom_px.size.height())))
+        return w_px, h_px
+
+    @classmethod
+    def _generate_scaled_image(
+        cls,
+        image_path: Path,
+        geom: UnitStrGeometry,
+        ctx: RenderContext,
+        aspect_mode: Aspect,
+        xform_mode: Xform,
+    ):
+        if not ValidPath.check(image_path, must_exist=True):
+            return None
+
+        try:
+            if ctx.is_export:
+                reader = QImageReader(str(image_path))
+                reader.setAutoTransform(True)
+                base_img = reader.read()
+                if base_img.isNull():
+                    return None
+                base = base_img
+            else:
+                base_px = QPixmap(str(image_path))
+                if base_px.isNull():
+                    return None
+                base = base_px
+
+            w_px, h_px = cls._target_size_px(geom, ctx)
+            target_px_size = QSize(w_px, h_px)
+
+            scaled = base.scaled(target_px_size, aspect_mode, xform_mode)
+
+            if aspect_mode == Qt.KeepAspectRatioByExpanding:
+                sw, sh = scaled.width(), scaled.height()
+                if (sw, sh) != (w_px, h_px):
+                    cx = max(0, (sw - w_px) // 2)
+                    cy = max(0, (sh - h_px) // 2)
+                    crop_rect = QRect(cx, cy, w_px, h_px)
+                    scaled = scaled.copy(crop_rect)
+
+            return scaled
+        except Exception as e:
+            print(f"Image load/scale failed: {e}")
+            return None
+
+    @classmethod
     def image_with_mode(
         cls,
         image_path: Path,
         geom: UnitStrGeometry,
         ctx: RenderContext,
         aspect: ModeLike,
-        transform: Union[str, Xform, None] = None
+        transform: Union[str, Xform, None] = None,
+        cache=None,
     ):
         """
         Returns a QImage (export) or QPixmap (GUI) already scaled to the px size
@@ -127,58 +182,118 @@ class ProtoPaint:
         For FILL (KeepAspectRatioByExpanding) we crop the overshoot to avoid
         a second scale later.
         """
-        if not ValidPath.check(image_path, must_exist=True):
-            return None
+        aspect_mode, xform_mode = ImageScaleMode.resolve(aspect, transform)
+        w_px, h_px = cls._target_size_px(geom, ctx)
 
-        try:
-            # 1) Load base
-            if ctx.is_export:
-                # Use reader for best fidelity + EXIF orientation
-                reader = QImageReader(str(image_path))
-                reader.setAutoTransform(True)
-                base_img = reader.read()
-                if base_img.isNull():
-                    return None
-                base = base_img  # QImage
-            else:
-                base_px = QPixmap(str(image_path))
-                if base_px.isNull():
-                    return None
-                base = base_px  # QPixmap
+        cache_obj = cache or getattr(ctx, "cache", None)
 
-            # 2) Resolve target size in px from your geometry at ctx.dpi
-            # replace the size_tuple/to(...).value block with this:
-            geom_px = geom.to("px", dpi=ctx.dpi)
-            w_px = max(1, round(float(geom_px.size.width())))
-            h_px = max(1, round(float(geom_px.size.height())))
-            target_px_size = QSize(w_px, h_px)
+        def factory():
+            return cls._generate_scaled_image(image_path, geom, ctx, aspect_mode, xform_mode)
 
+        if cache_obj is not None:
+            key = cache_obj.image_key(
+                source=image_path,
+                target_size=(w_px, h_px),
+                aspect_mode=int(aspect_mode),
+                transform_mode=int(xform_mode),
+                ctx=ctx,
+            )
+            return cache_obj.image(key, factory)
 
-            # 3) Resolve aspect + transform
-            aspect_mode, xform_mode = ImageScaleMode.resolve(aspect, transform)
-            # Stretch/Fit/Fill map to:
-            #  - IgnoreAspectRatio
-            #  - KeepAspectRatio
-            #  - KeepAspectRatioByExpanding
+        return factory()
 
-            # 4) Scale
-            scaled = base.scaled(target_px_size, aspect_mode, xform_mode)
+    @classmethod
+    def _build_text_document(
+        cls,
+        obj,
+        ctx: RenderContext,
+        width_px: float,
+        padding_pt: float,
+        alignment,
+        wrap_mode,
+        color,
+    ) -> QTextDocument:
+        doc = QTextDocument(getattr(obj, "content", "") or "")
 
-            # 5) If FILL expanded beyond at least one side, crop to exact box
-            if aspect_mode == Qt.KeepAspectRatioByExpanding:
-                sw, sh = scaled.width(), scaled.height()
-                if (sw, sh) != (w_px, h_px):
-                    # center-crop to target size
-                    cx = max(0, (sw - w_px) // 2)
-                    cy = max(0, (sh - h_px) // 2)
-                    crop_rect = QRect(cx, cy, w_px, h_px)
-                    # QImage.copy / QPixmap.copy both exist:
-                    scaled = scaled.copy(crop_rect)
+        font = getattr(obj, "font", None)
+        if font is not None:
+            qfont = font.scale(ldpi=144, dpi=ctx.dpi).to("pt", dpi=ctx.dpi).qfont
+            doc.setDefaultFont(qfont)
 
-            return scaled
-        except Exception as e:
-            print(f"Image load/scale failed: {e}")
-            return None
+        doc.setDocumentMargin(padding_pt)
+        doc.setTextWidth(width_px)
+
+        opt = QTextOption()
+        opt.setWrapMode(QTextOption.WrapMode(int(wrap_mode)))
+        opt.setAlignment(Qt.Alignment(int(alignment)))
+        doc.setDefaultTextOption(opt)
+
+        if color is not None:
+            cursor = QTextCursor(doc)
+            cursor.select(QTextCursor.Document)
+            fmt = QTextCharFormat()
+            fmt.setForeground(QBrush(color))
+            cursor.mergeCharFormat(fmt)
+
+        return doc
+
+    @classmethod
+    def text_document(
+        cls,
+        obj,
+        ctx: RenderContext,
+        *,
+        geom_pt: Optional[UnitStrGeometry] = None,
+        cache=None,
+    ) -> QTextDocument:
+        geom_pt = geom_pt or cls.ctx_geom(obj.geometry, ctx)
+        geom_px = geom_pt.to("px", dpi=ctx.dpi)
+        width_px = float(geom_px.size.width())
+        height_px = float(geom_px.size.height())
+
+        padding = getattr(obj, "padding", None)
+        padding_pt = padding.to("pt", dpi=ctx.dpi).value if padding is not None else 0.0
+
+        alignment = getattr(obj, "h_align", Qt.AlignLeft | Qt.AlignTop)
+        wrap_mode = getattr(obj, "wrap_mode", QTextOption.WordWrap)
+        color = getattr(obj, "color", None)
+
+        font = getattr(obj, "font", None)
+        font_signature = ""
+        if font is not None and hasattr(font, "to_dict"):
+            font_signature = json.dumps(font.to_dict(), sort_keys=True)
+
+        content = getattr(obj, "content", "") or ""
+        content_hash = hashlib.sha1(content.encode("utf-8")).hexdigest()
+
+        cache_obj = cache or getattr(ctx, "cache", None)
+
+        def factory() -> QTextDocument:
+            return cls._build_text_document(
+                obj,
+                ctx,
+                width_px,
+                padding_pt,
+                alignment,
+                wrap_mode,
+                color,
+            )
+
+        if cache_obj is not None:
+            key = cache_obj.text_key(
+                content_hash=content_hash,
+                font_signature=font_signature,
+                width_px=width_px,
+                height_px=height_px,
+                padding_pt=padding_pt,
+                alignment=int(alignment),
+                wrap_mode=int(wrap_mode),
+                color_rgba=color.rgba() if color is not None else None,
+                ctx=ctx,
+            )
+            return cache_obj.text_document(key, factory)
+
+        return factory()
 
 
     @classmethod
@@ -289,8 +404,6 @@ class ProtoPaint:
         """
         # --- 1) Geometry & clip path in PT ---
         # ctx_geom returns a geom in pts 
-        device = painter.device()
-        device_dpi = device.logicalDpiX() * device.devicePixelRatio()
         geom_pt = cls.ctx_geom(obj.geometry, ctx)
         shape = obj.shape
         extra = (
@@ -299,34 +412,8 @@ class ProtoPaint:
         )
         clip_shape_path = cls.shape_path(shape, geom_pt, ctx, extra=extra)
 
-        # --- 2) Build QTextDocument in PT (font, margin, width) ---
-        doc = QTextDocument(obj.content)
-        # Use UnitStrFont in PT for physical fidelity
-        # (You can also do: qfont = obj.font.pt.qfont if your .pt view is wired)
-        qfont = obj.font.scale(ldpi=144, dpi=ctx.dpi).to("pt", dpi=ctx.dpi).qfont
-
-        doc.setDefaultFont(qfont)
-
-        # Optional padding: keep it in PT to match the frame
-        pad_pt = obj.padding.to("pt", dpi=ctx.dpi).value if obj.padding else 0.0
-        doc.setDocumentMargin(pad_pt)
-
-        # Set layout width (PT) so wrapping matches the frame
-        doc.setTextWidth(geom_pt.to("px", dpi=ctx.dpi).size.width())
-
-        opt = QTextOption()
-        opt.setWrapMode(getattr(obj, "wrap_mode", QTextOption.WordWrap))
-        opt.setAlignment(getattr(obj, "h_align", Qt.AlignLeft | Qt.AlignTop))
-        doc.setDefaultTextOption(opt)
-
-        # Optional default color
-        color = getattr(obj, "color", None)
-        if color is not None:
-            cursor = QTextCursor(doc)
-            cursor.select(QTextCursor.Document)
-            fmt = QTextCharFormat()
-            fmt.setForeground(QBrush(color))
-            cursor.mergeCharFormat(fmt)
+        # --- 2) Build or fetch cached QTextDocument ---
+        doc = cls.text_document(obj, ctx, geom_pt=geom_pt)
 
         # --- 3) Paint in PT coordinates (no manual scaling) ---
         painter.save()

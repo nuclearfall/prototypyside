@@ -4,6 +4,7 @@ from PySide6.QtGui import QFont
 
 from prototypyside.utils.units.unit_str_font import UnitStrFont
 from prototypyside.utils.render_context import RenderContext, RenderMode, RenderRoute, TabMode
+from prototypyside.services.render_cache import RenderCache
 
 # @dataclass
 # class DPIContext:
@@ -37,6 +38,8 @@ class AppSettings(QObject):
             route=RenderRoute.COMPOSITE,
 
         )
+        if self._ctx.cache is None:
+            self._ctx.cache = RenderCache(self._ctx)
         screen = QApplication.primaryScreen()
         logical = screen.logicalDotsPerInch()
         physical = screen.physicalDotsPerInch()
@@ -55,6 +58,8 @@ class AppSettings(QObject):
         if self._ctx == new:
             return
         self._ctx = new
+        if getattr(self._ctx, "cache", None) is None:
+            self._ctx.cache = RenderCache(self._ctx)
 
     @Property(str)
     def unit(self):

@@ -17,6 +17,7 @@ from prototypyside.utils.units.unit_str_geometry import UnitStrGeometry
 from PySide6.QtCore import Qt, QSizeF, QRectF, QMarginsF, QPointF
 from prototypyside.services.proto_class import ProtoClass
 from prototypyside.utils.render_context import RenderContext, RenderMode, RenderRoute, TabMode
+from prototypyside.services.render_cache import RenderCache
 
 pc = ProtoClass
 
@@ -43,17 +44,20 @@ class ExportManager:
             # no CSV → clone exactly `copies` pages
             page_count = max(1, copies)
 
+        page_ctx = RenderContext(
+            route=RenderRoute.COMPOSITE,
+            tab_mode=TabMode.LAYOUT,
+            mode=RenderMode.EXPORT,
+            dpi=72,
+            unit="pt",
+        )
+        page_ctx.cache = RenderCache(page_ctx)
+
         for _ in range(page_count):
             page = registry.clone(layout)
             page.display_mode = False
             page.unit = "pt"
-            page.ctx = RenderContext(
-                route=RenderRoute.COMPOSITE,
-                tab_mode=TabMode.LAYOUT,
-                mode=RenderMode.EXPORT,
-                dpi=72,
-                unit="pt",
-            )
+            page.ctx = page_ctx
             if has_csv:
                 self.merge_manager.set_csv_content_for_next_page(page)
             pages.append(page)
@@ -103,6 +107,7 @@ class ExportManager:
             dpi=72,
             unit="pt"
         )
+        export_ctx.cache = RenderCache(export_ctx)
 
         # Page geometry in points
         page_size_pt: QSizeF = layout.geometry.pt.size

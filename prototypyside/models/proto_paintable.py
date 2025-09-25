@@ -10,6 +10,7 @@ from prototypyside.utils.units.unit_str_geometry import UnitStrGeometry
 from prototypyside.services.proto_class import ProtoClass
 from prototypyside.utils.render_context import RenderContext
 from prototypyside.services.proto_paint import ProtoPaint
+from prototypyside.services.render_cache import RenderCache
 from prototypyside.utils.rotatable_mixin import RotatableMixin
 from prototypyside.config import HMAP, VMAP, HMAP_REV, VMAP_REV
 
@@ -69,6 +70,8 @@ class ProtoPaintable(QGraphicsObject, RotatableMixin):
         self._registry = registry
         self._settings = registry.settings
         self._ctx = ctx
+        if getattr(self._ctx, "cache", None) is None:
+            self._ctx.cache = RenderCache(self._ctx)
         self._shape = "rect"
         self._geometry = geometry
         self._aspect = "fit"
@@ -171,6 +174,8 @@ class ProtoPaintable(QGraphicsObject, RotatableMixin):
 
         # Swap context
         self._ctx = ctx
+        if getattr(self._ctx, "cache", None) is None:
+            self._ctx.cache = RenderCache(self._ctx)
         interactive = bool(ctx.is_gui and ctx.is_component_tab)
         # Cache mode: GUI uses device cache; export/offscreen = no cache
         self.setCacheMode(
