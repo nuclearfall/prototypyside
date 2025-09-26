@@ -17,6 +17,8 @@ from prototypyside.services.proto_class import ProtoClass
 from prototypyside.utils.valid_path import ValidPath
 from prototypyside.utils.render_context import RenderContext, RenderMode, RenderRoute, TabMode
 from prototypyside.services.shape_factory import ShapeFactory
+
+pc = ProtoClass
 SHAPES = {
     "rect":         ShapeFactory.rect,
     "rounded_rect": ShapeFactory.rounded_rect,
@@ -45,7 +47,6 @@ class ComponentTemplate(ProtoPaintable):
         proto:ProtoClass,
         pid: str,
         registry: ProtoRegistry,
-        ctx: RenderContext,
         geometry: UnitStrGeometry = UnitStrGeometry(
             width="2.5in", height="3.5in"),
         name: Optional[str] = None,
@@ -58,8 +59,7 @@ class ComponentTemplate(ProtoPaintable):
         super().__init__(
             proto=proto, 
             pid=pid, 
-            registry=registry, 
-            ctx=ctx, 
+            registry=registry,  
             geometry=geometry, 
             name=name, 
             parent=parent
@@ -73,13 +73,13 @@ class ComponentTemplate(ProtoPaintable):
             self._name = ValidPath.file(self._file_path, stem=True)
         if has_csv_path:
             self._csv_path = ValidPath.file(self._file_path, stem=True)
-        self._ctx.tab_mode = TabMode.COMPONENT
         self._sides = 3
         self._bg_color = QColor(Qt.white)
         # Children
         self.items: List[ComponentElement] = []
 
         self.setFlag(QGraphicsItem.ItemIsSelectable, False)
+        self.setFlag(QGraphicsItem.ItemIsMovable, False)
 
     @property
     def file_path(self):
@@ -128,7 +128,7 @@ class ComponentTemplate(ProtoPaintable):
 
     def add_item(self, item):
         item.nameChanged.connect(self.item_name_change)
-        if item.proto == ProtoClass.TE:
+        if item.proto == pc.TE:
             item._component = self
         if item.pid in self.registry.orphans():
             self.registry.reinsert(item.pid)
@@ -147,9 +147,9 @@ class ComponentTemplate(ProtoPaintable):
             self.template_changed.emit()
             self.item_z_order_changed.emit()
 
-    def clone(self):
-        registry = self.registry
-        return registry.clone(self)
+    def clone(self, register=True, registry=None):
+        this_reg = self.registry
+        return this_reg.clone(self, register=register, registry=registry, component=True)
 
     def to_dict(self) -> Dict[str, Any]:
         sup_data = super().to_dict()
@@ -171,12 +171,13 @@ class ComponentTemplate(ProtoPaintable):
         cls,
         data: dict,
         registry: "ProtoRegistry",
+        clone: bool = False
     ) -> "ComponentTemplate":
         # --- 1) PID & provenance ---
         # For clones we intentionally mint a new 'cc_<uuid>' and record the original PID as tpid.
-        from prototypyside.services.proto_class import ProtoClass  # Enum with PID helpers
 
         serial_pid = data.get("pid")
+        proto = pc.from_prefix(serial_pid)
         if not serial_pid:
             raise ValueError(f"Invalid or missing pid for ComponentTemplate: {original_pid!r}")
 
@@ -184,7 +185,7 @@ class ComponentTemplate(ProtoPaintable):
         geom = UnitStrGeometry.from_dict(data["geometry"])
 
         inst = cls(
-            proto=ProtoClass.CT,
+            proto=proto,
             pid=serial_pid,
             registry=registry,
             geometry=geom,
@@ -196,9 +197,6 @@ class ComponentTemplate(ProtoPaintable):
         inst.csv_path = csv_path
         file_path = data.get("file_path")
         inst.file_path = file_path
-
-        # Compute bleed rect after bleed is set
-        inst.setBleedRect()
 
         return inst
 

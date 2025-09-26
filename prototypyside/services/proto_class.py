@@ -23,11 +23,10 @@ class ProtoClass(Enum):
     CE   = ("ce",  "prototypyside.models.component_element.ComponentElement")
     IE   = ("ie",  "prototypyside.models.image_element.ImageElement")
     TE   = ("te",  "prototypyside.models.text_element.TextElement")
-    VE   = ("ve",  "prototypyside.models.vector_element.VectorElement")
     EO   = ("eo",  "prototypyside.views.overlays.ElementOutline")
-    
+
+    CC   = ("cc",  "prototypyside.models.component.Component")    
     CT   = ("ct",  "prototypyside.models.component_template.ComponentTemplate")
-    CC   = ("cc",  "prototypyside.models.component.Component")
     LT   = ("lt",  "prototypyside.models.layout_template.LayoutTemplate")
     PG   = ("pg",  "prototypyside.models.layout_template.Page")
     LS   = ("ls",  "prototypyside.models.layout_slot.LayoutSlot")
@@ -195,7 +194,3 @@ class ProtoClass(Enum):
         _, prefix, _ = cls.split_pid(pid)
         return prefix
 
-# class PC(Enum):
-#     pc = ProtoClass
-#     CT = ProtoClass.CT
-#     

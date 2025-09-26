@@ -55,16 +55,6 @@ class RenderContext:
     @property
     def is_composite(self):
         return self.route == RenderRoute.COMPOSITE
-
-    # @property
-    # def ctx(self):
-    #     return self._ctx
-
-    # @ctx.setter
-    # def ctx(self, new):
-    #     if self._ctx == new:
-    #         return
-    #     self._ctx = new
     
     @property
     def unit(self):
@@ -95,14 +85,17 @@ class RenderContext:
             "tab_mode": self.tab_mode.name,
             "route": self.route.name,
             "dpi": self.dpi,
+            "unit": self.unit,
         }
 
     @classmethod
     def from_dict(cls, data: dict) -> "RenderContext":
         """Reconstruct a RenderContext from its dict representation."""
         return cls(
+            unit=data.get("unit", "px"),
+            dpi=int(data.get("dpi", 300)),
             mode=RenderMode[data.get("mode", "GUI")],
             tab_mode=TabMode[data.get("tab_mode", "COMPONENT")],
             route=RenderRoute[data.get("route", "COMPOSITE")],
-            dpi=int(data.get("dpi", 300)),
+
         )

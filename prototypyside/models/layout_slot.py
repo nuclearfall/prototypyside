@@ -36,12 +36,12 @@ class LayoutSlot(QGraphicsObject):
     """
     item_changed = Signal()
 
-    def __init__(self, proto, pid, registry, ctx, geometry=None, row=0, column=0, name=None, parent=None):
+    def __init__(self, proto, pid, registry, geometry=None, row=0, column=0, name=None, parent=None):
         super().__init__(parent)
         self.proto = proto
         self._pid = pid
         self._registry = registry
-        self._ctx = ctx
+        self._ctx = registry.settings.ctx
         self._geometry: UnitStrGeometry = geometry
         self._row = row
         self._column = column
@@ -127,8 +127,6 @@ class LayoutSlot(QGraphicsObject):
     @ctx.setter
     def ctx(self, new_ctx: RenderContext):
         self._ctx = new_ctx
-        if self._content:
-            self.content.ctx = new_ctx
         if new_ctx.is_raster:
             self.invalidate_cache()
         self.update()
@@ -206,14 +204,11 @@ class LayoutSlot(QGraphicsObject):
         # Accept only component clones/instances
         if ProtoClass.isproto(obj, ProtoClass.CC):
             self._content = obj
+            obj.ctx = self._ctx
             
             # Hide editor outlines in layout
-            for item in getattr(obj, "items", []):
-                try:
-                    item.display_outline = False
-                    item.ctx = self._ctx
-                except Exception:
-                    pass
+            for item in obj.items:
+                item.ctx = self._ctx
 
             # Parent inside the slot and zero local pos.
             self._content.setParentItem(self)
@@ -239,10 +234,6 @@ class LayoutSlot(QGraphicsObject):
                 except Exception:
                     pass
 
-            # Sync DPI/unit + route flag (avoid double paint)
-            self._content.dpi = self.ctx.dpi
-            self._content.unit = self.ctx.unit
-            self._content.ctx = self._ctx
             self._content.setFlag(QGraphicsItem.ItemHasNoContents, self._ctx.is_raster)
 
             self.invalidate_cache()

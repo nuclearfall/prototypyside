@@ -87,7 +87,6 @@ class AddElementCommand(QUndoCommand):
             # Create a brand-new element. IMPORTANT: do NOT pass tpid for fresh elements.
             self.item = self.registry.create(
                 proto=self.proto,
-                ctx=self.registry.settings.ctx,
                 geometry=self.geometry,
                 parent=self.tab.template
             )
@@ -161,21 +160,24 @@ class CloneElementCommand(QUndoCommand):
 
         self.tab.update_layers_panel()
 
-class RemoveElementCommand(QUndoCommand):
-    def __init__(self, item, tab, description="Remove Element"):
+class RemoveElementsCommand(QUndoCommand):
+    def __init__(self, items, tab, description="Remove Element"):
         super().__init__(description)
-        self.item = item
+        self.items = items
         self.tab = tab
 
     def redo(self):
-        self.tab.template.remove_item(self.item)
-        self.tab.scene.removeItem(self.item)
+        for item in self.items:
+            self.tab.template.remove_item(item)
+            self.tab.scene.removeItem(item)
         self.tab.update_layers_panel()
 
     def undo(self):
-        self.tab.template.add_item(self.item)
-        self.tab.scene.addItem(self.item)
-        self.tab.update_layers_panel()
+        print(self.items)
+        for item in self.items:
+            self.tab.template.add_item(self.item)
+            self.tab.scene.addItem(self.item)
+            self.tab.update_layers_panel()
 
 class MoveElementCommand(QUndoCommand):
     def __init__(self, item, new_pos: QPointF, old_pos: QPointF = None, description="Move Element"):

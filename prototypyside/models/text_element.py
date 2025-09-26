@@ -46,7 +46,6 @@ class TextElement(ComponentElement):
             proto: ProtoClass,
             pid: str, 
             registry: "ProtoRegistry",
-            ctx,
             geometry: UnitStrGeometry=None,
             name: Optional[str] = None,   
             parent: Optional[QGraphicsObject] = None
@@ -55,7 +54,6 @@ class TextElement(ComponentElement):
             proto=proto,
             pid=pid, 
             registry=registry,
-            ctx=ctx,
             geometry=geometry, 
             name=name, 
             parent=parent)
@@ -64,19 +62,8 @@ class TextElement(ComponentElement):
         self._content = "This is a sample text that is intentionally made long enough to demonstrate the overset behavior you would typically see in design software like Adobe InDesign. When this text cannot fit within the defined boundaries of the text frame, a small red plus icon will appear, indicating that there is more text than is currently visible."
         self.wrap_mode = QTextOption.WordWrap
 
-        self._padding = UnitStr("10px", dpi=self.ctx.dpi)
+        self._padding = UnitStr("10px", dpi=self._ctx.dpi)
         self._wants_overflow = False
-
-        # # Attach the decoupled outline/handle overlay
-        # self._outline = TextOutline(self, parent=self)
-        self.setFlag(QGraphicsItem.ItemIsSelectable, True)
-        self.setSelected(True)
-        if self._ctx.is_component_tab and self._ctx.is_gui:
-            self._display_outline = True
-        else:
-            self._display_outline = False
-        self._outline.setEnabled(self._display_outline)
-        self._outline.setVisible(self._display_outline)
 
     @property
     def wants_overflow(self):
@@ -125,9 +112,6 @@ class TextElement(ComponentElement):
     @property
     def outline(self):
         return self._outline
-
-    def clone(self):
-        super().clone(self)
 
     def to_dict(self):
         data = super().to_dict()  # ← include base fields

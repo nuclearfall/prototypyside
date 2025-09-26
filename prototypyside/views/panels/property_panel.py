@@ -14,7 +14,6 @@ from prototypyside.widgets.unit_str_geometry_field import UnitStrGeometryField
 from prototypyside.utils.units.unit_str_geometry import UnitStrGeometry
 from prototypyside.models.text_element import TextElement
 from prototypyside.models.image_element import ImageElement
-from prototypyside.models.vector_element import VectorElement
 from prototypyside.widgets.color_picker import ColorPickerWidget
 from prototypyside.widgets.rotation_field import RotationField
 from prototypyside.views.toolbars.font_toolbar import FontToolbar
@@ -313,7 +312,6 @@ class PropertyPanel(QWidget):
         # Common type subsets
         text_items = self._targets_of_type(TextElement)
         image_items = self._targets_of_type(ImageElement)
-        vector_items = self._targets_of_type(VectorElement)
 
         # Name: typically unique — disable on multi to avoid unintended rename
         if self._is_multi():
@@ -380,7 +378,6 @@ class PropertyPanel(QWidget):
         # Content & font toolbar
         show_text_editor = len(text_items) == len(items) and len(items) > 0
         show_image_button = len(image_items) == len(items) and len(items) > 0
-        show_vector_button = len(vector_items) == len(items) and len(items) > 0
 
         # Mutually exclusive stacks
         if show_text_editor:
@@ -406,7 +403,7 @@ class PropertyPanel(QWidget):
             else:
                 self.font_toolbar.setTarget(text_items[0])
 
-        elif show_image_button or show_vector_button:
+        elif show_image_button:
             self.content_stack.setCurrentWidget(self.content_path_button)
             self.content_stack.setMaximumHeight(20)
             self.font_toolbar.setVisible(False)

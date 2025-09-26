@@ -24,7 +24,7 @@ if TYPE_CHECKING:
     from prototypyside.views.overlays.print_lines import PrintLines
 
 pc = ProtoClass
-any_el_type = [pc.CE, pc.TE, pc.IE, pc.VE]
+any_el_type = [pc.CE, pc.TE, pc.IE, ]
 
 # -------------------------------------------------------------------------
 # Scene
@@ -166,18 +166,17 @@ class ComponentScene(QGraphicsScene):
     # ───────────────────────────── mouse events ───────────────────────────
     def mousePressEvent(self, event: QGraphicsSceneMouseEvent):
         pos = event.scenePos()
-        item = self.itemAt(pos, QTransform())
-        # Alt-drag duplication (only when pressed over a ComponentElement)
-        is_component = pc.isproto(item, any_el_type)
-        if item and (event.modifiers() & Qt.AltModifier) and is_component:
-            print(f"Component of type {type(item)} located.")
+        item = self._component_under(pos)  # <-- instead of self.itemAt(...)
+
+        # Alt-drag duplication
+        if item and (event.modifiers() & Qt.AltModifier):
             self.select_exclusive(item)
             self._begin_alt_dup(item, pos)
             self.alt_drag_original_item = item
             event.accept()
             return
 
-        # Shift-click toggle keeps existing behavior
+        # Shift-click toggle (works even if outline was on top)
         if item and (event.modifiers() & Qt.ShiftModifier):
             item.setSelected(not item.isSelected())
             event.accept()
@@ -207,7 +206,7 @@ class ComponentScene(QGraphicsScene):
         super().mousePressEvent(event)
 
     def mouseMoveEvent(self, event: QGraphicsSceneMouseEvent):
-        if self._dup_active:
+        if self._dup_active and (event.modifiers() & Qt.AltModifier):
             self._update_alt_dup(event.scenePos())
             event.accept()
             return
@@ -246,6 +245,7 @@ class ComponentScene(QGraphicsScene):
                 proto = ProtoClass.from_prefix(prefix)
                 if proto:
                     self.create_item_with_dims.emit(proto, geom)
+
                 self._teardown_preview()
                 self._creation_state  = 'idle'
                 self._creation_prefix = None
@@ -259,6 +259,11 @@ class ComponentScene(QGraphicsScene):
 
         super().mouseReleaseEvent(event)
 
+    def _component_under(self, pos) -> QGraphicsItem | None:
+        it = self.itemAt(pos, QTransform())
+        while it is not None and not pc.isproto(it, any_el_type):
+            it = it.parentItem()
+        return it
 
     def keyPressEvent(self, event):
         if (event.key() == Qt.Key_A) and (event.modifiers() & (Qt.ControlModifier | Qt.MetaModifier)):
@@ -311,6 +316,7 @@ class ComponentScene(QGraphicsScene):
             return
         # deep clone, but do NOT register
         clone = self.template.registry.clone(source, register=False)
+        source.setSelected(False)
         # stylistic preview: higher Z, semi-transparent, not selectable
         clone.setOpacity(0.6)
         clone.setZValue(9_999)
@@ -371,7 +377,7 @@ class ComponentScene(QGraphicsScene):
             if it is self._preview_item:
                 continue
             # If you want to restrict to your element types, keep your pc.isproto check:
-            # if not pc.isproto(it, (pc.CE, pc.TE, pc.IE, pc.VE)):
+            # if not pc.isproto(it, (pc.CE, pc.TE, pc.IE, )):
             #     continue
             if it.flags() & QGraphicsItem.ItemIsSelectable:
                 return True

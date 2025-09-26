@@ -12,8 +12,27 @@ _CTX.prec = 34
 _CTX.rounding = ROUND_HALF_UP
 
 # ----- Parsing
+
 NUM_UNIT_RE = re.compile(
-    r"^\s*(-?(?:\d+(?:\.\d+)?|\.\d+))\s*([a-zA-Z\"']+)?(?:@(\d+))?\s*$"
+    r"""
+    ^\s*
+    (                                  # 1) value_str
+      [+-]?                            #   optional sign
+      (?:\d+(?:\.\d*)?|\.\d+)          #   decimal number (1, 1., 1.0, .5)
+      (?:[eE][+-]?\d+)?                #   optional exponent (e.g. 1e-9, 0E-9)
+    )
+    (?:\s*
+      (                                # 2) unit_blob  (may include inline @dpi)
+        (?:
+          in|mm|cm|pt|px
+        )
+        (?:\s*@\s*\d+)?                #   optional inline @dpi (e.g. px@144)
+      )
+    )?
+    (?:\s*@\s*(\d+))?                  # 3) dpi_at_str (trailing @dpi)
+    \s*$
+    """,
+    re.IGNORECASE | re.VERBOSE,
 )
 UNIT_ONLY_RE = re.compile(r"^\s*([a-zA-Z\"']+)\s*(?:@(\d+))?\s*$")
 
@@ -97,7 +116,7 @@ class UnitStr:
         self._cache: dict[tuple[str, int], float] = {}
 
         internal_unit = "in"
-
+        
         # Clone
         if isinstance(raw, UnitStr):
             self._raw   = raw._raw
@@ -293,22 +312,25 @@ class UnitStr:
         return float(u.value)  # see note on .value below
 
     def to_dict(self) -> dict:
-        return {u: self.to(u) for u in ("in", "mm", "cm", "pt", "px")}
+        # Keep exact Decimal inches, but serialize as a string for JSON safety.
+        return {
+            "unit": self.unit,                     # creation unit
+            "dpi": int(self.dpi) if self.dpi is not None else None,  # creation dpi
+            "inch": str(self._value),              # canonical Decimal inches → string
+        }
 
     @classmethod
-    def from_dict(cls, data: dict, *, unit: str = "in", dpi: int = 300) -> "UnitStr":
-        u, u_dpi = _parse_unit_maybe_at(unit)
-        u = u or "in"
-        if u in data:
-            if u == "px" and u_dpi is not None:
-                return cls(f"{data[u]} px@{u_dpi}", dpi=dpi)
-            return cls(f"{data[u]} {u}", dpi=dpi)
-        for alt in ("in", "mm", "cm", "pt"):
-            if alt in data:
-                return cls(f"{data[alt]} {alt}", dpi=dpi)
-        if "px" in data:
-            return cls(data["px"], unit="px", dpi=dpi)
-        raise ValueError("UnitStr.from_dict: no recognised unit found in data")
+    def from_dict(cls, data: dict, *, unit: str | None = "in", dpi: int | None = 300) -> "UnitStr":
+        # Strict: expects exactly {"unit":..., "dpi":..., "inch": "..."} as produced by to_dict()
+        # Caller may optionally override target creation unit/dpi via kwargs.
+        u = unit if unit is not None else data.get("unit")
+        d = dpi  if dpi  is not None else data.get("dpi")
+        inch_val = data["inch"]            # string we emitted in to_dict()
+        # Recreate via your existing parsing/constructor path so all behaviors remain:
+        #   - internal canonical inches preserved
+        #   - creation unit/dpi set as requested
+        return cls(f"{inch_val} in", unit=u, dpi=d)
+
 
     # --------- arithmetic in inches
     def _as_decimal_inches(self) -> Decimal:

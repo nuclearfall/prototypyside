@@ -24,10 +24,10 @@ class ProtoPaintable(QGraphicsObject, RotatableMixin):
         # dict_key      : (from_fn,             to_fn,                  default)
         "shape":   		(str,                  		lambda s: s,                 "rect"),
         "z_order":      (int,                   	lambda z: z,                0),
-        "color":        (QColor.fromRgba,       	lambda c: c.rgba(),         ),
-        "bg_color":     (QColor.fromRgba,       	lambda c: c.rgba(),         None),
-        "border_color": (QColor.fromRgba,       	lambda c: c.rgba(),         None),
-        "bleed": (UnitStr.from_dict,         lambda u: u.to_dict(),      UnitStr("0.0 in")),
+        "color":        (QColor.fromRgba,       	lambda c: c.rgba(),         QColor(Qt.black)),
+        "bg_color":     (QColor.fromRgba,       	lambda c: c.rgba(),         QColor(Qt.white)),
+        "border_color": (QColor.fromRgba,       	lambda c: c.rgba(),         QColor(Qt.black)),
+        "bleed":        (UnitStr.from_dict,         lambda u: u.to_dict(),      UnitStr("0.0 in")),
         "border_width": (UnitStr.from_dict,     	lambda u: u.to_dict(),      UnitStr("0.0 in")),
         "corner_radius":(UnitStr.from_dict,     	lambda u: u.to_dict(),      UnitStr("0.0 in")),
         "rotation":     (int,                   	lambda v: v,                0),
@@ -58,7 +58,6 @@ class ProtoPaintable(QGraphicsObject, RotatableMixin):
         proto: ProtoClass,
         pid: str, 
         registry: "ProtoRegistry",
-        ctx: RenderContext, 
         geometry: UnitStrGeometry=None,
         name: Optional[str] = None,   
         parent: Optional[QGraphicsObject] = None
@@ -69,7 +68,7 @@ class ProtoPaintable(QGraphicsObject, RotatableMixin):
         self._pid = pid
         self._registry = registry
         self._settings = registry.settings
-        self._ctx = ctx
+        self._ctx = registry.settings.ctx
         if getattr(self._ctx, "cache", None) is None:
             self._ctx.cache = RenderCache(self._ctx)
         self._shape = "rect"
@@ -95,13 +94,8 @@ class ProtoPaintable(QGraphicsObject, RotatableMixin):
 
         self.setFlag(
             QGraphicsItem.ItemSendsGeometryChanges, True)
-        if ctx.is_gui:
+        if self._ctx.is_gui:
             self.setCacheMode(QGraphicsItem.DeviceCoordinateCache)
-            if ctx.is_component_tab and not self.proto == pc.CT:
-                self.setSelected(True)
-                self.setFlag(QGraphicsItem.ItemIsSelectable, True)
-                self.setFlag(QGraphicsItem.ItemIsMovable, True)
-                self.setAcceptHoverEvents(True)
         else:
             self.setCacheMode(QGraphicsItem.NoCache)
         
@@ -171,26 +165,26 @@ class ProtoPaintable(QGraphicsObject, RotatableMixin):
         # If nothing meaningful changed, bail early
         if ctx == self._ctx:
             return
-
-        # Swap context
         self._ctx = ctx
-        if getattr(self._ctx, "cache", None) is None:
-            self._ctx.cache = RenderCache(self._ctx)
-        interactive = bool(ctx.is_gui and ctx.is_component_tab)
-        # Cache mode: GUI uses device cache; export/offscreen = no cache
-        self.setCacheMode(
-            QGraphicsItem.DeviceCoordinateCache if interactive else QGraphicsItem.NoCache
-        )
+        # # Swap context
+        # self._ctx = ctx
+        # if getattr(self._ctx, "cache", None) is None:
+        #     self._ctx.cache = RenderCache(self._ctx)
+        # interactive = bool(ctx.is_gui and ctx.is_component_tab)
+        # # Cache mode: GUI uses device cache; export/offscreen = no cache
+        # self.setCacheMode(
+        #     QGraphicsItem.DeviceCoordinateCache if interactive else QGraphicsItem.NoCache
+        # )
 
-        # Interactivity only in Component tab (GUI)
+        # # Interactivity only in Component tab (GUI)
         
-        self.setFlag(QGraphicsItem.ItemIsSelectable, interactive)
-        self.setFlag(QGraphicsItem.ItemIsMovable, interactive)
-        self.setAcceptHoverEvents(interactive)
+        # self.setFlag(QGraphicsItem.ItemIsSelectable, interactive)
+        # self.setFlag(QGraphicsItem.ItemIsMovable, interactive)
+        # self.setAcceptHoverEvents(interactive)
 
-        # Leaving interactive mode? ensure deselected
-        if not interactive and self.isSelected():
-            self.setSelected(False)
+        # # Leaving interactive mode? ensure deselected
+        # if not interactive and self.isSelected():
+        #     self.setSelected(False)
 
         self.update()
 
@@ -223,7 +217,7 @@ class ProtoPaintable(QGraphicsObject, RotatableMixin):
         self._geometry = new_geom
 
         if pos_changed and self.pos() != new_pos_px:
-            self.positionChanged.emit()
+            self.positionChanged.emit(new_pos_px)
             self.setPos(new_pos_px)
 
         self.geometryChanged.emit(self._geometry)
@@ -399,7 +393,10 @@ class ProtoPaintable(QGraphicsObject, RotatableMixin):
             self._v_align = value
             self.item_changed.emit()
             self.update() 
-                   
+   
+    def render(self, painter, ctx):
+        ProtoPaint.render(self, painter, ctx)
+
     def paint(self, painter: QPainter, option, widget=None):
         ctx = self._ctx
  
@@ -408,16 +405,15 @@ class ProtoPaintable(QGraphicsObject, RotatableMixin):
         ProtoPaint.render(self, ctx, painter)
         painter.restore()
 
-    def clone(self):
-        registry = self.registry
-        return registry.clone(self)
+    def clone(self, register=True, registry=None):
+        this_reg = self.registry
+        return this_reg.clone(self, register=register, registry=registry)
 
     def to_dict(self) -> Dict[str, Any]:
         data = {
             "pid":      self._pid,
             "geometry": self._geometry.to_dict(),
             "name":     self._name,
-            "ctx":	self._ctx.to_dict(),
             "content":  self._content
         }
 
@@ -430,14 +426,12 @@ class ProtoPaintable(QGraphicsObject, RotatableMixin):
     @classmethod
     def from_dict(cls, data: Dict[str, Any], registry: "ProtoRegistry"):
         geom = UnitStrGeometry.from_dict(data.get("geometry"))
-        ctx = RenderContext.from_dict(data.get("ctx"))
         # any pid errors will be caught by the registry
         pid  = pc.validate_pid(data.get("pid"))
         inst = cls(
             proto = pc.from_class(cls),
             pid=pid,
             registry=registry,
-            ctx=ctx,
             geometry=geom,
             name=data.get("name"),
         )

@@ -30,54 +30,45 @@ class ComponentElement(ProtoPaintable):
         proto: ProtoClass,
         pid: str, 
         registry: "ProtoRegistry", 
-        ctx: RenderContext,
         geometry: UnitStrGeometry,
         name: Optional[str] = None,   
         parent = None
     ):
-        super().__init__(proto, pid, registry, ctx, geometry, name, parent)
+        super().__init__(proto, pid, registry, geometry, name, parent)
 
         self._shape = "rect"
-        self._geometry = geometry or UnitStrGeometry(width="0.75in", height="0.5in", x="10 px", y="10 px", dpi=ctx.dpi)
+        self._geometry = geometry or UnitStrGeometry(width="0.75in", height="0.5in", x="10 px", y="10 px", dpi=self._ctx.dpi)
 
         self._outline = ElementOutline(self, parent=self)
-        self._corner_radius = UnitStr(".125 in", dpi=ctx.dpi)
-        self._display_outline = True
+        self._corner_radius = UnitStr(".125 in", dpi=self._ctx.dpi)
 
         self._group_drag_active = False
         self._group_drag_items = []
         self._group_drag_start_pos = {}
         self._group_anchor_pos = QPointF()
-     
+
+        if self._ctx.is_component_tab and self._ctx.is_gui:
+            self._outline.setEnabled(True)
+            self._outline.setVisible(True)
+            self.setSelected(True)
+            self.setAcceptDrops(True)
+            self.setFlag(QGraphicsItem.ItemIsSelectable, True)
+            self.setFlag(QGraphicsItem.ItemIsMovable, True)
+            self.setAcceptedMouseButtons(Qt.LeftButton)
+            self.setAcceptHoverEvents(True)     
         
     def boundingRect(self) -> QRectF:
         ctx = self.ctx
         r = self._geometry.to(ctx.unit, dpi=ctx.dpi).rect
-        if ctx.is_gui and ctx.is_component_tab:
-            pad = 12.0
-            return r.adjusted(-pad, -pad, pad, pad)
-        else:
-            return r
+        # if ctx.is_gui and ctx.is_component_tab:
+        #     pad = 12.0
+        #     return r.adjusted(-pad, -pad, pad, pad)
+        # else:
+        return r
 
     @property
     def outline(self):
         return self._outline
-
-    @property
-    def display_outline(self) -> bool:
-        return self._display_outline
-
-    @display_outline.setter
-    def display_outline(self, state: bool):
-        self._display_outline = state
-        self._outline.setEnabled(state)
-        self._outline.setVisible(state)
-        self.update()
-
-    @classmethod
-    def from_dict(cls, data: dict, registry):
-        inst = super().from_dict(data, registry=registry)
-        return inst
 
     def mousePressEvent(self, event):
         if event.button() == Qt.LeftButton and self.isSelected():

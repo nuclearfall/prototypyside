@@ -328,30 +328,27 @@ class UnitStrGeometry:
             "unit": self._unit,
             "dpi": self._dpi,
             "print_dpi": self._print_dpi,
-            "pos": {"x": self._pos_x.to_dict(), "y": self._pos_y.to_dict()},
-            "rect": {
-                "x": self._rect_x.to_dict(),
-                "y": self._rect_y.to_dict(),
-                "width": self._w.to_dict(),
-                "height": self._h.to_dict(),
-            },
+            "pos_x": self._pos_x.to_dict(),
+            "pos_y": self._pos_y.to_dict(),
+            "rect_x": self._rect_x.to_dict(),
+            "rect_y": self._rect_y.to_dict(),
+            "width": self._w.to_dict(),
+            "height": self._h.to_dict(),
         }
 
     @classmethod
-    def from_dict(cls, blob: dict) -> UnitStrGeometry:
-        dpi = blob.get("dpi", 300)
-        unit = blob.get("unit", "in")
-        pos_data = blob.get("pos", {})
-        rect_data = blob.get("rect", {})
+    def from_dict(cls, data: dict) -> UnitStrGeometry:
+        dpi = data.get("dpi", 300)
+        unit = data.get("unit", "in")
         return cls(
-            x=UnitStr.from_dict(pos_data.get("x", {}), dpi=dpi),
-            y=UnitStr.from_dict(pos_data.get("y", {}), dpi=dpi),
-            rect_x=UnitStr.from_dict(rect_data.get("x", {}), dpi=dpi),
-            rect_y=UnitStr.from_dict(rect_data.get("y", {}), dpi=dpi),
-            width=UnitStr.from_dict(rect_data.get("width", {}), dpi=dpi),
-            height=UnitStr.from_dict(rect_data.get("height", {}), dpi=dpi),
+            x=UnitStr.from_dict(data.get("pos_x", "0.0"), unit=unit, dpi=dpi),
+            y=UnitStr.from_dict(data.get("pos_y", "0.0"), unit=unit, dpi=dpi),
+            rect_x=UnitStr.from_dict(data.get("rect_x", "0.0"), unit=unit, dpi=dpi),
+            rect_y=UnitStr.from_dict(data.get("rect_y", "0.0"), unit=unit, dpi=dpi),
+            width=UnitStr.from_dict(data.get("width", "0.0"), unit=unit, dpi=dpi),
+            height=UnitStr.from_dict(data.get("height", "0.0"), unit=unit, dpi=dpi),
             dpi=dpi,
-            print_dpi=blob.get("print_dpi", 300),
+            print_dpi=data.get("print_dpi", 300),
             unit=unit,
         )
 

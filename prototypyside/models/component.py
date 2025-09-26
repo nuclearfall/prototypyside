@@ -24,7 +24,6 @@ class Component(ComponentTemplate):
 		proto: "ProtoClass",
 		pid: str,
 		registry: "ProtoRegistry",
-		ctx,
 		geometry: "UnitStrGeometry" = None,
 		name: Optional[str] = None,
 		shape: str = "rounded_rect",
@@ -37,7 +36,6 @@ class Component(ComponentTemplate):
 			proto=proto,
 			pid=pid,
 			registry=registry,
-			ctx = ctx,
 			geometry=geometry,
 			name=name,
 			shape=shape,
@@ -45,7 +43,6 @@ class Component(ComponentTemplate):
 			csv_path=csv_path,
 			parent=parent,
 		)
-
 		# Will be set by the slot that owns/hosts this component
 		self._csv_row: csv_row
 		self._has_csv_conent = False
@@ -64,7 +61,7 @@ class Component(ComponentTemplate):
 	# ---- QGraphicsItem overrides ------------------------------------------
 
 	def boundingRect(self) -> QRectF:
-		base = (self._bleed_rect if self._include_bleed else self._geometry).to(self.ctx.unit, dpi=self.dpi).rect
+		base = (self._bleed_rect if self._include_bleed else self._geometry).to(self.ctx.unit, dpi=self.ctx.dpi).rect
 		return QRectF(0, 0, base.width(), base.height())
 		
 	# ---- Slot binding ------------------------------------------------------

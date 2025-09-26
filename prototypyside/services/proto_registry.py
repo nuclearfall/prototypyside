@@ -18,7 +18,6 @@ _SUFFIX_RE = re.compile(r"^(?P<root>.*)\((?P<n>\d+)\)\s*$")
 
 BASE_NAMES = {
     "te": "Text Element",
-    "ve": "Vector Element",
     "ie": "Image Element",
     "ce": "Component Element", # Should never be used but exists for ProtoClass.
     "ct": "Component Template",
@@ -189,12 +188,11 @@ class ProtoRegistry(QObject):
         if not isinstance(proto, ProtoClass):
             raise TypeError(f"create() expects a ProtoClass member, got {proto}")
         pid = ProtoClass.issue_pid(proto)
-        ctx = kwargs.get("ctx", self.settings.ctx)
         name = kwargs.get("name", None)
-        kwargs = {k:v for k, v in kwargs.items() if k not in ["proto", "name", "ctx", "pid"]}
+        kwargs = {k:v for k, v in kwargs.items() if k not in ["proto", "name", "pid"]}
         registry = self
         obj = self._factory.create(proto=proto, pid=pid, 
-            registry=self, ctx=ctx, name=name, **kwargs)
+            registry=self, name=name, **kwargs)
 
         return obj
 
@@ -231,8 +229,9 @@ class ProtoRegistry(QObject):
         return data
 
     # recursively rehydrates proto objects
-    def from_dict(self, data: dict):
+    def from_dict(self, data: dict, registry=None):
         # 1) Construct the parent via factory/model from_dict (parent-only)
+        registry = registry if registry else self
         obj = self._factory.from_dict(data, registry=self)
 
         # 2) Register parent immediately (so children can reference it if needed)
@@ -264,19 +263,18 @@ class ProtoRegistry(QObject):
 
         return obj
 
-
-    def clone(self, obj: Any, register: bool = True, new_registry=False):
-
+    def clone(self, obj: Any, register: bool = True, registry=None):
+        registry = registry if registry else self
         # 1) Serialize source
         data = self._factory.to_dict(obj)
 
         # 2) Issue fresh PID for the parent clone (preserve prefix via ProtoClass)
         proto = ProtoClass.from_prefix(data.get("pid"))
         if proto == ProtoClass.CT:
-            # ComponentTemplate clones are components
             proto = ProtoClass.CC
+            
         data["pid"] = ProtoClass.issue_pid(proto)
-
+        print(f"Creating clone with pid: {data.get("pid")}")
         # 3) Lineage (only if type carries tpid)
         if hasattr(obj, "tpid"):
             data["tpid"] = getattr(obj, "tpid", None) or obj.pid
@@ -288,7 +286,7 @@ class ProtoRegistry(QObject):
         data.pop("items", None)
 
         # 5) Construct the parent clone
-        clone = self._factory.from_dict(data, registry=self)
+        clone = self._factory.from_dict(data, registry=registry)
 
         # 6) Clone per-object content (e.g., LayoutSlot.content) if present
         content = getattr(obj, "content", None)
@@ -301,20 +299,15 @@ class ProtoRegistry(QObject):
         if isinstance(src_items, (list, tuple)):
             cloned_items = []
             for child in src_items:
-                child_clone = self.clone(child, register=register)
+                child_clone = self.clone(child, register=register, registry=registry)
                 # Parent/scene wiring for QGraphicsItems
                 if hasattr(child_clone, "setParentItem") and hasattr(clone, "setParentItem"):
                     child_clone.setParentItem(clone)
                 cloned_items.append(child_clone)
             setattr(clone, "items", cloned_items)
 
-        if proto == ProtoClass.LT:
-            clone.setGrid()
-            clone.updateGrid()
         # 8) Register the clone
-        registry = new_registry if new_registry else self
-        if register:
-            registry.register(clone)
+        registry = registry if registry else self
 
         return clone
 
@@ -359,7 +352,6 @@ class ProtoRegistry(QObject):
             results += child.get_by_prefix(prefix)
         return results
 
-
     def get_last(self, prefix=None) -> object:
         vals = list(self._store.values())
         return vals[-1] if vals else None
@@ -400,9 +392,13 @@ class RootRegistry(ProtoRegistry):
         self.register(template)
         return new, template
 
-    def add_child(self, child):
+    def add_child(self, child, template):
         child.root = self
+        if template.pid not in child._store:
+            child.register(template)
         self._children.append(child)
+        self._repeat_registered(template.pid)
+
 
     def remove_child(self, child):
         if child in self._children:
@@ -416,7 +412,6 @@ class RootRegistry(ProtoRegistry):
 
             child.root = None
             self._children.remove(child)
-
 
     def has(self, pid):
         if pid in self._store:

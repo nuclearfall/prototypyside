@@ -97,6 +97,7 @@ class LayoutPalette(QWidget):
                     return
             # print(f"Object pid is {pid}")
             obj = self.registry.global_get(pid)
+            print(obj.pid)
             self._add_component_item(obj)
         self.refresh()
 

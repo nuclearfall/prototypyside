@@ -41,7 +41,6 @@ class LayoutTemplate(QGraphicsObject):
         proto:ProtoClass,
         pid: str,
         registry: ProtoRegistry,
-        ctx,
         pagination_policy: Optional[dict] = None,  
         name: Optional[str] = None, 
         file_path: Optional[Path] = None,
@@ -52,7 +51,7 @@ class LayoutTemplate(QGraphicsObject):
         self.proto = proto
         self._pid = pid
         self._registry = registry
-        self._ctx = ctx     
+        self._ctx = registry.settings.ctx 
         self._name = name
         self._file_path = ValidPath.file(file_path, must_exist=True)
         self._items: list[LayoutSlot] = []
@@ -115,11 +114,18 @@ class LayoutTemplate(QGraphicsObject):
     @property
     def ctx(self) -> RenderContext: return self._ctx
 
+    # sets ctx for the entire page
     @ctx.setter
     def ctx(self, new) -> None:
         self._ctx = new
         for slot in self.items:
             slot.ctx = new
+            comp = slot.content
+            if comp:
+                comp.ctx = new
+                for item in comp.items:
+                    item.ctx = new
+        self.update()
 
     @property
     def polkey(self):

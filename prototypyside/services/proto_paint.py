@@ -5,10 +5,11 @@ from dataclasses import dataclass
 from pathlib import Path
 from typing import Callable, Optional, Tuple, Union
 
-from PySide6.QtCore import Qt, QRectF, QSize
+from PySide6.QtCore import Qt, QRectF, QSize, QRect
 from PySide6.QtGui import (QPainter, QImage, QPixmap, QPen, 
     QTextOption, QTextLayout, QFontMetricsF, QTextDocument, 
     QTextCursor, QTextCharFormat, QBrush, QImageReader)
+
 from prototypyside.services.proto_class import ProtoClass
 from prototypyside.services.shape_factory import ShapeFactory
 from prototypyside.utils.render_context import RenderContext
@@ -17,8 +18,8 @@ from prototypyside.utils.units.unit_str import UnitStr
 from prototypyside.utils.units.unit_str_geometry import UnitStrGeometry
 
 pc = ProtoClass
-elem_types = [pc.IE, pc.TE, pc.VE]
-image_types = [pc.IE, pc.VE, pc.CT, pc.CC]
+elem_types = [pc.IE, pc.TE, ]
+image_types = [pc.IE, pc.CT, pc.CC]
 zero = UnitStr(0)
 Aspect = Qt.AspectRatioMode
 Xform  = Qt.TransformationMode
@@ -108,12 +109,6 @@ SHAPES = {
 
 
 
-
-# imports you’ll likely need
-from PySide6.QtCore import QSize, QRect
-from PySide6.QtGui import (QImage, QPixmap, QImageReader, QPainter,
-                           Qt)
-
 class ProtoPaint:
     @classmethod
     def _target_size_px(cls, geom: UnitStrGeometry, ctx: RenderContext) -> Tuple[int, int]:
@@ -194,8 +189,8 @@ class ProtoPaint:
             key = cache_obj.image_key(
                 source=image_path,
                 target_size=(w_px, h_px),
-                aspect_mode=int(aspect_mode),
-                transform_mode=int(xform_mode),
+                aspect_mode=aspect_mode,
+                transform_mode=xform_mode,
                 ctx=ctx,
             )
             return cache_obj.image(key, factory)
@@ -207,7 +202,7 @@ class ProtoPaint:
         cls,
         obj,
         ctx: RenderContext,
-        width_px: float,
+        width: UnitStr,
         padding_pt: float,
         alignment,
         wrap_mode,
@@ -216,15 +211,17 @@ class ProtoPaint:
         doc = QTextDocument(getattr(obj, "content", "") or "")
 
         font = getattr(obj, "font", None)
-        if font is not None:
-            qfont = font.scale(ldpi=144, dpi=ctx.dpi).to("pt", dpi=ctx.dpi).qfont
-            doc.setDefaultFont(qfont)
-
+        qfont = font.scale(ldpi=144, dpi=ctx.dpi).to("pt", dpi=ctx.dpi).qfont
+        if ctx.is_export:
+           qfont = font.scale(ldpi=144, dpi=72).to("pt", dpi=ctx.dpi).qfont
+            
+        doc.setDefaultFont(qfont)
+        width_ctx = width.to(ctx.unit, dpi=ctx.dpi).value
         doc.setDocumentMargin(padding_pt)
-        doc.setTextWidth(width_px)
+        doc.setTextWidth(width_ctx)
 
         opt = QTextOption()
-        opt.setWrapMode(QTextOption.WrapMode(int(wrap_mode)))
+        opt.setWrapMode(QTextOption.WrapMode(wrap_mode))
         opt.setAlignment(Qt.Alignment(int(alignment)))
         doc.setDefaultTextOption(opt)
 
@@ -250,6 +247,7 @@ class ProtoPaint:
         geom_px = geom_pt.to("px", dpi=ctx.dpi)
         width_px = float(geom_px.size.width())
         height_px = float(geom_px.size.height())
+        width = geom_pt.width
 
         padding = getattr(obj, "padding", None)
         padding_pt = padding.to("pt", dpi=ctx.dpi).value if padding is not None else 0.0
@@ -272,7 +270,7 @@ class ProtoPaint:
             return cls._build_text_document(
                 obj,
                 ctx,
-                width_px,
+                width,
                 padding_pt,
                 alignment,
                 wrap_mode,
@@ -286,8 +284,8 @@ class ProtoPaint:
                 width_px=width_px,
                 height_px=height_px,
                 padding_pt=padding_pt,
-                alignment=int(alignment),
-                wrap_mode=int(wrap_mode),
+                alignment=alignment.value,
+                wrap_mode=wrap_mode.value,
                 color_rgba=color.rgba() if color is not None else None,
                 ctx=ctx,
             )
@@ -506,24 +504,11 @@ class ProtoPaint:
         # and manage their own paint via the scene
         ol.render(ctx, painter)
 
-    # @classmethod
-    # def paint_text_outline(cls, ctx, elem, painter):
-    #     """
-    #     Text outline rendering for TextElement-like items (pc.TE).
-    #     Delegates to elem.outline (TextOutline) so overset UI and handles show.
-    #     """
-    #     ol = elem.outline  # TextOutline
-    #     # Keep geometry/handles in sync (includes overset frame logic)
-    #     ol._on_geometry_changed()
-    #     ol.update_visibility_policy()
-    #     # Paint text-specific outline (overset button/box etc.)
-    #     ol.render(painter, option, widget)
-
     @classmethod
     def paint_outline(cls, elem, ctx, painter):
         """
         Dispatcher: call the correct outline renderer for the element type.
-        pc.VE intentionally ignored for now.
+         intentionally ignored for now.
         """
         # if elem.proto == pc.IE:
         cls.paint_element_outline(elem, ctx, painter)
@@ -544,6 +529,26 @@ class ProtoPaint:
         painter.drawText(rect, (obj.h_align | obj.v_align), 
                         "Drop Image\nor Double Click to Set")
         painter.restore()
+
+    def render_page(page, ctx, painter):
+        # page coords are already PDF points in export; screen is px
+        for slot in page.items:
+            painter.save()
+            pos_pt = slot.geometry.to("pt", dpi=ctx.dpi).pos
+            print(f"Painting component, beginning at pos: {pos_pt}")
+            painter.translate(pos_pt.x(), pos_pt.y())
+            # if slot.rotation:
+            #     painter.rotate(slot.rotation)  # degrees
+            # Optionally slot scale here
+            comp = slot.content
+            comp.render(ctx, painter)  # draws at its own local origin
+            for item in comp.items:
+                item_pos_pt = item.geometry.to("pt", dpi=ctx.dpi).pos
+                print(f"Painting element, beginning at pos: {item_pos_pt}")
+                painter.save()
+                item.render(ctx, painter)
+                painter.restore()
+            painter.restore()
 
     @classmethod
     def render(cls, obj, ctx: RenderContext, painter: QPainter):
@@ -566,14 +571,11 @@ class ProtoPaint:
         if obj.proto in image_types and has_image:
             cls.paint_image(obj, ctx, painter)
 
-        if ctx.is_gui and ctx.is_component_tab and not has_image:
-            if obj.proto == pc.TE:
-                cls.paint_text_path(obj, ctx, painter)
-            if obj.proto == pc.IE or obj.proto == pc.VE:
-                cls.paint_placeholder_text(obj, ctx, painter)
+        if obj.proto == pc.IE and ctx.is_gui and ctx.is_component_tab and not has_image:
+            cls.paint_placeholder_text(obj, ctx, painter)
 
-        cls.paint_border_path(obj, ctx, painter)
+        if obj.proto == pc.TE:
+            cls.paint_text_path(obj, ctx, painter)
 
-        # paint_outline will only draw if ctx.is_gui and ctx.is_component_tab
-        if pc.isproto(obj, elem_types):
-            cls.paint_outline(obj, ctx, painter)
+        if obj.border_width > zero:
+            cls.paint_border_path(obj, ctx, painter)

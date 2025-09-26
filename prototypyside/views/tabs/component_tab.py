@@ -30,11 +30,11 @@ from prototypyside.models.component_element import ComponentElement
 from prototypyside.services.app_settings import AppSettings
 
 from prototypyside.services.undo_commands import (
-    AddElementCommand, RemoveElementCommand, CloneElementCommand,
+    AddElementCommand, RemoveElementsCommand, CloneElementCommand,
     ResizeTemplateCommand, ChangePropertyCommand, MoveSelectionCommand
 )
 pc = ProtoClass
-elem_types = (pc.CE, pc.TE, pc.IE, pc.VE)
+elem_types = (pc.CE, pc.TE, pc.IE, )
 
 if TYPE_CHECKING:
     from PySide6.QtWidgets import QGraphicsItem
@@ -55,17 +55,13 @@ class ComponentTab(QWidget):
     def __init__(self, parent, main_window, template, registry):
         super().__init__(parent)
         self.main_window = main_window
-        presets = self.main_window.settings
-        self.settings = AppSettings(
-            display_unit=presets.display_unit, 
-            print_unit=presets.print_unit
-        )
-        self._dpi = self.settings.display_dpi           # <- REQUIRED: no fallback, no None
-        self._unit = self.settings.display_unit         # scene logical unit (e.g., "in")
         self._template = template
         self.undo_stack = QUndoStack()
         self.file_path = None
         self.registry = registry
+        self.settings = registry.settings
+        self._dpi = self.settings.display_dpi        
+        self._unit = self.settings.display_unit
         self._show_grid   = True
         self._snap_grid   = True
 
@@ -174,7 +170,6 @@ class ComponentTab(QWidget):
         components = [
             ("Text Field", "te", "T"),
             ("Image Container", "ie", "🖼️"),
-            ("Vector Graphic", "ve", "⬠"),
         ]
         for name, etype, icon in components:
             self.palette.add_item(name, etype, icon)
@@ -768,36 +763,30 @@ class ComponentTab(QWidget):
 
     @Slot()
     def remove_selected_item(self):
-        item = self.get_selected_item()
-        if not item:
-            self.show_status_message("No item selected to remove.", "warning")
-            return
-        
+        sel_items = list(self.scene.selectedItems())       
         reply = QMessageBox.question(
-            self, "Remove Element",
-            f"Are you sure you want to remove '{item.name}'?",
+            self, "Remove Elements",
+            f"Are you sure you want to remove '{[item.name for item in sel_items]}'?",
             QMessageBox.Yes | QMessageBox.No
         )
         if reply == QMessageBox.No:
             self.show_status_message("Element removal cancelled.", "info")
             return
-        
-        # 1) Unbind the panel first so no child editors hold the item
 
         # 2) Clear selection in the scene (prevents selection-changed churn)
-        sel_items = list(self.scene.selectedItems())
+
         for it in sel_items:
-            self._disconnect_item_signals(item)
+            self._disconnect_item_signals(it)
             it.setSelected(False)
         self.property_panel.clear_target()
         # 3) Delete via undo command
-        command = RemoveElementCommand(item, self)
+        command = RemoveElementsCommand(sel_items, self)
         self.undo_stack.push(command)
         
         # 4) Panel stays empty until the user selects something else
         self.on_selection_changed()
         print(f"Confirming the removal method is being called")
-        self.show_status_message(f"Element '{item.name}' removed.", "info")
+        self.show_status_message(f"Elements '{[item.name for item in sel_items]}' removed.", "info")
 
     @Slot(QObject)
     def _on_selected_item_destroyed(self, _=None):

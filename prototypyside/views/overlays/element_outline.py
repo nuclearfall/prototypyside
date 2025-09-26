@@ -81,11 +81,12 @@ class _ResizeHandle(QGraphicsObject):
 
     def render(self, ctx, painter: QPainter):
         # Keep it lightweight; outline decides visibility.
-        painter.save()
-        painter.setPen(QPen(QColor(0, 175, 236, 255)))
-        painter.setBrush(QColor(0, 175, 236, 255))
-        painter.drawRect(self.boundingRect())
-        painter.restore()
+        if ctx.is_component_tab:
+            painter.save()
+            painter.setPen(QPen(QColor(0, 175, 236, 255)))
+            painter.setBrush(QColor(0, 175, 236, 255))
+            painter.drawRect(self.boundingRect())
+            painter.restore()
 
     def paint(self, painter, option=None, widget=None):
         painter.save()
@@ -132,6 +133,7 @@ class ElementOutline(QGraphicsObject):
     ):
         super().__init__(parent)
         self.element = element  # <— keep existing name
+        self._ctx = element.ctx
         self._handles = {}
         self.pen_color = pen_color
         self.pen_width_px = pen_width_px
@@ -159,12 +161,13 @@ class ElementOutline(QGraphicsObject):
         self._create_handles()
         # Initial layout.
         self._on_geometry_changed()
+        self.setFlag(QGraphicsItem.ItemIsSelectable, False)
 
     # ---------- Public-ish helpers ----------
 
     def show_handles(self, show: bool):
         for h in self._handles.values():
-            h.setVisible(True)
+            h.setVisible(bool(show))
         # self.update()  # refresh outline paint (selection cues, etc.)
 
     # ---------- Geometry plumbing ----------
@@ -299,9 +302,8 @@ class ElementOutline(QGraphicsObject):
         # Base outline paint: TextElementOutline overrides as needed.
         if ctx.is_gui and ctx.is_component_tab:
             selection_state = self.element.isSelected()
+
             self.show_handles(selection_state)
-            if selection_state:
-                self.show_handles(True)
             r = self._current_draw_rect()
             painter.save()
             pen = QPen(self.pen_color, self.pen_width_px)

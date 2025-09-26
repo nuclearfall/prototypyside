@@ -17,6 +17,8 @@ from prototypyside.services.app_settings import AppSettings
 from prototypyside.services.proto_registry import ProtoRegistry, RootRegistry
 from prototypyside.utils.pkey_sequence import PKeySequence, Key
 from prototypyside.utils.valid_path import ValidPath
+from prototypyside.utils.render_context import RenderContext, RenderMode, RenderRoute, TabMode
+
  
 from prototypyside.services.merge_manager import MergeManager
 from prototypyside.views.panels.import_panel import ImportPanel
@@ -40,14 +42,12 @@ class MainDesignerWindow(QMainWindow):
         super().__init__()
         screen = self.screen()
         # Validation temporarily disabled pending schema updates
-        self.settings = AppSettings()
+        ctx = RenderContext(unit="px", dpi=300)
+        self.settings = AppSettings(ctx)
         self.settings.dpi_changed.connect(self.on_dpi_changed)
         self.settings.unit_changed.connect(self.on_unit_changed)
         self.registry = RootRegistry(root=None, settings=self.settings)
-        self.export_registry = ProtoRegistry(root=self.registry, settings=self.settings, parent=self.registry)
-        self.registry.add_child(self.export_registry)
-        # self.mail_room = MailRoom(registry=self.registry)
-        # self.registry.set_mail_room(self.mail_room)
+
         self.undo_group = QUndoGroup(self)
         self.setWindowTitle("ProtoTypySide")
         self.resize(1400, 900)
@@ -412,18 +412,33 @@ class MainDesignerWindow(QMainWindow):
 
     @Slot(object)
     def add_new_tab(self, proto, loaded=None):
-        if not loaded:
-            registry, obj = self.registry.new_with_template(proto)
-        else:
-            registry, obj = loaded
 
-        if pc.isproto(obj, pc.CT):
-            new_tab = ComponentTab(parent=self, main_window=self, registry=registry, template=obj)
-        elif pc.isproto(obj, pc.LT):
-            new_tab = LayoutTab(main_window=self, registry=registry, template=obj, parent=self)
-            new_tab.scene.addItem(obj)
-            obj.updateGrid()
-        print(f"Template dimensions for {obj.pid} are {obj.geometry.px.rect}")
+        if proto == pc.CT:
+            ctx = RenderContext(
+                unit="px",
+                dpi=300,
+                mode=RenderMode.GUI,
+                tab_mode=TabMode.COMPONENT,
+                route=RenderRoute.COMPOSITE)
+        elif proto == pc.LT:
+            ctx = RenderContext(
+                unit="px",
+                dpi=300,
+                mode=RenderMode.GUI,
+                tab_mode=TabMode.LAYOUT,
+                route=RenderRoute.RASTER)
+        else:
+            raise TypeError("Tab target must be either pc.CT or pc.LT")
+        settings = AppSettings(ctx)
+        registry = ProtoRegistry(root=self.registry, settings=settings, parent=self.registry)
+        template = registry.create(proto) if not loaded else registry.from_dict(loaded)
+        self.registry.add_child(registry, template)
+        if proto == pc.CT:
+            new_tab = ComponentTab(main_window=self, registry=registry, template=template, parent=self)
+        elif proto == pc.LT:
+            new_tab = LayoutTab(main_window=self, registry=registry, template=template, parent=self)
+            new_tab.scene.addItem(template)
+            template.updateGrid()
         # Register the tab’s widgets in the stacks exactly once
         # Tab must expose .toolbar, .left_dock, .right_dock (plain QWidget)
         if getattr(new_tab, "toolbar", None):
@@ -444,7 +459,7 @@ class MainDesignerWindow(QMainWindow):
         self.undo_group.addStack(new_tab.undo_stack)
         new_tab.status_message_signal.connect(self.show_status_message)
 
-        index = self.tab_widget.addTab(new_tab, obj.name)
+        index = self.tab_widget.addTab(new_tab, template.name)
         self.tab_widget.setCurrentIndex(index)
         self.show_status_message("New template tab created.", "info")
 
@@ -664,7 +679,7 @@ class MainDesignerWindow(QMainWindow):
     def export_to_png(self):
         active_tab = self.tab_widget.currentWidget()
         template = active_tab.template
-        em = ExportManager(self.settings, active_tab.registry, self.merge_manager)
+        em = ExportManager(self.registry, self.merge_manager)
         if pc.isproto(active_tab, pc.CTAB):
             folder = QFileDialog.getExistingDirectory(
                 self, 
@@ -682,7 +697,7 @@ class MainDesignerWindow(QMainWindow):
     def export_to_pdf(self):
         active_tab = self.tab_widget.currentWidget()
         template = active_tab.template
-        em = ExportManager(self.settings, self.merge_manager)
+        em = ExportManager(self.registry, self.merge_manager)
         if pc.isproto(active_tab, pc.LTAB):
             output_path, _ = QFileDialog.getSaveFileName(
                 self,
@@ -764,8 +779,7 @@ class MainDesignerWindow(QMainWindow):
             raise TypeError("cli_export_to_png requires a ComponentTemplate")
         out_dir = Path(export_dir).expanduser().resolve()
         out_dir.mkdir(parents=True, exist_ok=True)
-        em = ProtoClass.EM(settings=self.settings,
-                           registry=self.export_registry,
+        em = ExportManager(settings=self.settings,
                            merge_manager=self.merge_manager)
         em.export_component_to_png(ct_obj, str(out_dir))
 

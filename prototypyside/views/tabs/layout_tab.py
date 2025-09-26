@@ -35,11 +35,8 @@ class LayoutTab(QWidget):
         super().__init__(parent)
         self.main_window = main_window
         presets = self.main_window.settings
-        self.settings = AppSettings(
-            display_unit=presets.display_unit, 
-            print_unit=presets.print_unit
-        )
         self.registry = registry
+        self.settings = registry.settings
         self._template = template
         self.file_path = None
         self.undo_stack = QUndoStack()
@@ -347,9 +344,8 @@ class LayoutTab(QWidget):
     @Slot(str, QPointF)
     def on_component_dropped(self, tpid: str, scene_pos: QPointF):
         component = self.registry.global_get(tpid)
-        
         command = CloneComponentToEmptySlotsCommand(self.registry, self.template, component)
-
+        
         self.undo_stack.push(command)
 
     # --- Page Management ---

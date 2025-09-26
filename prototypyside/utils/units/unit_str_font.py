@@ -677,14 +677,8 @@ class UnitStrFont:
         style_strategy = QFont.StyleStrategy(_enum_to_int(blob.get("style_strategy", QFont.PreferDefault), QFont.PreferDefault))
         hinting_pref = QFont.HintingPreference(_enum_to_int(blob.get("hinting_preference", QFont.PreferDefaultHinting), QFont.PreferDefaultHinting))
 
-        size = (
-            UnitStr.from_dict(blob["size"]) if isinstance(blob.get("size"), dict)
-            else UnitStr(blob.get("size", "12pt"), dpi=dpi)
-        )
-        leading = (
-            UnitStr.from_dict(blob["leading"]) if isinstance(blob.get("leading"), dict)
-            else size * 1.5
-        )
+        size = UnitStr.from_dict(blob["size"]) 
+        leading = UnitStr.from_dict(blob["leading"])
 
         return cls(
             None,

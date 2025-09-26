@@ -20,8 +20,9 @@ class AppSettings(QObject):
     dpi_changed = Signal(int)
     ctx_changed = Signal(object)
 
-    def __init__(self, display_unit="in", print_unit="pt", display_dpi=300, print_dpi=300):
+    def __init__(self, ctx, display_unit="in", print_unit="pt", display_dpi=300, print_dpi=300):
         super().__init__()
+        self._ctx = ctx
         self._display_unit = display_unit
         self._print_dpi = print_dpi
         self._print_unit = print_unit
@@ -30,14 +31,6 @@ class AppSettings(QObject):
         self._unit = "px"
         self.default_font = UnitStrFont(QFont("Arial", 12))
 
-        self._ctx = RenderContext(
-            dpi=self._dpi,
-            unit=self._unit,
-            mode=RenderMode.GUI,
-            tab_mode=TabMode.LAYOUT,
-            route=RenderRoute.COMPOSITE,
-
-        )
         if self._ctx.cache is None:
             self._ctx.cache = RenderCache(self._ctx)
         screen = QApplication.primaryScreen()

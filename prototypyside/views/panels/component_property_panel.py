@@ -287,7 +287,7 @@ class ComponentPropertyPanel(QWidget):
             self, "Select File", "", "Images (*.png *.jpg *.bmp *.gif);;SVG Files (*.svg)"
         )
         if file_path:
-            self._emit_property_change("bg_image", file_path)
+            self._emit_property_change("content", file_path)
 
     # @Slot()
     # def _on_rotation_finished(self):
