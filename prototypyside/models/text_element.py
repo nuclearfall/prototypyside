@@ -27,7 +27,7 @@ from prototypyside.utils.units.unit_str_geometry import UnitStrGeometry
 from prototypyside.utils.units.unit_str_helpers import geometry_with_px_rect, geometry_with_px_pos
 from prototypyside.services.proto_class import ProtoClass
 from prototypyside.models.component_element import ComponentElement
-from prototypyside.utils.units.unit_str_font import UnitStrFont
+
 from prototypyside.views.overlays.element_outline import ElementOutline #TextOutline
 from prototypyside.models.component_template import RenderRoute
 from prototypyside.utils.render_context import RenderContext, RenderMode, RenderRoute, TabMode
@@ -35,13 +35,8 @@ from prototypyside.utils.render_context import RenderContext, RenderMode, Render
 pc = ProtoClass
 
 class TextElement(ComponentElement):
-    _subclass_serializable = {
-        "font": ("font",
-                 UnitStrFont.from_dict,
-                 lambda u: u.to_dict(),
-                 UnitStrFont(QFont("Arial", 10))),
-    }
     text_changed = Signal(object, str, object, object)
+    
     def __init__(self,
             proto: ProtoClass,
             pid: str, 
@@ -58,7 +53,7 @@ class TextElement(ComponentElement):
             name=name, 
             parent=parent)
 
-        self._font = registry.settings.default_font
+
         self._content = "This is a sample text that is intentionally made long enough to demonstrate the overset behavior you would typically see in design software like Adobe InDesign. When this text cannot fit within the defined boundaries of the text frame, a small red plus icon will appear, indicating that there is more text than is currently visible."
         self.wrap_mode = QTextOption.WordWrap
 
@@ -96,38 +91,24 @@ class TextElement(ComponentElement):
         return r.adjusted(-pad, -pad, pad, pad)
 
     @property
-    def font(self) -> UnitStrFont:
-        return self._font
-
-    @font.setter
-    def font(self, value: UnitStrFont) -> None:
-        if value == self._font:
-            return
-        self.prepareGeometryChange()
-        self._font = UnitStrFont(value)
-        self.item_changed.emit()
-
-        self.update()
-
-    @property
     def outline(self):
         return self._outline
 
-    def to_dict(self):
-        data = super().to_dict()  # ← include base fields
-        for attr, (key, _, to_fn, default) in self._subclass_serializable.items():
-            val = getattr(self, f"_{attr}", default)
-            data[key] = to_fn(val)
+    # def to_dict(self):
+    #     data = super().to_dict()  # ← include base fields
+    #     for attr, (key, _, to_fn, default) in self._subclass_serializable.items():
+    #         val = getattr(self, f"_{attr}", default)
+    #         data[key] = to_fn(val)
 
-        return data
+    #     return data
 
-    @classmethod
-    def from_dict(cls, data: dict, registry):
-        inst = super().from_dict(data, registry=registry)
-        for attr, (key, from_fn, _, default) in cls._subclass_serializable.items():
-            raw = data.get(key, default)
-            if hasattr(inst, f"{attr}"):
-                setattr(inst, f"{attr}", from_fn(raw))
-            else:
-                setattr(inst, f"_{attr}", from_fn(raw))
-        return inst
+    # @classmethod
+    # def from_dict(cls, data: dict, registry):
+    #     inst = super().from_dict(data, registry=registry)
+    #     for attr, (key, from_fn, _, default) in cls._subclass_serializable.items():
+    #         raw = data.get(key, default)
+    #         if hasattr(inst, f"{attr}"):
+    #             setattr(inst, f"{attr}", from_fn(raw))
+    #         else:
+    #             setattr(inst, f"_{attr}", from_fn(raw))
+    #     return inst

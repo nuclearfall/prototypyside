@@ -13,16 +13,16 @@ class ShapeFactory:
     Factory for generating QPainterPath shapes from a bounding QRectF.
     """
     @staticmethod
-    def rect(_ugeom: UnitStrGeometry, extra=None, unit="px") -> QPainterPath:
-        _rect = _ugeom.to(unit, dpi=_ugeom.dpi).rect
+    def rect(_ugeom: UnitStrGeometry, ctx, extra=None) -> QPainterPath:
+        _rect = _ugeom.to(ctx.unit, dpi=ctx.dpi).rect
         path = QPainterPath()
         path.addRect(_rect)
         return path
 
     @staticmethod
-    def rounded_rect(_ugeom: UnitStrGeometry, extra=None, unit="px") -> QPainterPath:
-        _rect = _ugeom.to(unit, dpi=_ugeom.dpi).rect
-        radius = extra.to(unit, dpi=_ugeom.dpi)
+    def rounded_rect(_ugeom: UnitStrGeometry, ctx, extra=None) -> QPainterPath:
+        _rect = _ugeom.to(ctx.unit, dpi=ctx.dpi).rect
+        radius = extra.to(ctx.unit, dpi=ctx.dpi).value
         path = QPainterPath()
         if extra != None:
             path.addRoundedRect(_rect, radius, radius)  # x & y
@@ -31,8 +31,8 @@ class ShapeFactory:
         return path
 
     @staticmethod
-    def oval(_ugeom: UnitStrGeometry, extra=None, unit="px") -> QPainterPath:
-        _rect = _ugeom.to(unit, dpi=_ugeom.dpi).rect
+    def oval(_ugeom: UnitStrGeometry, ctx, extra=None) -> QPainterPath:
+        _rect = _ugeom.to(ctx.unit, dpi=ctx.dpi).rect
         path = QPainterPath()
         center = _rect.center()
         rx = _rect.width() / 2.0   # horizontal radius
@@ -42,8 +42,8 @@ class ShapeFactory:
 
     @staticmethod
     # will default to a triangular polygon if extra (sides) is not given.
-    def polygon(_ugeom: UnitStrGeometry, extra=3, unit="px") -> QPainterPath:
-        _rect = _ugeom.to(unit, dpi=_ugeom.dpi).rect
+    def polygon(_ugeom: UnitStrGeometry, ctx, extra=3) -> QPainterPath:
+        _rect = _ugeom.to(ctx.unit, dpi=ctx.dpi).rect
         path = QPainterPath()
         cx = _rect.center().x()
         cy = _rect.center().y()
@@ -64,18 +64,18 @@ class ShapeFactory:
         path.closeSubpath()
         return path
 
-    def octagon(_ugeom: UnitStrGeometry, extra=None, unit="px") -> QPainterPath:
-        _rect = _ugeom.to(unit, dpi=_ugeom.dpi).rect
+    def octagon(_ugeom: UnitStrGeometry, ctx, extra=None) -> QPainterPath:
+        _rect = _ugeom.to(ctx.unit, dpi=ctx.dpi).rect
         return ShapeFactory.polygon(_rect, 8)
 
-    def diamond(_ugeom: UnitStrGeometry, extra=None, unit="px") -> QPainterPath:
-        _rect = _ugeom.to(unit, dpi=_ugeom.dpi).rect
+    def diamond(_ugeom: UnitStrGeometry, ctx, extra=None) -> QPainterPath:
+        _rect = _ugeom.to(ctx.unit, dpi=ctx.dpi).rect
         return ShapeFactory.polygon(_rect, 4)
 
-    def triangle(_ugeom: UnitStrGeometry, extra=3, unit="px"):
-        _rect = _ugeom.to(unit, dpi=_ugeom.dpi).rect
+    def triangle(_ugeom: UnitStrGeometry, ctx, extra=None):
+        _rect = _ugeom.to(ctx.unit, dpi=ctx.dpi).rect
         return ShapeFactory.polygon(_rect, 3)
             
-    def hexagon(_ugeom: UnitStrGeometry, extra=None, unit="px") -> QPainterPath:
-        _rect = _ugeom.to(unit, dpi=_ugeom.dpi).rect
+    def hexagon(_ugeom: UnitStrGeometry, ctx, extra=None) -> QPainterPath:
+        _rect = _ugeom.to(ctx.unit, dpi=ctx.dpi).rect
         return ShapeFactory.polygon(rect, 6)

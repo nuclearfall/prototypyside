@@ -60,6 +60,7 @@ class ExportManager:
         for _ in range(page_count):
             page = _registry.clone(export_layout)
             self.no_autorender(page, True)
+            self.normalize_positions(page, page.ctx)
             # Setting page.ctx sets context for everything on the page
             page.ctx = _ctx
             if has_csv:
@@ -98,7 +99,7 @@ class ExportManager:
 
         for i, page in enumerate(pages):
             # 1) Draw this page
-            self.normalize_positions(page, page.ctx)
+            # 
             painter.save()
             # ensure painter origin is top-left of page in points
             ProtoPaint.render_page(page, page.ctx, painter)
@@ -120,10 +121,12 @@ class ExportManager:
             # content placement policy: put component at (0,0) inside slot
             comp = slot.content
             comp.setPos(0, 0)
+            comp.update()
             # Elements
             for el in comp.items:
                 ge = el.geometry.to(ctx.unit, dpi=ctx.dpi)
                 el.setPos(float(ge.pos.x()), float(ge.pos.y()))
+                el.update
 
 def traverse_export(p: QPainter, item, ctx: RenderContext):
     # 1) Translate to this item's scene position

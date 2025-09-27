@@ -233,9 +233,10 @@ class LayoutSlot(QGraphicsObject):
                                        el_geom.y.to(self.ctx.unit, dpi=self.ctx.dpi)))
                 except Exception:
                     pass
-
-            self._content.setFlag(QGraphicsItem.ItemHasNoContents, self._ctx.is_raster)
-
+            # if self.ctx.is_gui:
+            #     self._content.setFlag(QGraphicsItem.ItemHasNoContents, self._ctx.is_raster)
+            # else:
+            #     self._content.setFlag(QGraphicsItem.ItemHasNoContents, not self._ctx.is_gui)
             self.invalidate_cache()
             self.update()
 

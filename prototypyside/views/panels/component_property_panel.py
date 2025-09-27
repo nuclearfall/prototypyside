@@ -12,7 +12,6 @@ from PySide6.QtGui import QColor, QFont, QTextOption, QKeyEvent
 from prototypyside.widgets.unit_str_field import UnitStrField
 from prototypyside.widgets.unit_str_geometry_field import UnitStrGeometryField
 from prototypyside.utils.units.unit_str_geometry import UnitStrGeometry
-from prototypyside.models.component_template import SHAPES
 from prototypyside.widgets.color_picker import ColorPickerWidget
 from prototypyside.widgets.rotation_field import RotationField
 from prototypyside.views.toolbars.font_toolbar import FontToolbar

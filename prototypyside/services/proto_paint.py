@@ -6,7 +6,7 @@ from pathlib import Path
 from typing import Callable, Optional, Tuple, Union
 
 from PySide6.QtCore import Qt, QRectF, QSize, QRect
-from PySide6.QtGui import (QPainter, QImage, QPixmap, QPen, 
+from PySide6.QtGui import (QPainter, QPainterPath, QImage, QPixmap, QPen, 
     QTextOption, QTextLayout, QFontMetricsF, QTextDocument, 
     QTextCursor, QTextCharFormat, QBrush, QImageReader)
 
@@ -18,8 +18,9 @@ from prototypyside.utils.units.unit_str import UnitStr
 from prototypyside.utils.units.unit_str_geometry import UnitStrGeometry
 
 pc = ProtoClass
-elem_types = [pc.IE, pc.TE, ]
+elem_types = [pc.IE, pc.TE]
 image_types = [pc.IE, pc.CT, pc.CC]
+
 zero = UnitStr(0)
 Aspect = Qt.AspectRatioMode
 Xform  = Qt.TransformationMode
@@ -95,7 +96,6 @@ class ImageScaleMode:
     def fill(cls) -> Tuple[Aspect, Xform]:
         return cls.FILL, cls.SMOOTH
 
-
 SHAPES = {
     "rect":         ShapeFactory.rect,
     "rounded_rect": ShapeFactory.rounded_rect,
@@ -106,8 +106,6 @@ SHAPES = {
     "polygon":      ShapeFactory.polygon,
     "default":      None,
 }
-
-
 
 class ProtoPaint:
     @classmethod
@@ -309,93 +307,166 @@ class ProtoPaint:
         return ustr.to(ctx.unit, dpi=ctx.dpi)
 
     @classmethod
-    def shape_path(cls, shp: str, geom: UnitStrGeometry, ctx: RenderContext, *, extra=None, adjusts=None):
+    def shape_path(cls, shp: str, geom: UnitStrGeometry, ctx: RenderContext, *, extra=None):
         # geom is expected to be UnitStrGeometry in LOCAL coords; adjust by UnitStr deltas in ctx.unit
-        fin_geom = geom
-        if adjusts:
-            gt = geom.ustr_tuple(unit=ctx.unit, dpi=ctx.dpi)
-            adjusted = [g+adj for g, adj in zip(gt, adjusts)]
-            dx, dy, dw, dh = adjusted
-            fin_geom = UnitStrGeometry(width=dw, height=dh, x=dx, y=dy, unit=ctx.unit, dpi=ctx.dpi)
         fn = SHAPES.get(shp) or SHAPES["default"]
-        return fn(fin_geom, extra=extra) if fn else None
+        return fn(geom, ctx, extra=extra) if fn else None
 
     @classmethod
-    def border_shape_path(cls, shp: str, geom: UnitStrGeometry, ctx: RenderContext, bw: UnitStr, extra=None):
-        bw_u = cls.ctx_ustr(bw, ctx)
-        if bw_u <= UnitStr(0.0):
-            return None
-        adjusts = (-bw*(1/2), -bw*(1/2), bw*(1/2), bw*(1/2))
-        return cls.shape_path(shp, geom, ctx, adjusts=adjusts, extra=extra)
+    def bleed_path(
+        cls,
+        shp: str,
+        base_geom: "UnitStrGeometry",
+        ctx: "RenderContext",
+        bleed,
+        extra=None,
+    ):
+        """
+        Returns a path expanded outward by `bleed` on all sides.
+        Accepts UnitStr or a number (interpreted in base_geom's unit/dpi).
+        """
+        # Outward by b each side == adjust(-b, -b, +b, +b)
+        g = base_geom.adjust(left=-bleed, top=-bleed, right=+bleed, bottom=+bleed, normalize=True)
+        return cls.shape_path(shp, g, ctx, extra=extra)
 
     @classmethod
-    def bleed_shape_path(cls, shp: str, geom: UnitStrGeometry, ctx: RenderContext, bleed: UnitStr, extra=None, include_bleed: bool = False):
-        if not include_bleed:
-            return None
-        bleed_u = cls.ctx_ustr(bleed, ctx)
-        if bleed_u <= UnitStr(0, unit=ctx.unit, dpi=ctx.dpi):
-            return None
-        b = bleed_u.value
-        adjusts = (-b, -b, +2*b, +2*b)  # expand on all sides
-        return cls.shape_path(shp, geom, ctx, extra=extra, adjusts=adjusts)
+    def border_paths(
+        cls,
+        shp: str,
+        base_geom: "UnitStrGeometry",
+        ctx: "RenderContext",
+        *,
+        border_width: "UnitStr",
+        extra=None,
+    ) -> tuple["QPainterPath|None", "QPainterPath|None"]:
+        """
+        Returns (inner_path, outer_path) for a border that lies entirely INSIDE base_geom.
+
+        - outer edge: the base shape itself (no expansion)
+        - inner edge: base inset by full border_width on each side
+        """
+        # Outer edge = base shape
+        outer_geom = base_geom
+        outer_extra = extra
+
+        # Inner edge = inset by full bw on each side
+        bw = border_width
+        inner_geom = base_geom.adjust(left=+bw, top=+bw, right=-bw, bottom=-bw, normalize=True)
+
+        # If rounded-rect, shrink the corner radius for the inner edge
+        inner_extra = extra
+        if shp == "rounded_rect" and extra is not None:
+            # extra is a UnitStr (corner radius) in your codebase
+            # clamp to >= 0
+            r_in = extra - bw
+            zero_r = UnitStr(0, unit=base_geom._unit, dpi=base_geom._dpi)
+            inner_extra = r_in if r_in > zero_r else zero_r
+
+        inner_path = cls.shape_path(shp, inner_geom, ctx, extra=inner_extra)
+        outer_path = cls.shape_path(shp, outer_geom, ctx, extra=outer_extra)
+        return inner_path, outer_path
+
+    # @classmethod
+    # def border_paths(
+    #     cls,
+    #     shp: str,
+    #     base_geom: "UnitStrGeometry",
+    #     ctx: "RenderContext",
+    #     border_width,
+    #     extra=None,
+    # ) -> Tuple["QPainterPath", "QPainterPath"]:
+    #     """
+    #     Returns (inner_path, outer_path) representing the inner and outer edges
+    #     of a stroke of width `border_width` centered on the base geometry's outline.
+
+    #     - inner edge: inset by +bw/2
+    #     - outer edge: outset by +bw/2
+    #     """
+    #     bw2: UnitLike = border_width * 0.5  # works for UnitStr or number
+
+    #     # Inner edge = shrink by bw/2 (per side)
+    #     g_inner = base_geom.adjust(left=+bw2, top=+bw2, right=-bw2, bottom=-bw2, normalize=True)
+
+    #     # Outer edge = expand by bw/2 (per side)
+    #     g_outer = base_geom.adjust(left=-bw2, top=-bw2, right=+bw2, bottom=+bw2, normalize=True)
+
+    #     inner_path = cls.shape_path(shp, g_inner, ctx, extra=extra)
+    #     outer_path = cls.shape_path(shp, g_outer, ctx, extra=extra)
+    #     return inner_path, outer_path
+
 
     @classmethod
-    def paint_bleed_path(cls, obj, ctx: RenderContext, painter: QPainter):
-        geom = obj.geometry
-        shape = obj.shape
-        bleed = obj.bleed
+    def paint_border(cls, obj, ctx: "RenderContext", painter: QPainter):
         bw = cls.ctx_ustr(obj.border_width, ctx)
-
-        extra = None
-        if shape == "rounded_rect" and bw >= UnitStr(0):
-            extra = obj.corner_radius
-        if shape == "polygon" and getattr(obj, "sides", None):
-            extra = obj.sides
-
-        path = cls.bleed_shape_path(shape, geom, ctx, bleed=bleed, extra=extra, include_bleed=obj.include_bleed)
-        color = obj.border_color if bw > UnitStr(0.0) else obj.bg_color
-
-        if path:
-            painter.save()
-            painter.setBrush(color)
-            painter.setPen(Qt.NoPen)
-            painter.drawPath(path)
-            painter.restore()
-
-    @classmethod
-    def paint_border_path(cls, obj, ctx: RenderContext, painter: QPainter):
-        bw = cls.ctx_ustr(obj.border_width, ctx)
-        if bw <= UnitStr(0, unit=ctx.unit, dpi=ctx.dpi):
+        if bw <= zero:
             return
 
-        geom = obj.geometry
+        geom  = obj.geometry
         shape = obj.shape
 
+        # Pass through any shape-specific extra
         extra = None
-        if shape == "rounded_rect" and bw >= UnitStr(0):
+        if shape == "rounded_rect":
             extra = obj.corner_radius
-        if shape == "polygon" and getattr(obj, "sides", None):
+        elif shape == "polygon" and getattr(obj, "sides", None):
             extra = obj.sides
 
-        path = cls.border_shape_path(shape, geom, ctx, bw=bw, extra=extra)
-        if path is None:
+        inner, outer = cls.border_paths(shape, geom, ctx, border_width=bw, extra=extra)
+        if inner is None or outer is None:
             return
+
+        # Create the "ring" area: outer - inner
+        ring = QPainterPath(outer)
+        ring -= inner
 
         color = obj.border_color
-        bw_f = float(cls.ctx_ustr(bw, ctx).value)
+        if color is None or color.alpha() == 0:
+            return
 
         painter.save()
         painter.setRenderHint(QPainter.Antialiasing, True)
-        pen = QPen(color)
-        pen.setWidthF(bw_f)
-        pen.setJoinStyle(Qt.MiterJoin)
-        painter.setPen(pen)
-        painter.setBrush(Qt.NoBrush)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(color)
+        painter.drawPath(ring)
+        painter.restore()
+
+    @classmethod
+    def paint_bleed(cls, obj, ctx: "RenderContext", painter: QPainter):
+        """
+        Optional helper to paint the bleed-expanded shape (e.g., solid bg under no-image case).
+        """
+        include_bleed = getattr(obj, "include_bleed", False)
+        bleed = getattr(obj, "bleed", zero)
+        if not include_bleed or bleed <= zero:
+            return
+
+        geom  = obj.geometry
+        shape = obj.shape
+
+        # same extra dispatch as above
+        extra = None
+        if shape == "rounded_rect":
+            extra = obj.corner_radius
+        elif shape == "polygon" and getattr(obj, "sides", None):
+            extra = obj.sides
+
+        path = cls.bleed_path(shape, geom, ctx, bleed=bleed, extra=extra)
+        if path is None:
+            return
+
+        color = getattr(obj, "bg_color", None)
+        if color is None or color.alpha() == 0:
+            return
+
+        painter.save()
+        painter.setRenderHint(QPainter.Antialiasing, True)
+        painter.setPen(Qt.NoPen)
+        painter.setBrush(color)
         painter.drawPath(path)
         painter.restore()
 
     @classmethod
-    def paint_text_path(cls, obj, ctx, painter, extra=None):
+    def paint_text(cls, obj, ctx, painter, extra=None):
         """
         Render rich text into obj.geometry using a clip path, all in PT coordinates.
         Assumes UnitStrFont.qfont() returns a QFont sized in points.
@@ -422,7 +493,7 @@ class ProtoPaint:
 
 
     @classmethod
-    def paint_background_path(cls, obj, ctx: RenderContext, painter: QPainter):
+    def paint_background(cls, obj, ctx: RenderContext, painter: QPainter):
         if obj.bg_color.alpha() <= 0:
             return
 
@@ -531,23 +602,36 @@ class ProtoPaint:
         painter.restore()
 
     def render_page(page, ctx, painter):
-        # page coords are already PDF points in export; screen is px
-        for slot in page.items:
-            painter.save()
-            pos_pt = slot.geometry.to("pt", dpi=ctx.dpi).pos
-            print(f"Painting component, beginning at pos: {pos_pt}")
-            painter.translate(pos_pt.x(), pos_pt.y())
-            # if slot.rotation:
-            #     painter.rotate(slot.rotation)  # degrees
-            # Optionally slot scale here
+        # Assumes: ItemHasNoContents=True on all items (so Qt doesn't auto-paint),
+        #          normalize_positions(..., unit="pt") already run,
+        #          and your item renderers draw in local (0,0,w,h) without translating.
+
+        # Draw slots in Z order (optional but usually desired)
+        for slot in sorted(page.items, key=lambda s: s.zValue()):
             comp = slot.content
-            comp.render(ctx, painter)  # draws at its own local origin
-            for item in comp.items:
-                item_pos_pt = item.geometry.to("pt", dpi=ctx.dpi).pos
-                print(f"Painting element, beginning at pos: {item_pos_pt}")
+            if comp is None:
+                continue
+
+            painter.save()
+            slot_pos = slot.pos()  # already in pt if you normalized positions for export
+            painter.translate(slot_pos.x(), slot_pos.y())
+
+            # If you support per-slot rotation/scaling, do it here:
+            # if getattr(slot, "rotation", 0):
+            #     painter.rotate(slot.rotation)
+
+            print(f"Painting component at page pos: ({slot_pos.x():.2f}, {slot_pos.y():.2f})")
+            comp.render(ctx, painter)  # component draws at its own local origin (0,0)
+
+            # Elements relative to component origin
+            for item in sorted(comp.items, key=lambda i: i.zValue()):
                 painter.save()
+                ipos = item.pos()  # also in pt if normalized
+                painter.translate(ipos.x(), ipos.y())
+                print(f"  Painting element at page pos: ({slot_pos.x()+ipos.x():.2f}, {slot_pos.y()+ipos.y():.2f})")
                 item.render(ctx, painter)
                 painter.restore()
+
             painter.restore()
 
     @classmethod
@@ -556,17 +640,16 @@ class ProtoPaint:
         include_bleed = obj.include_bleed
         bw = cls.ctx_ustr(obj.border_width, ctx)
 
-        zero = UnitStr(0)
         wants_bleed = include_bleed and obj.bleed > zero
         has_image = False
         if obj.proto in image_types:
             has_image = ValidPath.check(obj.content, must_exist=True)
 
         if not has_image and wants_bleed:
-            cls.paint_bleed_path(obj, ctx, painter)
+            cls.paint_bleed(obj, ctx, painter)
 
         if not has_image and obj.bg_color.alpha() > 0:
-            cls.paint_background_path(obj, ctx, painter)
+            cls.paint_background(obj, ctx, painter)
 
         if obj.proto in image_types and has_image:
             cls.paint_image(obj, ctx, painter)
@@ -575,7 +658,7 @@ class ProtoPaint:
             cls.paint_placeholder_text(obj, ctx, painter)
 
         if obj.proto == pc.TE:
-            cls.paint_text_path(obj, ctx, painter)
+            cls.paint_text(obj, ctx, painter)
 
         if obj.border_width > zero:
-            cls.paint_border_path(obj, ctx, painter)
+            cls.paint_border(obj, ctx, painter)

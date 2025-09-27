@@ -19,24 +19,8 @@ from prototypyside.utils.render_context import RenderContext, RenderMode, Render
 from prototypyside.services.shape_factory import ShapeFactory
 
 pc = ProtoClass
-SHAPES = {
-    "rect":         ShapeFactory.rect,
-    "rounded_rect": ShapeFactory.rounded_rect,
-    "oval":         ShapeFactory.oval,
-    "hexagon":      ShapeFactory.hexagon,
-    "diamond":      ShapeFactory.diamond,
-    "octagon":      ShapeFactory.octagon,
-    "polygon":      ShapeFactory.polygon,
-    "default":      None,
-}
 
 class ComponentTemplate(ProtoPaintable):
-    _subclass_serializable = {
-        "keep_aspect": ("keep_aspect",
-                        lambda x: bool(x),
-                        lambda b: b,
-                        True),
-    }
     template_changed = Signal()
     template_name_changed = Signal()
     item_z_order_changed = Signal()
@@ -73,7 +57,9 @@ class ComponentTemplate(ProtoPaintable):
             self._name = ValidPath.file(self._file_path, stem=True)
         if has_csv_path:
             self._csv_path = ValidPath.file(self._file_path, stem=True)
-        self._sides = 3
+        self._corner_radius = UnitStr(".125in", dpi=self._ctx.dpi)
+        self._border_width = UnitStr(".125in", dpi=self._ctx.dpi)
+        self._border_color = QColor(Qt.black)
         self._bg_color = QColor(Qt.white)
         # Children
         self.items: List[ComponentElement] = []
@@ -108,10 +94,7 @@ class ComponentTemplate(ProtoPaintable):
     @border_z.setter
     def border_z(self, z: float) -> None:
         self._border_z = float(z)
-        if self._border_item:
-            self._border_item.setZValue(self._border_z)
-
-            self.update()
+        self.update()
 
     @property
     def csv_path(self):
@@ -203,6 +186,8 @@ class ComponentTemplate(ProtoPaintable):
     # ---------------- rendering (single source of truth) ---------------- #
 
     def boundingRect(self) -> QRectF:
-        base = (self._bleed_rect if self._include_bleed else self._geometry).to(self.ctx.unit, dpi=self.ctx.dpi).rect
+        base = self._geometry.to(self.ctx.unit, dpi=self.ctx.dpi).rect
+        if self._include_bleed:
+            base = base.outset(self._bleed, self._bleed)
         return QRectF(0, 0, base.width(), base.height())
 

@@ -2,11 +2,12 @@ from typing import Optional, Dict, Any, TYPE_CHECKING
 
 from PySide6.QtCore import Qt, QRectF, QPointF, Signal
 from PySide6.QtWidgets import QGraphicsItem, QGraphicsObject
-from PySide6.QtGui import QColor, QPainter
+from PySide6.QtGui import QColor, QPainter, QFont
 
 from prototypyside.utils.units.unit_str_helpers import geometry_with_px_rect, geometry_with_px_pos
 from prototypyside.utils.units.unit_str import UnitStr
 from prototypyside.utils.units.unit_str_geometry import UnitStrGeometry
+from prototypyside.utils.units.unit_str_font import UnitStrFont
 from prototypyside.services.proto_class import ProtoClass
 from prototypyside.utils.render_context import RenderContext
 from prototypyside.services.proto_paint import ProtoPaint
@@ -43,6 +44,9 @@ class ProtoPaintable(QGraphicsObject, RotatableMixin):
             lambda f: VMAP_REV.get(Qt.Alignment(int(f)), Qt.AlignTop),
             Qt.AlignTop,
         ),
+        "font": (UnitStrFont.from_dict,
+                 lambda u: u.to_dict(),
+                 UnitStrFont(QFont("Arial", 10))),
     }
 
     item_changed 			= Signal()
@@ -71,11 +75,12 @@ class ProtoPaintable(QGraphicsObject, RotatableMixin):
         self._ctx = registry.settings.ctx
         if getattr(self._ctx, "cache", None) is None:
             self._ctx.cache = RenderCache(self._ctx)
-        self._shape = "rect"
+        self._shape = "rounded_rect"
         self._geometry = geometry
         self._aspect = "fit"
         self._include_bleed = False
         self._name = registry.validate_name(proto, name)
+        self._font = registry.settings.default_font
 
         # will be either an image path or plain text
         self._content: Optional[str] = ""
@@ -261,6 +266,21 @@ class ProtoPaintable(QGraphicsObject, RotatableMixin):
             return
         self._shape = new
         self.update()
+
+    @property
+    def font(self) -> UnitStrFont:
+        return self._font
+
+    @font.setter
+    def font(self, value: UnitStrFont) -> None:
+        if value == self._font:
+            return
+        self.prepareGeometryChange()
+        self._font = UnitStrFont(value)
+        self.item_changed.emit()
+
+        self.update()
+
     @property
     def include_bleed(self):
         return self._include_bleed

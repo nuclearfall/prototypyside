@@ -321,6 +321,75 @@ class UnitStrGeometry:
     def outset(self, dw: Number = 0, dh: Number = 0) -> UnitStrGeometry:
         return self.inset(-dw, -dh)
 
+    def _as_unitstr(self, v: Union["UnitStr", Number]) -> "UnitStr":
+        """Coerce numbers/UnitStr to a UnitStr in this geom's unit/dpi."""
+        if isinstance(v, UnitStr):
+            return v.to(self._unit, dpi=self._dpi)  # ensure consistent basis
+        return UnitStr(v, unit=self._unit, dpi=self._dpi)
+
+    def adjust(
+        self,
+        left: Union["UnitStr", Number] = 0,
+        top: Union["UnitStr", Number] = 0,
+        right: Union["UnitStr", Number] = 0,
+        bottom: Union["UnitStr", Number] = 0,
+        *,
+        normalize: bool = False,
+    ) -> "UnitStrGeometry":
+        """
+        QRectF.adjust(l, t, r, b) analog for UnitStrGeometry.
+
+        Effect:
+          x' = x + l
+          y' = y + t
+          w' = w + (r - l)
+          h' = h + (b - t)
+
+        Inputs may be numbers (interpreted in this geom's unit/dpi) or UnitStr.
+        """
+        l = self._as_unitstr(left)
+        t = self._as_unitstr(top)
+        r = self._as_unitstr(right)
+        b = self._as_unitstr(bottom)
+
+        new_rect_x = self._rect_x + l
+        new_rect_y = self._rect_y + t
+        new_w = self._w + (r - l)
+        new_h = self._h + (b - t)
+
+        out = UnitStrGeometry(
+            rect_x=new_rect_x, rect_y=new_rect_y,
+            width=new_w, height=new_h,
+            x=self._pos_x, y=self._pos_y,
+            dpi=self._dpi, print_dpi=self._print_dpi, unit=self._unit
+        )
+
+        if not normalize:
+            return out
+
+        # Optional QRectF.normalized()-style behavior
+        zero = UnitStr(0, unit=self._unit, dpi=self._dpi)
+        if new_w < zero:
+            out = out.with_rect(rect_x=out._rect_x + new_w, width=-new_w)
+        if new_h < zero:
+            out = out.with_rect(rect_y=out._rect_y + new_h, height=-new_h)
+        return out
+
+    def adjust_inset(self, dw: Union["UnitStr", Number] = 0, dh: Union["UnitStr", Number] = 0) -> "UnitStrGeometry":
+        """
+        Symmetric shrink by (dw, dh), equivalent to adjust(+dw/2, +dh/2, -dw/2, -dh/2).
+        Accepts UnitStr or numbers.
+        """
+        dw_u = self._as_unitstr(dw) * 0.5
+        dh_u = self._as_unitstr(dh) * 0.5
+        return self.adjust(left=+dw_u, top=+dh_u, right=-dw_u, bottom=-dh_u)
+
+    def adjust_outset(self, dw: Union["UnitStr", Number] = 0, dh: Union["UnitStr", Number] = 0) -> "UnitStrGeometry":
+        """Symmetric expand, inverse of adjust_inset()."""
+        dw_u = self._as_unitstr(dw) * 0.5
+        dh_u = self._as_unitstr(dh) * 0.5
+        return self.adjust(left=-dw_u, top=-dh_u, right=+dw_u, bottom=+dh_u)
+
     # ---- serialization ------------------------------------------------------
 
     def to_dict(self) -> dict:
